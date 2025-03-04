@@ -1,6 +1,6 @@
 {
-  "name": "@lynx-dev/debug-router-connector",
-  "version": "0.0.2",
+  "name": "@lynx-js/debug-router-connector",
+  "version": "0.0.1",
   "description": "debuger router connector",
   "main": "dist/cjs/src/index.js",
   "scripts": {

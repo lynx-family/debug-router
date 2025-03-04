@@ -9,7 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@lynx-dev/debug-router-connector": "file:../../../debug_router_connector",
+    "@lynx-js/debug-router-connector": "file:../../../debug_router_connector",
     "ws": "^8.12.1"
   }
 }

@@ -1,4 +1,4 @@
-const DebugRouterConnector = require("@lynx-dev/debug-router-connector").DebugRouterConnector;
+const DebugRouterConnector = require("@lynx-js/debug-router-connector").DebugRouterConnector;
 
 const front_end = require('./front_end.js');  
 const util = require('./util.js');  

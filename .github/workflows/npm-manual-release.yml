@@ -37,7 +37,15 @@ jobs:
           npm run build
           ls -al
           echo "//registry.npmjs.org/:_authToken=${{ secrets.REPO_DEBUG_ROUTER_NPM_TOKEN }}" > .npmrc
-          npm publish --tag alpha
+
+          if [[ $version == *"alpha"* ]]; then
+              echo "Publishing alpha version..."
+              npm publish --tag alpha
+          else
+              echo "Publishing stable version..."
+              npm publish
+          fi
+
           popd
         env:
           NPM_TOKEN: ${{ secrets.REPO_DEBUG_ROUTER_NPM_TOKEN }}
