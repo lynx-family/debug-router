@@ -1,0 +1,2 @@
+-keep class com.lynx.debugrouter.** { public *;}
+-keep class com.lynx.debugrouter.log.** { public *;}

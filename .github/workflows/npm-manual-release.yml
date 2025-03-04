@@ -1,0 +1,43 @@
+name: npm release
+
+on:
+  push:
+    tags:
+      - '*-connector'
+
+permissions:
+  contents: write
+
+jobs:
+  npm-release-test:
+    runs-on: macos-latest
+    steps:
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - uses: pnpm/action-setup@v4.0.0
+        with:
+          version: 7.33.6
+
+      - name: Build debug-router-connector
+        run: |-
+          set -e
+          pushd debug_router_connector/
+
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          if [[ $TAG_NAME == *"-connector"* ]]; then
+            version=${TAG_NAME%-connector}
+            echo "debug-router-connector version: $version"
+            npm version --no-git-tag-version $version
+          fi
+
+          npm install
+          npm run build
+          ls -al
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.REPO_DEBUG_ROUTER_NPM_TOKEN }}" > .npmrc
+          npm publish --tag alpha
+          popd
+        env:
+          NPM_TOKEN: ${{ secrets.REPO_DEBUG_ROUTER_NPM_TOKEN }}

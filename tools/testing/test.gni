@@ -1,0 +1,86 @@
+# Copyright 2021 The Lynx Authors. All rights reserved.
+# Licensed under the Apache License Version 2.0 that can be found in the
+# LICENSE file in the root directory of this source tree.
+
+declare_args() {
+}
+
+template("unit_test") {
+  assert(defined(invoker.sources), "missing sources for ${target_name}")
+  executable("${target_name}") {
+    forward_variables_from(invoker, "*", ["deps", "configs"])
+    testonly = true
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+      deps += [ "//third_party/googletest:gtest_main" ]
+    } else {
+      deps = [ "//third_party/googletest:gtest_main" ]
+    }
+    if (defined(invoker.configs)) {
+      configs += invoker.configs
+    }
+    if (defined(configs_to_exclude)) {
+      configs -= configs_to_exclude
+    }
+  }
+}
+
+template("unittest_set") {
+  assert(defined(invoker.sources), "missing sources for ${target_name}")
+  source_set("${target_name}") {
+    forward_variables_from(invoker, "*", ["deps", "configs"])
+    testonly = true
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+      deps += [ "//third_party/googletest:gtest" ]
+    } else {
+      deps = [ "//third_party/googletest:gtest" ]
+    }
+    if (defined(invoker.configs)) {
+      configs += invoker.configs
+    }
+    if (defined(configs_to_exclude)) {
+      configs -= configs_to_exclude
+    }
+  }
+}
+
+template("mocktest_set") {
+  assert(defined(invoker.sources), "missing sources for ${target_name}")
+  source_set("${target_name}") {
+    forward_variables_from(invoker, "*", ["deps", "configs"])
+    testonly = true
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+      deps += [ "//third_party/googletest:gmock" ]
+    } else {
+      deps = [ "//third_party/googletest:gmock" ]
+    }
+    if (defined(invoker.configs)) {
+      configs += invoker.configs
+    }
+    if (defined(configs_to_exclude)) {
+      configs -= configs_to_exclude
+    }
+  }
+}
+
+template("mock_test") {
+  assert(defined(invoker.sources), "missing sources for ${target_name}")
+  executable("${target_name}") {
+    forward_variables_from(invoker, "*", ["deps", "configs"])
+    testonly = true
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+      deps += [ "//third_party/googletest:gmock_main" ]
+    } else {
+      deps = [ "//third_party/googletest:gmock_main" ]
+    }
+    if (defined(invoker.configs)) {
+      configs += invoker.configs
+    }
+    if (defined(configs_to_exclude)) {
+      configs -= configs_to_exclude
+    }
+  }
+}

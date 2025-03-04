@@ -1,0 +1,31 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+buildscript {
+    repositories {
+        google()
+    }
+    dependencies {
+        classpath "com.android.tools.build:gradle:4.1.1"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.5.32"
+    }
+}
+
+plugins {
+    id "org.jetbrains.kotlin.android" version "1.6.21" apply false
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+        google()
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+    description "Clean JNI files."
+    delete "../../../debug_router/Android/build/gen"
+    description "Clean export files."
+    delete "../../../debug_router/Android/DebugRouter/src/main/export"
+}
+
+ext.enable_coverage_bool = (enable_coverage == 'true')

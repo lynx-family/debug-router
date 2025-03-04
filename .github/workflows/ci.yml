@@ -1,0 +1,99 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  android-example-build:
+    runs-on: lynx-ubuntu-22.04-avd-large
+    steps:
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - name: Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - uses: pnpm/action-setup@v4.0.0
+        with:
+          version: 7.33.6
+      - name: Grant execute permission for gradlew
+        run: cd $GITHUB_WORKSPACE/test/e2e_test/AndroidExample &&  chmod +x ./gradlew
+      - name: Build the AAR
+        run: |-
+            mkdir tools/android_tools
+            source tools/envsetup.sh
+            pushd test/e2e_test/AndroidExample
+            ./gradlew :DebugRouter:assemblerelease
+            popd
+
+  ios-debugrouter-lib-build:
+    runs-on: lynx-darwin-14-medium
+    env:
+      POD_VERSION: 5.0.5
+    steps:
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - uses: pnpm/action-setup@v4.0.0
+        with:
+          version: 7.33.6
+      - name: Build Example App
+        run: |-
+          set -e
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          pushd test/e2e_test/iOSExample
+          root_dir=$(pwd) && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk bundle install
+          bundle exec pod install --verbose --repo-update
+          xcodebuild clean -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug
+          xcodebuild -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug -arch arm64 -derivedDataPath iOSCoreBuild/DerivedData -sdk iphonesimulator
+          popd
+
+  debug-router-connector-npm-package-build:
+    runs-on: lynx-ubuntu-22.04-avd-large
+    steps:
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - uses: pnpm/action-setup@v4.0.0
+        with:
+          version: 7.33.6
+      - name: Build debug-router-connector
+        run: |-
+          set -e
+          pushd debug_router_connector/
+          npm install
+          npm run build
+          ls -al
+          popd
+
+  remote-debug-driver-npm-package-build:
+    runs-on: lynx-ubuntu-22.04-avd-large
+    steps:
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - uses: pnpm/action-setup@v4.0.0
+        with:
+          version: 7.33.6
+      - name: Build remote_debug_driver
+        run: |-
+          set -e
+          pushd remote_debug_driver/
+          npm install
+          npm run build
+          ls -al
+          popd

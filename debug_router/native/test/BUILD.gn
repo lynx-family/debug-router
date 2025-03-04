@@ -1,0 +1,23 @@
+# Copyright 2023 The Lynx Authors. All rights reserved.
+# Licensed under the Apache License Version 2.0 that can be found in the
+# LICENSE file in the root directory of this source tree.
+
+import("//tools/testing/test.gni")
+unittest_set("example_testset") {
+  public_configs = []
+  sources = [
+    "../socket/count_down_latch.cc",
+    "../socket/util.cc",
+    "example_source.cc",
+  ]
+  public_deps = []
+}
+
+unit_test("example_unittest") {
+  sources = [
+    "count_down_latch_unittest.cc",
+    "example_source_unittest.cc",
+    "socket_util_unittest.cc",
+  ]
+  deps = [ ":example_testset" ]
+}

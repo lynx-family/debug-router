@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "sourceMap": true,
+    "declaration": true,
+    "rootDir": "./",
+    "outDir": "./lib",
+    "resolveJsonModule": true,
+    "esModuleInterop": true
+  },
+  "typedocOptions": {
+    "mode": "file",
+    "out": "docs"
+  },
+  "include": ["./third_party/**/*", "./src/**/*"]
+}

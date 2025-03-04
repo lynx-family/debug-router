@@ -1,0 +1,4 @@
+source 'https://rubygems.org'
+gem "cocoapods", '1.10.1'
+# lock public_suffix's version to avoid occasional failure in dependencies resolving
+gem "public_suffix", '5.0.4' if RUBY_VERSION < "3.0"

@@ -1,0 +1,43 @@
+name: remote-debug-driver npm release
+
+on:
+  push:
+    tags:
+      - '*-remote-debug-driver'
+
+permissions:
+  contents: write
+
+jobs:
+  npm-release-test:
+    runs-on: macos-latest
+    steps:
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - uses: pnpm/action-setup@v4.0.0
+        with:
+          version: 7.33.6
+
+      - name: Build remote-debug-driver
+        run: |-
+          set -e
+          pushd remote_debug_driver/
+
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          if [[ $TAG_NAME == *"-remote-debug-driver"* ]]; then
+            version=${TAG_NAME%-remote-debug-driver}
+            echo "remote-debug-driver version: $version"
+            npm version --no-git-tag-version $version
+          fi
+
+          npm install
+          npm run build
+          ls -al
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.REPO_REMOTE_DEBUG_DRIVER_NPM_TOKEN }}" > .npmrc
+          npm publish --tag alpha
+          popd
+        env:
+          NPM_TOKEN: ${{ secrets.REPO_REMOTE_DEBUG_DRIVER_NPM_TOKEN }}
