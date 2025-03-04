@@ -1,4 +1,4 @@
-const DebugRouterConnector = require("@lynx-dev/debug-router-connector").DebugRouterConnector;
+const DebugRouterConnector = require("@lynx-js/debug-router-connector").DebugRouterConnector;
 
 async function main() {
   // 1. cteate a debug router connector, named driver

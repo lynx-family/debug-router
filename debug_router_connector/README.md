@@ -18,7 +18,7 @@ DebugRouterConnector is an npm package implemented in TypeScript
 #### Connect to App
 
 ```js
-import { DebugRouterConnector } from '@lynx-dev/debug-router-connector';
+import { DebugRouterConnector } from '@lynx-js/debug-router-connector';
 
 const connector = new DebugRouterConnector({
   manualConnect: true,
