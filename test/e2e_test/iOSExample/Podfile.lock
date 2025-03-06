@@ -1,38 +1,38 @@
 PODS:
-  - DebugRouter (5.0.0):
-    - DebugRouter/Framework (= 5.0.0)
-    - DebugRouter/Native (= 5.0.0)
-    - DebugRouter/third_party (= 5.0.0)
-  - DebugRouter/Framework (5.0.0):
+  - DebugRouter (5.0.5):
+    - DebugRouter/Framework (= 5.0.5)
+    - DebugRouter/Native (= 5.0.5)
+    - DebugRouter/third_party (= 5.0.5)
+  - DebugRouter/Framework (5.0.5):
     - DebugRouter/Native
-    - SocketRocket
-  - DebugRouter/Native (5.0.0):
+    - SocketRocket (= 0.6.0)
+  - DebugRouter/Native (5.0.5):
     - DebugRouter/third_party
-  - DebugRouter/third_party (5.0.0):
-    - DebugRouter/third_party/jsoncpp (= 5.0.0)
-  - DebugRouter/third_party/jsoncpp (5.0.0)
+  - DebugRouter/third_party (5.0.5):
+    - DebugRouter/third_party/jsoncpp (= 5.0.5)
+  - DebugRouter/third_party/jsoncpp (5.0.5)
   - SocketRocket (0.6.0)
 
 DEPENDENCIES:
   - DebugRouter (from `../../../`)
-  - "SocketRocket (from `git@github.com:facebookincubator/SocketRocket.git`, tag `0.6.0`)"
+  - SocketRocket (from `https://github.com/facebookincubator/SocketRocket.git`, tag `0.6.0`)
 
 EXTERNAL SOURCES:
   DebugRouter:
     :path: "../../../"
   SocketRocket:
-    :git: "git@github.com:facebookincubator/SocketRocket.git"
+    :git: https://github.com/facebookincubator/SocketRocket.git
     :tag: 0.6.0
 
 CHECKOUT OPTIONS:
   SocketRocket:
-    :git: "git@github.com:facebookincubator/SocketRocket.git"
+    :git: https://github.com/facebookincubator/SocketRocket.git
     :tag: 0.6.0
 
 SPEC CHECKSUMS:
-  DebugRouter: eb3b7cdc4a0314d181446f5217cf9573de1f21fc
+  DebugRouter: 69ecf7e10fea7f8bb39847e5e67ead61a65994d5
   SocketRocket: fccef3f9c5cedea1353a9ef6ada904fde10d6608
 
-PODFILE CHECKSUM: 7bdcc2985dce7bb2a88f091b5413f8bc69e5d926
+PODFILE CHECKSUM: 3892a2ea3640db6283b4e61b637eea3c0c82cc5d
 
-COCOAPODS: 1.11.3
+COCOAPODS: 1.10.1
