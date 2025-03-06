@@ -15,18 +15,18 @@ PODS:
 
 DEPENDENCIES:
   - DebugRouter (from `../../../`)
-  - "SocketRocket (from `git@github.com:facebookincubator/SocketRocket.git`, tag `0.6.0`)"
+  - "SocketRocket (from `https://github.com/facebookincubator/SocketRocket.git`, tag `0.6.0`)"
 
 EXTERNAL SOURCES:
   DebugRouter:
     :path: "../../../"
   SocketRocket:
-    :git: "git@github.com:facebookincubator/SocketRocket.git"
+    :git: "https://github.com/facebookincubator/SocketRocket.git"
     :tag: 0.6.0
 
 CHECKOUT OPTIONS:
   SocketRocket:
-    :git: "git@github.com:facebookincubator/SocketRocket.git"
+    :git: "https://github.com/facebookincubator/SocketRocket.git"
     :tag: 0.6.0
 
 SPEC CHECKSUMS:
