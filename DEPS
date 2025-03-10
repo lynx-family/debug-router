@@ -41,6 +41,13 @@ deps = {
         "ignore_in_git": True,
         "condition": system in ['linux', 'darwin', 'windows']
     },
+    'build/linux/debian_sid_amd64-sysroot': {
+        "type": "http",
+        "url": "https://commondatastorage.googleapis.com/chrome-linux-sysroot/toolchain/79a7783607a69b6f439add567eb6fcb48877085c/debian_sid_amd64_sysroot.tar.xz",
+        "ignore_in_git": True,
+        "condition": machine == "x86_64" and system == "linux",
+        "require": ["build"]
+    },
     'buildtools/cmake': {
         "type": "http",
         "url": {
@@ -53,20 +60,52 @@ deps = {
     'buildtools/node': {
         "type": "http",
         "url": {
-            "linux-x86_64": "https://nodejs.org/dist/v16.18.1/node-v16.18.1-linux-x64.tar.gz",
-            "linux-arm64": "https://nodejs.org/dist/v16.18.1/node-v16.18.1-linux-arm64.tar.gz",
-            "darwin-x86_64": "https://nodejs.org/dist/v16.18.1/node-v16.18.1-darwin-x64.tar.gz",
-            "darwin-arm64": "https://nodejs.org/dist/v16.18.1/node-v16.18.1-darwin-arm64.tar.gz",
-            "windows-x86_64": "https://nodejs.org/dist/v16.18.1/node-v16.18.1-win-x64.zip"
+            "linux-x86_64": "https://nodejs.org/dist/v18.19.1/node-v18.19.1-linux-x64.tar.gz",
+            "linux-arm64": "https://nodejs.org/dist/v18.19.1/node-v18.19.1-linux-arm64.tar.gz",
+            "darwin-x86_64": "https://nodejs.org/dist/v18.19.1/node-v18.19.1-darwin-x64.tar.gz",
+            "darwin-arm64": "https://nodejs.org/dist/v18.19.1/node-v18.19.1-darwin-arm64.tar.gz",
+            "windows-x86_64": "https://nodejs.org/dist/v18.19.1/node-v18.19.1-win-x64.zip"
         }.get(f'{system}-{machine}', None),
         "sha256": {
-            "linux-x86_64": "8949919fc52543efae3bfd057261927c616978614926682ad642915f98fe1981",
-            "linux-arm64": "d6caa1439e8f3fbf4855b5cc1d09ae3eee31fc54ec29b7170603222ba6f8dfe6",
-            "darwin-x86_64": "c190e106d4ac6177d1db3a5a739d39dd68bd276ba17f3d3c84039a93717e081e",
-            "darwin-arm64": "71720bb0a80cf158d8fdf492def08048befd953ad45e2458b1d095e32c612ba7",
-            "windows-x86_64": "db6a81de8e8ca3444495f1bcf04a883c076b4325d0fbaa032a190f88b38b30c5"
+            "linux-x86_64": "724802c45237477dbe5777923743e6c77906830cae03a82b5653ebd75b301dda",
+            "linux-arm64": "2913e8544d95c8be9e6034c539ec0584014532166a088bf742629756c3ec42e2",
+            "darwin-x86_64": "ab67c52c0d215d6890197c951e1bd479b6140ab630212b96867395e21d813016",
+            "darwin-arm64": "0c7249318868877032ed21cc0ed450015ee44b31b9b281955521cd3fc39fbfa3",
+            "windows-x86_64": "ff08f8fe253fba9274992d7052e9d9a70141342d7b36ddbd6e84cbe823e312c6"
         }.get(f'{system}-{machine}', None),
         "ignore_in_git": True,
         "condition": system in ['linux', 'darwin', 'windows']
+    },
+    'third_party/libcxx': {
+        "type": "git",
+        "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx",
+        "commit": "64d36e572d3f9719c5d75011a718f33f11126851",
+        "ignore_in_git": True,     
+    },
+    'third_party/libcxxabi': {
+        "type": "git",
+        "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi",
+        "commit": "9572e56a12c88c011d504a707ca94952be4664f9",
+        "ignore_in_git": True,
+    },
+    'test/e2e_test/iOSExample/xctestrunner': {
+        "type": "http",
+        "url": "https://github.com/google/xctestrunner/releases/download/0.2.15/ios_test_runner.par",
+        "decompress": False,
+        "condition": system in ['darwin'],
+    },
+    "tools_shared": {
+        "type": "solution",
+        "url": "https://github.com/lynx-family/tools-shared.git",
+        "commit": "271dba582cab4409de488da3fa6e6761fb2a1cdd",
+        'deps_file': 'dependencies/DEPS',
+        "ignore_in_git": True,
+    },
+    'third_party/gyp': {
+        "type": "git",
+        "url": "https://chromium.googlesource.com/external/gyp",
+        "commit": "9d09418933ea2f75cc416e5ce38d15f62acd5c9a",
+        "ignore_in_git": True,
+        "condition": system in ['linux', 'darwin', 'windows'],
     },
 }
