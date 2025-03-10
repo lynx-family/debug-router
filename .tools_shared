@@ -1,0 +1,18 @@
+checker-config:
+  file-type-checker:
+    binary-files-allow-list:
+      - 'test/e2e_test/iOSExample/Assets.xcassets/AppIcon.appiconset/*'
+      - 'test/e2e_test/AndroidExample/app/src/main/res/*'
+      - 'test/e2e_test/AndroidExample/gradle/wrapper/gradle-wrapper.jar'
+      - 'test/e2e_test/iOSExample/Provisions/LynxDevToolsDebugRouterDis.mobileprovision'
+
+  coding-style-checker:
+    ignore-suffixes:
+      - '_jni.h'
+      - 'pnpm-lock.yaml'
+      - 'Podfile.yml'
+      - '.d.ts'
+      - '.r.ts'
+    ignore-dirs:
+      - '^third_party/*'
+      - '^build/*'
