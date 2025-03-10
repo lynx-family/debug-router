@@ -8,7 +8,7 @@
 
 Pod::Spec.new do |s|
   s.name             = 'DebugRouter'
-  s.version          = "#{ ENV['POD_VERSION'] }"
+  s.version          = "#{ ENV['POD_VERSION'] || File.read('DEBUG_ROUTER_VERSION').strip }"
   s.summary          = 'A short description of DebugRouter.'
   s.homepage         = 'https://github.com/lynx-family/debug-router'
   s.license          = 'Apache'
