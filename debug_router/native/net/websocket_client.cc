@@ -273,24 +273,29 @@ bool WebSocketClient::do_read(std::string &msg) {
     uint8_t flag_opcode;
     uint8_t mask_payload_len;
   } head;
+  auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
 
   if (recv(socket_, (char *)&head, sizeof(head), 0) != sizeof(head)) {
     LOGE("failed to read websocket message");
+    delegate()->OnFailure(self);
     return false;
   }
   if ((head.flag_opcode & 0x80) == 0) {  // FIN
     LOGE("read_message not final fragment");
+    delegate()->OnFailure(self);
     return false;
   }
   const uint8_t flags = head.flag_opcode >> 4;
   if ((head.mask_payload_len & 0x80) != 0) {  // masked payload
     LOGE("read_message masked");
+    delegate()->OnFailure(self);
     return false;
   }
   size_t payloadLen = head.mask_payload_len & 0x7f;
   bool deflated = (flags & 4 /*FLAG_RSV1*/) != 0;
   if (deflated) {
     LOGE("deflated message unimplemented");
+    delegate()->OnFailure(self);
     return false;
   }
 
@@ -309,6 +314,7 @@ bool WebSocketClient::do_read(std::string &msg) {
   if (recv(socket_, const_cast<char *>(msg.data()), payloadLen, 0) !=
       payloadLen) {
     LOGE("failed to read websocket message");
+    delegate()->OnFailure(self);
     return false;
   }
   return true;
