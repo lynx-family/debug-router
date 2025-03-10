@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -111,6 +112,8 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   DebugRouterCore &operator=(DebugRouterCore &&) = delete;
 
  protected:
+  std::mutex slots_mutex_;
+  friend class MessageHandlerCore;
   std::unordered_map<int32_t, std::shared_ptr<core::NativeSlot> > slots_;
   std::string room_id_;
   std::string server_url_;
