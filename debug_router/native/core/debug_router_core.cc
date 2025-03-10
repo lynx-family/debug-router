@@ -23,7 +23,7 @@ namespace debugrouter {
 
 namespace core {
 class MessageHandlerCore : public processor::MessageHandler {
- public:
+public:
   MessageHandlerCore() {}
 
   std::string GetRoomId() override {
@@ -113,11 +113,8 @@ DebugRouterCore &DebugRouterCore::GetInstance() {
 }
 
 DebugRouterCore::DebugRouterCore()
-    : connection_state_(DISCONNECTED),
-      current_transceiver_(nullptr),
-      max_session_id_(0),
-      processor_(nullptr),
-      handler_count_(1) {
+    : connection_state_(DISCONNECTED), current_transceiver_(nullptr),
+      max_session_id_(0), processor_(nullptr), handler_count_(1) {
   message_transceivers_.push_back(std::make_shared<net::WebSocketClient>());
   message_transceivers_.push_back(std::make_shared<net::SocketServerClient>());
 
@@ -213,6 +210,7 @@ int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     processor_->FlushSessionList();
   }
+  NotifyConnectStateByMessage(GetConnectionState());
   for (auto it : session_handler_map_) {
     it.second->OnSessionCreate(max_session_id_, slot->GetUrl());
   }
@@ -488,24 +486,35 @@ std::string DebugRouterCore::GetAppInfoByKey(const std::string &key) {
 }
 
 void DebugRouterCore::NotifyConnectStateByMessage(ConnectionState state) {
+  std::string state_msg = GetConnectionStateMsg(state);
+  LOGI("notify connect state: " << state_msg);
+  if (state_msg.empty()) {
+    return;
+  }
+  processor_->Process(state_msg);
+}
+
+std::string DebugRouterCore::GetConnectionStateMsg(ConnectionState state) {
   if (state == CONNECTED) {
-    processor_->Process(
-        "{\"event\": \"Customized\",\"data\": {\"type\": "
-        "\"DebugRouter\",\"data\": "
-        "{\"client_id\": -1,\"session_id\": -1,\"message\": {\"id\": "
-        "-1,\"method\": "
-        "\"DebugRouter.State\",\"params\": {\"ConnectState\": 1}}},\"sender\": "
-        "-1}}");
+    return "{\"event\": \"Customized\",\"data\": {\"type\": "
+           "\"DebugRouter\",\"data\": "
+           "{\"client_id\": -1,\"session_id\": -1,\"message\": {\"id\": "
+           "-1,\"method\": "
+           "\"DebugRouter.State\",\"params\": {\"ConnectState\": "
+           "1}}},\"sender\": "
+           "-1}}";
   } else if (state == DISCONNECTED) {
-    processor_->Process(
-        "{\"event\": \"Customized\",\"data\": {\"type\": "
-        "\"DebugRouter\",\"data\": "
-        "{\"client_id\": -1,\"session_id\": -1,\"message\": {\"id\": "
-        "-1,\"method\": "
-        "\"DebugRouter.State\",\"params\": {\"ConnectState\": 0}}},\"sender\": "
-        "-1}}");
+    return "{\"event\": \"Customized\",\"data\": {\"type\": "
+           "\"DebugRouter\",\"data\": "
+           "{\"client_id\": -1,\"session_id\": -1,\"message\": {\"id\": "
+           "-1,\"method\": "
+           "\"DebugRouter.State\",\"params\": {\"ConnectState\": "
+           "0}}},\"sender\": "
+           "-1}}";
+  } else {
+    return "";
   }
 }
 
-}  // namespace core
-}  // namespace debugrouter
+} // namespace core
+} // namespace debugrouter

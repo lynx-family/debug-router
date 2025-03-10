@@ -135,6 +135,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   int32_t retry_times_;
   void TryToReconnect();
   void NotifyConnectStateByMessage(ConnectionState state);
+  std::string GetConnectionStateMsg(ConnectionState state);
   std::atomic<int32_t> usb_port_;
   std::atomic<int> handler_count_;
 };
