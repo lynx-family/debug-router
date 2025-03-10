@@ -18,6 +18,7 @@
 #include "debug_router/native/processor/processor.h"
 #include "debug_router/native/thread/debug_router_executor.h"
 #include "json/value.h"
+#include <mutex>
 
 namespace debugrouter {
 
@@ -36,6 +37,7 @@ public:
 
   std::unordered_map<int, std::string> GetSessionList() override {
     std::unordered_map<int, std::string> session_list;
+    std::lock_guard<std::mutex> lock(DebugRouterCore::GetInstance().slots_mutex_);
     const auto &slots = DebugRouterCore::GetInstance().slots_;
     if (!slots.empty()) {
       for (auto it = slots.begin(); it != slots.end(); ++it) {
@@ -74,6 +76,7 @@ public:
 
     const auto &session_handler_map =
         DebugRouterCore::GetInstance().session_handler_map_;
+    std::lock_guard<std::mutex> lock(DebugRouterCore::GetInstance().slots_mutex_);
     const auto &slots = DebugRouterCore::GetInstance().slots_;
     for (auto it : session_handler_map) {
       it.second->OnMessage(message, type, session_id);
@@ -204,6 +207,7 @@ void DebugRouterCore::SendDataAsync(const std::string &data,
 }
 
 int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
+  std::lock_guard<std::mutex> lock(slots_mutex_);
   max_session_id_++;
   slots_[max_session_id_] = slot;
   LOGI("plug session: " << max_session_id_);
@@ -223,6 +227,7 @@ int32_t DebugRouterCore::GetUSBPort() {
 
 void DebugRouterCore::Pull(int32_t session_id_) {
   LOGI("pull session: " << session_id_);
+  std::lock_guard<std::mutex> lock(slots_mutex_);
   slots_.erase(session_id_);
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     processor_->FlushSessionList();
