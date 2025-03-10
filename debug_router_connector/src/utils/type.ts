@@ -35,6 +35,7 @@ export enum DeviceOS {
   iOS = "iOS",
   Mac = "Mac",
   Windows = "Windows",
+  Linux = "Linux",
   Network = "Network",
 }
 

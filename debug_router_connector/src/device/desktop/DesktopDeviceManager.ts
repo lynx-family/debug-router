@@ -5,6 +5,7 @@
 import { DebugRouterConnector } from "../../connector";
 import MacDevice from "./MacDevice";
 import WindowsDevice from "./WindowsDevice";
+import LinuxDevice from "./LinuxDevice";
 import { DeviceManager } from "../DeviceManager";
 
 export default class DesktopDeviceManager extends DeviceManager {
@@ -17,6 +18,8 @@ export default class DesktopDeviceManager extends DeviceManager {
       device = new MacDevice(this.driver);
     } else if (process.platform === "win32") {
       device = new WindowsDevice(this.driver);
+    } else if (process.platform === "linux") {
+      device = new LinuxDevice(this.driver);
     } else {
       return;
     }

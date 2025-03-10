@@ -4,6 +4,7 @@
 
 import AndroidDevice from "../device/android/AndroidDevice";
 import { BaseDevice } from "../device/BaseDevice";
+import LinuxDevice from "../device/desktop/LinuxDevice";
 import MacDevice from "../device/desktop/MacDevice";
 import WindowsDevice from "../device/desktop/WindowsDevice";
 import iOSDevice from "../device/ios/iOSDevice";
@@ -48,6 +49,9 @@ function getDeviceType(device: BaseDevice): string {
   }
   if (device instanceof WindowsDevice) {
     return "Windows";
+  }
+  if (device instanceof LinuxDevice) {
+    return "Linux";
   }
   if (device instanceof NetworkDevice) {
     return "Network";
