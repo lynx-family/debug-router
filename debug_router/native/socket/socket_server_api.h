@@ -99,7 +99,6 @@ class ClientListener : public UsbClientListener {
           client, ConnectionStatus::kDisconnected, code, reason);
     }
     client->SetConnectStatus(USBConnectStatus::DISCONNECTED);
-    client->Stop();
   }
 
   void OnError(std::shared_ptr<UsbClient> client, int32_t code,
@@ -109,7 +108,6 @@ class ClientListener : public UsbClientListener {
                                          message);
     }
     client->SetConnectStatus(USBConnectStatus::DISCONNECTED);
-    client->Stop();
   }
 
  private:

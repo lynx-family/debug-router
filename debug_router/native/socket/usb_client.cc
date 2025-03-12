@@ -200,7 +200,6 @@ void UsbClient::ReadMessage(SocketType socket_fd_) {
                        "ReadMessage finished");
   }
   LOGI("UsbClient: ReadMessage thread exit.");
-  CloseClientSocket(socket_fd_);
   incoming_message_queue_.put(std::move(kMessageQuit));
   outgoing_message_queue_.put(std::move(kMessageQuit));
   if (latch_) {
@@ -321,7 +320,6 @@ void UsbClient::WriteMessage(SocketType socket_fd_) {
                        "writer thread finished");
   }
   LOGI("UsbClient: WriteMessage thread exit.");
-  CloseClientSocket(socket_fd_);
   if (latch_) {
     latch_->CountDown();
   }
@@ -338,18 +336,9 @@ void UsbClient::StartWriter(SocketType socket_fd_) {
   write_thread.detach();
 }
 
-void UsbClient::Stop() {
-  LOGI("UsbClient: Stop.");
-  work_thread_.submit([client_ptr = shared_from_this()]() {
-    client_ptr->DisconnectInternal();
-  });
-  work_thread_.shutdown();
-}
-
 void UsbClient::DisconnectInternal() {
   LOGI("UsbClient: DisconnectInternal.");
-  CloseClientSocket(socket_fd_);
-  if (!latch_) {
+  if (latch_) {
     incoming_message_queue_.put(std::move(kMessageQuit));
     outgoing_message_queue_.put(std::move(kMessageQuit));
 
@@ -362,6 +351,7 @@ void UsbClient::DisconnectInternal() {
     latch_ = nullptr;
     LOGI("UsbClient: DisconnectInternal successfully.");
   }
+  CloseClientSocket(socket_fd_);
 }
 
 bool UsbClient::Send(const std::string &message) {
@@ -389,7 +379,9 @@ void UsbClient::SendInternal(const std::string &message) {
 
 UsbClient::~UsbClient() {
   LOGI("UsbClient: ~UsbClient.");
-  CloseClientSocket(socket_fd_);
+  // TODO(popoaichuiniu) optimize thread policy of UsbClient's fields
+  DisconnectInternal();
+  work_thread_.shutdown();
 }
 
 }  // namespace socket_server
