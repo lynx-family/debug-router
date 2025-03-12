@@ -25,7 +25,6 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
  public:
   // below three functions work only on one work thread
   void StartUp(const std::shared_ptr<UsbClientListener> &listener);
-  void Stop();
   // true means the message are added to message queue
   bool Send(const std::string &message);
 
@@ -96,6 +95,7 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   USBConnectStatus connect_status_ = USBConnectStatus::DISCONNECTED;
   std::unique_ptr<CountDownLatch> latch_;
 
+  // TODO(popoaichuiniu) use unique_fd to manage socket
   volatile SocketType socket_fd_ = kInvalidSocket;
   // mutex for close socket_fd_
   std::mutex mutex_;

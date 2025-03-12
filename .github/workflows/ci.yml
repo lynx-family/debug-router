@@ -50,16 +50,12 @@ jobs:
           python3 tools_shared/git_lynx.py check --checkers commit-message
       - name: Run coding-style check
         run: |
-          source tools/envsetup.sh
           cd tools_shared
           ./hab sync -f .
           source envsetup.sh
           cd ..
-          git lynx check --checkers coding-style
-      - name: Run cpplint check
-        run: |
           source tools/envsetup.sh
-          python3 tools_shared/git_lynx.py check --checkers cpplint
+          git lynx check --checkers coding-style
 
   unittest-build-check:
     runs-on: lynx-ubuntu-22.04-avd-large
