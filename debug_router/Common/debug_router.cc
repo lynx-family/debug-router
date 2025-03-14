@@ -190,6 +190,7 @@ void DebugRouter::SetAppInfo(const std::string &key, const std::string &value) {
 
 std::string DebugRouter::GetAppInfoByKey(const std::string &key) {
   return core::DebugRouterCore::GetInstance().GetAppInfoByKey(key);
+}
 
 }  // namespace common
 }  // namespace debugrouter

@@ -5,6 +5,7 @@
 #include "debug_router_core.h"
 
 #include <atomic>
+#include <mutex>
 
 #include "debug_router/native/base/no_destructor.h"
 #include "debug_router/native/core/debug_router_config.h"
@@ -18,13 +19,12 @@
 #include "debug_router/native/processor/processor.h"
 #include "debug_router/native/thread/debug_router_executor.h"
 #include "json/value.h"
-#include <mutex>
 
 namespace debugrouter {
 
 namespace core {
 class MessageHandlerCore : public processor::MessageHandler {
-public:
+ public:
   MessageHandlerCore() {}
 
   std::string GetRoomId() override {
@@ -37,7 +37,8 @@ public:
 
   std::unordered_map<int, std::string> GetSessionList() override {
     std::unordered_map<int, std::string> session_list;
-    std::lock_guard<std::mutex> lock(DebugRouterCore::GetInstance().slots_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(
+        DebugRouterCore::GetInstance().slots_mutex_);
     const auto &slots = DebugRouterCore::GetInstance().slots_;
     if (!slots.empty()) {
       for (auto it = slots.begin(); it != slots.end(); ++it) {
@@ -76,7 +77,8 @@ public:
 
     const auto &session_handler_map =
         DebugRouterCore::GetInstance().session_handler_map_;
-    std::lock_guard<std::mutex> lock(DebugRouterCore::GetInstance().slots_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(
+        DebugRouterCore::GetInstance().slots_mutex_);
     const auto &slots = DebugRouterCore::GetInstance().slots_;
     for (auto it : session_handler_map) {
       it.second->OnMessage(message, type, session_id);
@@ -116,8 +118,11 @@ DebugRouterCore &DebugRouterCore::GetInstance() {
 }
 
 DebugRouterCore::DebugRouterCore()
-    : connection_state_(DISCONNECTED), current_transceiver_(nullptr),
-      max_session_id_(0), processor_(nullptr), handler_count_(1) {
+    : connection_state_(DISCONNECTED),
+      current_transceiver_(nullptr),
+      max_session_id_(0),
+      processor_(nullptr),
+      handler_count_(1) {
   message_transceivers_.push_back(std::make_shared<net::WebSocketClient>());
   message_transceivers_.push_back(std::make_shared<net::SocketServerClient>());
 
@@ -207,7 +212,7 @@ void DebugRouterCore::SendDataAsync(const std::string &data,
 }
 
 int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
-  std::lock_guard<std::mutex> lock(slots_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(slots_mutex_);
   max_session_id_++;
   slots_[max_session_id_] = slot;
   LOGI("plug session: " << max_session_id_);
@@ -227,7 +232,7 @@ int32_t DebugRouterCore::GetUSBPort() {
 
 void DebugRouterCore::Pull(int32_t session_id_) {
   LOGI("pull session: " << session_id_);
-  std::lock_guard<std::mutex> lock(slots_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(slots_mutex_);
   slots_.erase(session_id_);
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     processor_->FlushSessionList();
@@ -521,5 +526,5 @@ std::string DebugRouterCore::GetConnectionStateMsg(ConnectionState state) {
   }
 }
 
-} // namespace core
-} // namespace debugrouter
+}  // namespace core
+}  // namespace debugrouter
