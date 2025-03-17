@@ -10,22 +10,26 @@
 #include <string>
 #include <thread>
 
+#include "debug_router/native/base/socket_guard.h"
 #include "debug_router/native/core/message_transceiver.h"
+#include "debug_router/native/socket/work_thread_executor.h"
 
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#define CLOSESOCKET closesocket
 #else
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 #define SOCKET int
-#define CLOSESOCKET close
 #endif
 
 namespace debugrouter {
+namespace base {
+class WorkThreadExecutor;
+class SocketGuard;
+}  // namespace base
 namespace net {
 
 class WebSocketClient : public core::MessageTransceiver {
@@ -40,14 +44,18 @@ class WebSocketClient : public core::MessageTransceiver {
   core::ConnectionType GetType() override;
 
  private:
+  void DisconnectInternal();
+  void ConnectInternal(const std::string &url);
+  void SendInternal(const std::string &data);
+
   void run();
   bool do_connect();
   bool do_read(std::string &msg);
 
   std::string url_;
-  SOCKET socket_ = 0;
+  std::unique_ptr<base::SocketGuard> socket_guard_;
+  base::WorkThreadExecutor work_thread_;
   std::unique_ptr<std::thread> thread_;
-  std::mutex mutex_;
 };
 }  // namespace net
 }  // namespace debugrouter
