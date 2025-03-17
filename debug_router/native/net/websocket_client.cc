@@ -99,28 +99,33 @@ std::string decodeURIComponent(std::string url) {
   return result_url_.str();
 }
 
-WebSocketClient::WebSocketClient() {}
+WebSocketClient::WebSocketClient() : socket_guard_(nullptr) {}
 
-WebSocketClient::~WebSocketClient() { Disconnect(); }
+WebSocketClient::~WebSocketClient() { DisconnectInternal(); }
 
 void WebSocketClient::Init() {}
 
 bool WebSocketClient::Connect(const std::string &url) {
-  Disconnect();
-
-  mutex_.lock();
-  url_ = url;
-  thread_ = std::make_unique<std::thread>([this]() { run(); });
-  mutex_.unlock();
+  auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
+  work_thread_.submit([client_ptr = self, url]() {
+    client_ptr->DisconnectInternal();
+    client_ptr->ConnectInternal(url);
+  });
   return true;
 }
 
+void WebSocketClient::ConnectInternal(const std::string &url) {
+  url_ = url;
+  thread_ = std::make_unique<std::thread>([this]() { run(); });
+}
+
 void WebSocketClient::Disconnect() {
-  mutex_.lock();
-  if (socket_) {
-    CLOSESOCKET(socket_);
-    socket_ = 0;
-  }
+  auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
+  work_thread_.submit(
+      [client_ptr = self]() { client_ptr->DisconnectInternal(); });
+}
+
+void WebSocketClient::DisconnectInternal() {
   if (thread_) {
     if (thread_->joinable()) {
       thread_->join();
@@ -128,7 +133,6 @@ void WebSocketClient::Disconnect() {
     }
     thread_.reset();
   }
-  mutex_.unlock();
 }
 
 core::ConnectionType WebSocketClient::GetType() {
@@ -136,6 +140,12 @@ core::ConnectionType WebSocketClient::GetType() {
 }
 
 void WebSocketClient::Send(const std::string &data) {
+  auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
+  work_thread_.submit(
+      [client_ptr = self, data]() { client_ptr->SendInternal(data); });
+}
+
+void WebSocketClient::SendInternal(const std::string &data) {
   const char *buf = data.data();
   size_t payloadLen = data.size();
   uint8_t prefix[14];
@@ -165,10 +175,8 @@ void WebSocketClient::Send(const std::string &data) {
   *reinterpret_cast<uint32_t *>(prefix + prefix_len) = 0;
   prefix_len += 4;
 
-  mutex_.lock();
-  send(socket_, (char *)prefix, prefix_len, 0);
-  send(socket_, buf, payloadLen, 0);
-  mutex_.unlock();
+  send(socket_guard_->Get(), (char *)prefix, prefix_len, 0);
+  send(socket_guard_->Get(), buf, payloadLen, 0);
 }
 
 void WebSocketClient::run() {
@@ -234,7 +242,7 @@ bool WebSocketClient::do_connect() {
       continue;
     }
     if (connect(sockfd, p->ai_addr, p->ai_addrlen) != -1) {
-      socket_ = sockfd;
+      socket_guard_ = std::make_unique<base::SocketGuard>(sockfd);
       break;
     }
     CLOSESOCKET(sockfd);
@@ -250,17 +258,18 @@ bool WebSocketClient::do_connect() {
            "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\n"
            "Sec-WebSocket-Version: 13\r\n\r\n",
            path, host, port);
-  send(socket_, buf, strlen(buf), 0);
+  send(socket_guard_->Get(), buf, strlen(buf), 0);
 
   int status;
-  if (readline(socket_, buf, sizeof(buf)) < 10 ||
+  if (readline(socket_guard_->Get(), buf, sizeof(buf)) < 10 ||
       sscanf(buf, "HTTP/1.1 %d Switching Protocols\r\n", &status) != 1 ||
       status != 101) {
     LOGE("Connect Error: " << url_.c_str());
     return false;
   }
 
-  while (readline(socket_, buf, sizeof(buf)) > 0 && buf[0] != '\r') {
+  while (readline(socket_guard_->Get(), buf, sizeof(buf)) > 0 &&
+         buf[0] != '\r') {
     size_t len = strlen(buf);
     buf[len - 2] = '\0';
     LOGI(buf);
@@ -275,7 +284,8 @@ bool WebSocketClient::do_read(std::string &msg) {
   } head;
   auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
 
-  if (recv(socket_, (char *)&head, sizeof(head), 0) != sizeof(head)) {
+  if (recv(socket_guard_->Get(), (char *)&head, sizeof(head), 0) !=
+      sizeof(head)) {
     LOGE("failed to read websocket message");
     delegate()->OnFailure(self);
     return false;
@@ -301,18 +311,18 @@ bool WebSocketClient::do_read(std::string &msg) {
 
   if (payloadLen == 126) {
     uint8_t len[2];
-    recv(socket_, (char *)&len, sizeof(len), 0);
+    recv(socket_guard_->Get(), (char *)&len, sizeof(len), 0);
     payloadLen = (len[0] << 8) | len[1];
   } else if (payloadLen == 127) {
     uint8_t len[8];
-    recv(socket_, (char *)&len, sizeof(len), 0);
+    recv(socket_guard_->Get(), (char *)&len, sizeof(len), 0);
     payloadLen = (len[4] << 24) | (len[5] << 16) | (len[6] << 8) | len[7];
   }
 
   msg.resize(payloadLen);
 
-  if (recv(socket_, const_cast<char *>(msg.data()), payloadLen, 0) !=
-      payloadLen) {
+  if (recv(socket_guard_->Get(), const_cast<char *>(msg.data()), payloadLen,
+           0) != payloadLen) {
     LOGE("failed to read websocket message");
     delegate()->OnFailure(self);
     return false;
