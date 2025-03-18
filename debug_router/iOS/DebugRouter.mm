@@ -295,6 +295,9 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 }
 
 - (void)sendAsync:(NSString *)message {
+  if (message == nil) {
+    return;
+  }
   debugrouter::core::DebugRouterCore::GetInstance().SendAsync([message UTF8String]);
 }
 
@@ -306,6 +309,9 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
              WithType:(NSString *)type
            ForSession:(int)session
              WithMark:(int)mark {
+  if (data == nil || type == nil) {
+    return;
+  }
   debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(
       [data UTF8String], [type UTF8String], session, mark, false);
 }
@@ -318,6 +324,9 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
                WithType:(NSString *)type
              ForSession:(int)session
                WithMark:(int)mark {
+  if (type == nil) {
+    return;
+  }
   NSError *error;
   NSData *jsonData = [NSJSONSerialization dataWithJSONObject:data
                                                      options:NSJSONWritingPrettyPrinted
@@ -426,10 +435,16 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 }
 
 - (BOOL)isValidSchema:(NSString *)schema {
+  if (schema == nil) {
+    return false;
+  }
   return debugrouter::core::DebugRouterCore::GetInstance().IsValidSchema([schema UTF8String]);
 }
 
 - (BOOL)handleSchema:(NSString *)schema {
+  if (schema == nil) {
+    return false;
+  }
   LLogInfo(@"handleSchema: %@", schema);
   return debugrouter::core::DebugRouterCore::GetInstance().HandleSchema([schema UTF8String]);
 }
@@ -488,6 +503,9 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 }
 
 - (void)setAppInfo:(nonnull NSString *)key withValue:(nonnull NSString *)value {
+  if (key == nil || value == nil) {
+    return;
+  }
   debugrouter::core::DebugRouterCore::GetInstance().SetAppInfo([key UTF8String],
                                                                [value UTF8String]);
 }
