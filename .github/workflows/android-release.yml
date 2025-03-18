@@ -3,7 +3,7 @@ name: android release
 on:
   push:
     tags:
-      - '*-android'
+      - "*-android"
 
 permissions:
   contents: write
@@ -17,7 +17,7 @@ jobs:
       - name: Python Setup
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
       - uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -34,22 +34,21 @@ jobs:
         run: cd $GITHUB_WORKSPACE/test/e2e_test/AndroidExample &&  chmod +x ./gradlew
       - name: Build artifact
         run: |-
-            mkdir tools/android_tools
-            source tools/envsetup.sh
-            pushd test/e2e_test/AndroidExample
-            ./gradlew :DebugRouter:assemblerelease
-            ./gradlew :DebugRouter:publish \
-            -Pversion=${{ steps.get_tag.outputs.VERSION }} \
-            -Psigning.keyId=${{ secrets.SIGNING_KEY_ID }} \
-            -Psigning.password=${{ secrets.SIGNING_PASSWORD }} \
-            -Psigning.secretKey=${{ secrets.SIGNING_SECRET_KEY }}
-            ./gradlew :DebugRouter:zipArtifacts -Pversion=${{ steps.get_tag.outputs.VERSION }} :DebugRouter:getArtifactList
-            popd
-            pushd debug_router/Android/DebugRouter/build/
-            artifact_list=$(<artifact-list)
-            echo $artifact_list
-            echo "::set-output name=artifact_list::$artifact_list"
-            popd
+          source tools/envsetup.sh
+          pushd test/e2e_test/AndroidExample
+          ./gradlew :DebugRouter:assemblerelease
+          ./gradlew :DebugRouter:publish \
+          -Pversion=${{ steps.get_tag.outputs.VERSION }} \
+          -Psigning.keyId=${{ secrets.SIGNING_KEY_ID }} \
+          -Psigning.password=${{ secrets.SIGNING_PASSWORD }} \
+          -Psigning.secretKey=${{ secrets.SIGNING_SECRET_KEY }}
+          ./gradlew :DebugRouter:zipArtifacts -Pversion=${{ steps.get_tag.outputs.VERSION }} :DebugRouter:getArtifactList
+          popd
+          pushd debug_router/Android/DebugRouter/build/
+          artifact_list=$(<artifact-list)
+          echo $artifact_list
+          echo "::set-output name=artifact_list::$artifact_list"
+          popd
         id: build_artifact
       - name: Publish artifact to maven
         uses: lynx-infra/maven-publish-action@c48e3067642c7ceccf807cd52e6644a257cd8ded
