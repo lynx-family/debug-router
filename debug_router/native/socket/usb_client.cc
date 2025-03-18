@@ -381,7 +381,6 @@ UsbClient::~UsbClient() {
   LOGI("UsbClient: ~UsbClient.");
   // TODO(popoaichuiniu) optimize thread policy of UsbClient's fields
   DisconnectInternal();
-  work_thread_.shutdown();
 }
 
 }  // namespace socket_server
