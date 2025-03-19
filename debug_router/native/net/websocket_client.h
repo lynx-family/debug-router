@@ -12,6 +12,7 @@
 
 #include "debug_router/native/base/socket_guard.h"
 #include "debug_router/native/core/message_transceiver.h"
+#include "debug_router/native/net/websocket_task.h"
 #include "debug_router/native/socket/work_thread_executor.h"
 
 #if defined(_WIN32)
@@ -46,16 +47,9 @@ class WebSocketClient : public core::MessageTransceiver {
  private:
   void DisconnectInternal();
   void ConnectInternal(const std::string &url);
-  void SendInternal(const std::string &data);
 
-  void run();
-  bool do_connect();
-  bool do_read(std::string &msg);
-
-  std::string url_;
-  std::unique_ptr<base::SocketGuard> socket_guard_;
   base::WorkThreadExecutor work_thread_;
-  std::unique_ptr<std::thread> thread_;
+  std::unique_ptr<WebSocketTask> current_task_;
 };
 }  // namespace net
 }  // namespace debugrouter

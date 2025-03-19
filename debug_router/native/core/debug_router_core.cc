@@ -458,7 +458,7 @@ void DebugRouterCore::AddStateListener(
 }
 
 void DebugRouterCore::TryToReconnect() {
-  if (retry_times_ < 30) {
+  if (retry_times_ < 3) {
     retry_times_++;
     LOGI("try to reconnect: " << retry_times_);
 
