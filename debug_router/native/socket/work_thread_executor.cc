@@ -4,6 +4,8 @@
 
 #include "debug_router/native/socket/work_thread_executor.h"
 
+#include "debug_router/native/log/logging.h"
+
 namespace debugrouter {
 namespace base {
 
@@ -38,7 +40,12 @@ void WorkThreadExecutor::shutdown() {
   cond.notify_all();
 
   if (worker && worker->joinable()) {
-    worker->join();
+    try {
+      worker->join();
+    } catch (const std::exception& e) {
+      LOGE("WorkThreadExecutor::shutdown worker->detach() failed, "
+           << e.what());
+    }
   }
   worker.reset();
 }
