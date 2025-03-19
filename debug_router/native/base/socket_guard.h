@@ -9,28 +9,29 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #define CLOSESOCKET closesocket
+typedef SOCKET SocketType;
+constexpr SocketType kInvalidSocket = INVALID_SOCKET;
 #else
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#define SOCKET int
 #define CLOSESOCKET close
+typedef int SocketType;
+constexpr SocketType kInvalidSocket = -1;
 #endif
-
-constexpr SOCKET kInvalidSocket = 0;
 
 namespace debugrouter {
 namespace base {
 
 class SocketGuard {
  public:
-  SOCKET Get() const { return sock_; }
+  SocketType Get() const { return sock_; }
 
-  explicit SocketGuard(SOCKET sock) : sock_(sock) {}
+  explicit SocketGuard(SocketType sock) : sock_(sock) {}
 
   ~SocketGuard() {
-    if (sock_ != 0) {
+    if (sock_ != kInvalidSocket) {
       CLOSESOCKET(sock_);
     }
   }
@@ -38,7 +39,7 @@ class SocketGuard {
   SocketGuard& operator=(const SocketGuard&) = delete;
 
  private:
-  SOCKET sock_;
+  SocketType sock_;
 };
 
 }  // namespace base

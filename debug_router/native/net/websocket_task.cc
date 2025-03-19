@@ -125,8 +125,18 @@ void WebSocketTask::SendInternal(const std::string &data) {
   *reinterpret_cast<uint32_t *>(prefix + prefix_len) = 0;
   prefix_len += 4;
 
-  send(socket_guard_->Get(), (char *)prefix, prefix_len, 0);
-  send(socket_guard_->Get(), buf, payloadLen, 0);
+  if (!socket_guard_) {
+    onFailure();
+    return;
+  }
+  if (send(socket_guard_->Get(), (char *)prefix, prefix_len, 0) == -1) {
+    onFailure();
+    return;
+  }
+  if (send(socket_guard_->Get(), buf, payloadLen, 0) == -1) {
+    onFailure();
+    return;
+  }
 }
 
 void WebSocketTask::start() {
@@ -229,6 +239,11 @@ bool WebSocketTask::do_read(std::string &msg) {
     uint8_t flag_opcode;
     uint8_t mask_payload_len;
   } head;
+
+  if (!socket_guard_) {
+    onFailure();
+    return false;
+  }
 
   if (recv(socket_guard_->Get(), (char *)&head, sizeof(head), 0) !=
       sizeof(head)) {
