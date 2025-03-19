@@ -16,6 +16,7 @@ class WebSocketTask : public base::WorkThreadExecutor {
  public:
   WebSocketTask(std::shared_ptr<core::MessageTransceiver> transceiver,
                 const std::string &url);
+  virtual ~WebSocketTask() override;
 
   void SendInternal(const std::string &data);
 

@@ -17,7 +17,7 @@ namespace base {
 class WorkThreadExecutor {
  public:
   WorkThreadExecutor();
-  ~WorkThreadExecutor();
+  virtual ~WorkThreadExecutor();
 
   void submit(std::function<void()> task);
   void shutdown();

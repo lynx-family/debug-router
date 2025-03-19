@@ -40,6 +40,9 @@ void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
     std::shared_ptr<UsbClient> old_client_ = usb_client_;
     LOGI("SocketServerApi OnOpen: replace old client.");
+    if (old_client_) {
+      old_client_->Stop();
+    }
     usb_client_ = client;
     if (auto listener = listener_.lock()) {
       listener->OnStatusChanged(kConnected, code, reason);
@@ -68,6 +71,7 @@ void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
       LOGI("SocketServerApi OnMessage: client is null or not match.");
       return;
     }
+    usb_client_->Stop();
     usb_client_ = nullptr;
     if (auto listener = listener_.lock()) {
       listener->OnStatusChanged(status, code, reason);
@@ -83,6 +87,7 @@ void SocketServer::HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
       LOGI("SocketServerApi OnMessage: client is null or not match.");
       return;
     }
+    usb_client_->Stop();
     usb_client_ = nullptr;
     if (auto listener = listener_.lock()) {
       listener->OnStatusChanged(status, code, reason);

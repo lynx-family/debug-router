@@ -367,6 +367,8 @@ bool UsbClient::Send(const std::string &message) {
   return true;
 }
 
+void UsbClient::Stop() { work_thread_.shutdown(); }
+
 void UsbClient::SendInternal(const std::string &message) {
   LOGI("UsbClient: SendInternal.");
   if (connect_status_ != USBConnectStatus::CONNECTED) {

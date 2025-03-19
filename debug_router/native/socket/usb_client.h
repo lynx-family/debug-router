@@ -28,6 +28,8 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   // true means the message are added to message queue
   bool Send(const std::string &message);
 
+  void Stop();
+
   explicit UsbClient(SocketType socket_fd);
   ~UsbClient();
 
