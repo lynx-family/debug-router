@@ -190,6 +190,10 @@ bool WebSocketTask::do_connect() {
     }
     CLOSESOCKET(sockfd);
   }
+  if (socket_guard_ == nullptr) {
+    LOGE("Connect " << url_.c_str() << "Error: socket_guard_ is nullptr.");
+    return false;
+  }
   freeaddrinfo(servinfo);
 
   char buf[512];
