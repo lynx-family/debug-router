@@ -122,6 +122,7 @@ DebugRouterCore::DebugRouterCore()
       current_transceiver_(nullptr),
       max_session_id_(0),
       processor_(nullptr),
+      retry_times_(0),
       handler_count_(1) {
   message_transceivers_.push_back(std::make_shared<net::WebSocketClient>());
   message_transceivers_.push_back(std::make_shared<net::SocketServerClient>());
@@ -138,16 +139,7 @@ DebugRouterCore::DebugRouterCore()
 }
 
 void DebugRouterCore::Connect(const std::string &url, const std::string &room) {
-  Disconnect();
-  connection_state_.store(CONNECTING, std::memory_order_relaxed);
-  for (auto it = message_transceivers_.begin();
-       it != message_transceivers_.end(); ++it) {
-    if ((*it)->Connect(url)) {
-      break;
-    }
-  }
-  server_url_ = url;
-  room_id_ = room;
+  Connect(url, room, false);
 }
 
 ConnectionState DebugRouterCore::GetConnectionState() {
@@ -175,8 +167,25 @@ void DebugRouterCore::DisconnectAsync() {
 
 void DebugRouterCore::Reconnect() {
   if (!server_url_.empty() && !room_id_.empty()) {
-    Connect(server_url_, room_id_);
+    Connect(server_url_, room_id_, true);
   }
+}
+
+void DebugRouterCore::Connect(const std::string &url, const std::string &room,
+                              bool is_reconnect) {
+  if (!is_reconnect) {
+    retry_times_.store(0, std::memory_order_relaxed);
+  }
+  Disconnect();
+  connection_state_.store(CONNECTING, std::memory_order_relaxed);
+  for (auto it = message_transceivers_.begin();
+       it != message_transceivers_.end(); ++it) {
+    if ((*it)->Connect(url)) {
+      break;
+    }
+  }
+  server_url_ = url;
+  room_id_ = room;
 }
 
 void DebugRouterCore::Send(const std::string &message) {
@@ -270,7 +279,6 @@ void DebugRouterCore::OnOpen(
   for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
     (*it)->OnOpen(connect_type);
   }
-  retry_times_ = 0;
 }
 
 void DebugRouterCore::OnClosed(
@@ -281,19 +289,25 @@ void DebugRouterCore::OnClosed(
   }
   connection_state_.store(DISCONNECTED, std::memory_order_relaxed);
   NotifyConnectStateByMessage(DISCONNECTED);
-  for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
-    (*it)->OnClose(-1, "unknown reason");
+  if (retry_times_.load(std::memory_order_relaxed) >= 3) {
+    for (auto it = state_listeners_.begin(); it != state_listeners_.end();
+         it++) {
+      (*it)->OnClose(-1, "unknown reason");
+    }
   }
 
   if (transceiver->GetType() == ConnectionType::kWebSocket) {
-    std::string result = DebugRouterConfigs::GetInstance().GetConfig(
-        kForbidReconnectWhenClose, "false");
-    if (result == "true") {
-      LOGI("onClosed: forbid reconnect");
-      return;
+    if (current_transceiver_ == nullptr ||
+        current_transceiver_->GetType() == ConnectionType::kWebSocket) {
+      std::string result = DebugRouterConfigs::GetInstance().GetConfig(
+          kForbidReconnectWhenClose, "false");
+      if (result == "true") {
+        LOGI("onClosed: forbid reconnect");
+        return;
+      }
+      LOGI("onClosed: try to reconnect");
+      TryToReconnect();
     }
-    LOGI("onClosed: try to reconnect");
-    TryToReconnect();
   }
 }
 
@@ -305,13 +319,21 @@ void DebugRouterCore::OnFailure(
   }
   connection_state_.store(DISCONNECTED, std::memory_order_relaxed);
   NotifyConnectStateByMessage(DISCONNECTED);
-  for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
-    // TODO(zhoumingsong.smile): add more details
-    (*it)->OnError("unknown error");
+  if (retry_times_.load(std::memory_order_relaxed) >= 3) {
+    for (auto it = state_listeners_.begin(); it != state_listeners_.end();
+         it++) {
+      // TODO(zhoumingsong.smile): add more details
+      (*it)->OnError("unknown error");
+    }
   }
 
-  LOGI("onFailure: try to reconnect");
-  TryToReconnect();
+  if (transceiver->GetType() == ConnectionType::kWebSocket) {
+    if (current_transceiver_ == nullptr ||
+        current_transceiver_->GetType() == ConnectionType::kWebSocket) {
+      LOGI("onFailure: try to reconnect");
+      TryToReconnect();
+    }
+  }
 }
 
 void DebugRouterCore::OnMessage(
@@ -458,16 +480,14 @@ void DebugRouterCore::AddStateListener(
 }
 
 void DebugRouterCore::TryToReconnect() {
-  if (retry_times_ < 3) {
-    retry_times_++;
-    LOGI("try to reconnect: " << retry_times_);
+  if (retry_times_.load(std::memory_order_relaxed) < 3) {
+    retry_times_.fetch_add(1);
+    LOGI("try to reconnect: " << retry_times_.load(std::memory_order_relaxed));
 
     thread::DebugRouterExecutor::GetInstance().Post([=]() {
       std::this_thread::sleep_for(std::chrono::milliseconds(2000));
       Reconnect();
     });
-  } else {
-    retry_times_ = 0;
   }
 }
 
