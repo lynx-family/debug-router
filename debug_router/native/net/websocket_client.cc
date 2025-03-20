@@ -40,30 +40,47 @@ WebSocketClient::~WebSocketClient() { DisconnectInternal(); }
 void WebSocketClient::Init() {}
 
 bool WebSocketClient::Connect(const std::string &url) {
+  LOGI("WebSocketClient::Connect");
   auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
-  work_thread_.submit(
-      [client_ptr = self, url]() { client_ptr->ConnectInternal(url); });
+  work_thread_.submit([client_ptr = self, url]() {
+    client_ptr->DisconnectInternal();
+    client_ptr->ConnectInternal(url);
+  });
   return true;
 }
 
 void WebSocketClient::ConnectInternal(const std::string &url) {
+  LOGI("WebSocketClient::ConnectInternal: use " << url << " to connect.");
   current_task_ = std::make_unique<WebSocketTask>(shared_from_this(), url);
 }
 
 void WebSocketClient::Disconnect() {
+  LOGI("WebSocketClient::Disconnect");
   auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
   work_thread_.submit(
       [client_ptr = self]() { client_ptr->DisconnectInternal(); });
 }
 
-void WebSocketClient::DisconnectInternal() { current_task_.reset(nullptr); }
+void WebSocketClient::DisconnectInternal() {
+  LOGI("WebSocketClient::DisconnectInternal");
+  if (current_task_) {
+    current_task_->Stop();
+    LOGI("WebSocketClient::DisconnectInternal: current_task_->Stop() success.");
+  }
+  current_task_.reset(nullptr);
+}
 
 core::ConnectionType WebSocketClient::GetType() {
   return core::ConnectionType::kWebSocket;
 }
 
 void WebSocketClient::Send(const std::string &data) {
-  work_thread_.submit([this, data]() { current_task_->SendInternal(data); });
+  LOGI("WebSocketClient::Send.");
+  work_thread_.submit([this, data]() {
+    if (current_task_) {
+      current_task_->SendInternal(data);
+    }
+  });
 }
 
 }  // namespace net

@@ -4,6 +4,7 @@
 
 #include "debug_router/native/processor/processor.h"
 
+#include "debug_router/native/log/logging.h"
 #include "debug_router/native/protocol/events.h"
 #include "json/reader.h"
 
@@ -43,13 +44,17 @@ void Processor::process(const Json::Value &root) {
     auto init_data = body->AsInit();
     client_id_ = init_data->client_id_;
     if (client_id_ > 0) {
+      LOGI("registerDevice");
       registerDevice();
     }
   } else if (body->IsProtocolBody4Registered()) {
+    LOGI("joinRoom");
     joinRoom();
   } else if (body->IsProtocolBody4RoomJoined()) {
+    LOGI("get sessionList");
     sessionList();
   } else if (body->IsProtocolBody4ChangeRoomServer()) {
+    LOGI("changeRoomServer");
     auto server_data = body->AsChangeRoomServer();
     changeRoomServer(server_data->url_, server_data->room_id_);
   } else if (body->IsProtocolBody4Custom()) {
@@ -57,6 +62,7 @@ void Processor::process(const Json::Value &root) {
     if (custom->Is4CDP()) {
       auto cdp = custom->AsCDP();
       if (cdp->client_id_ == client_id_) {
+        LOGI("CDP Message %s" << cdp->message_.c_str());
         processMessage("CDP", cdp->session_id_, cdp->message_);
       }
     } else if (custom->Is4D2RStopAtEntry()) {
@@ -72,12 +78,16 @@ void Processor::process(const Json::Value &root) {
             -1, custom->AsD2RStopLepusAtEntry() ? "true" : "false");
       }
     } else if (custom->Is4OpenCard()) {
+      LOGI("openCard");
       openCard(custom->AsOpenCardData()->url);
     } else if (custom->Is4ListSession()) {
+      LOGI("FlushSessionList");
       FlushSessionList();
     } else if (custom->Is4MessageHandler()) {
+      LOGI("HandleAppAction");
       HandleAppAction(custom);
     } else {
+      LOGI("extension");
       auto ext = custom->AsExtension();
       if (ext->client_id_ == client_id_) {
         processMessage(custom->type_, ext->session_id_, ext->message_);
@@ -146,6 +156,7 @@ void Processor::joinRoom() {
 
 void Processor::reportError(const std::string &error) {
   if (message_handler_) {
+    LOGI("reportError:" << error);
     message_handler_->ReportError(error);
   }
 }

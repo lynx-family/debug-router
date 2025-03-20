@@ -18,6 +18,7 @@ class WebSocketTask : public base::WorkThreadExecutor {
                 const std::string &url);
   virtual ~WebSocketTask() override;
 
+  void Stop();
   void SendInternal(const std::string &data);
 
  private:
