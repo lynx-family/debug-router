@@ -132,7 +132,12 @@ void SocketServer::Disconnect() {
   });
 }
 
-SocketServer::~SocketServer() { Close(); }
+SocketServer::~SocketServer() {
+  if (!usb_client_) {
+    usb_client_->Stop();
+  }
+  Close();
+}
 
 }  // namespace socket_server
 }  // namespace debugrouter

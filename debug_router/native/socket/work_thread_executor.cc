@@ -45,8 +45,10 @@ void WorkThreadExecutor::shutdown() {
 #endif
       if (worker->get_id() != std::this_thread::get_id()) {
         worker->join();
+        LOGI("WorkThreadExecutor::shutdown worker->join() success.");
       } else {
         worker->detach();
+        LOGI("WorkThreadExecutor::shutdown worker->detach() success.");
       }
 #if __cpp_exceptions >= 199711L
     } catch (const std::exception& e) {
@@ -56,6 +58,7 @@ void WorkThreadExecutor::shutdown() {
 #endif
   }
   worker.reset();
+  LOGI("WorkThreadExecutor::shutdown success.");
 }
 
 void WorkThreadExecutor::run() {
@@ -69,7 +72,11 @@ void WorkThreadExecutor::run() {
       auto task = tasks.front();
       tasks.pop();
       lock.unlock();
+      if (is_shut_down) {
+        break;
+      }
       task();
+      LOGI("WorkThreadExecutor::run task() success.");
     }
   }
 }

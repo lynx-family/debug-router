@@ -133,14 +133,18 @@ void WebSocketTask::SendInternal(const std::string &data) {
     onFailure();
     return;
   }
+  LOGI("[TX] SendInternal: " << buf);
   if (send(socket_guard_->Get(), (char *)prefix, prefix_len, 0) == -1) {
+    LOGI("send prefix_len error.");
     onFailure();
     return;
   }
   if (send(socket_guard_->Get(), buf, payloadLen, 0) == -1) {
+    LOGI("send: buf error.");
     onFailure();
     return;
   }
+  LOGI("send: prefix_len and buf success.");
 }
 
 void WebSocketTask::start() {
@@ -153,11 +157,19 @@ void WebSocketTask::start() {
 
   std::string msg;
   while (do_read(msg)) {
+    LOGI("[RX]:" << msg);
     onMessage(msg);
   }
 }
 
+void WebSocketTask::Stop() {
+  LOGI("WebSocketTask::Stop");
+  socket_guard_->Reset();
+  shutdown();
+}
+
 bool WebSocketTask::do_connect() {
+  LOGI("WebSocketTask::do_connect");
   url_ = decodeURIComponent(url_);
   const char *purl = url_.c_str();
   if (memcmp(purl, "wss://", 6) == 0) {
@@ -200,6 +212,7 @@ bool WebSocketTask::do_connect() {
     }
     if (connect(sockfd, p->ai_addr, p->ai_addrlen) != -1) {
       socket_guard_ = std::make_unique<base::SocketGuard>(sockfd);
+      LOGI("Connect socket success. sockfd: " << sockfd);
       break;
     }
     CLOSESOCKET(sockfd);
@@ -292,10 +305,12 @@ bool WebSocketTask::do_read(std::string &msg) {
     onFailure();
     return false;
   }
+  LOGI("WebSocketTask::do_read websocket message success.");
   return true;
 }
 
 void WebSocketTask::onOpen() {
+  LOGI("WebSocketTask::onOpen");
   auto transceiver = transceiver_.lock();
   if (transceiver) {
     transceiver->delegate()->OnOpen(transceiver);
@@ -303,6 +318,7 @@ void WebSocketTask::onOpen() {
 }
 
 void WebSocketTask::onFailure() {
+  LOGI("WebSocketTask::onFailure");
   auto transceiver = transceiver_.lock();
   if (transceiver) {
     transceiver->delegate()->OnFailure(transceiver);
@@ -310,6 +326,7 @@ void WebSocketTask::onFailure() {
 }
 
 void WebSocketTask::onMessage(const std::string &msg) {
+  LOGI("WebSocketTask::onMessage");
   auto transceiver = transceiver_.lock();
   if (transceiver) {
     transceiver->delegate()->OnMessage(msg, transceiver);

@@ -111,6 +111,8 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   DebugRouterCore(DebugRouterCore &&) = delete;
   DebugRouterCore &operator=(DebugRouterCore &&) = delete;
 
+  virtual ~DebugRouterCore();
+
  protected:
   std::recursive_mutex slots_mutex_;
   friend class MessageHandlerCore;

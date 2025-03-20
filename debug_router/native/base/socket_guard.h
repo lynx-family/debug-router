@@ -28,6 +28,13 @@ class SocketGuard {
  public:
   SocketType Get() const { return sock_; }
 
+  void Reset() {
+    if (sock_ != kInvalidSocket) {
+      CLOSESOCKET(sock_);
+    }
+    sock_ = kInvalidSocket;
+  }
+
   explicit SocketGuard(SocketType sock) : sock_(sock) {}
 
   ~SocketGuard() {

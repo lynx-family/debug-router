@@ -148,6 +148,7 @@ ConnectionState DebugRouterCore::GetConnectionState() {
 
 void DebugRouterCore::Disconnect() {
   if (connection_state_.load(std::memory_order_relaxed) != DISCONNECTED) {
+    LOGI("Disconnect");
     if (current_transceiver_) {
       current_transceiver_->Disconnect();
       current_transceiver_ = nullptr;
@@ -167,6 +168,7 @@ void DebugRouterCore::DisconnectAsync() {
 
 void DebugRouterCore::Reconnect() {
   if (!server_url_.empty() && !room_id_.empty()) {
+    LOGI("DebugRouterCore::Reconnect.");
     Connect(server_url_, room_id_, true);
   }
 }
@@ -176,6 +178,8 @@ void DebugRouterCore::Connect(const std::string &url, const std::string &room,
   if (!is_reconnect) {
     retry_times_.store(0, std::memory_order_relaxed);
   }
+  LOGI(
+      "connect. retry times: " << retry_times_.load(std::memory_order_relaxed));
   Disconnect();
   connection_state_.store(CONNECTING, std::memory_order_relaxed);
   for (auto it = message_transceivers_.begin();
@@ -269,29 +273,38 @@ void DebugRouterCore::OnInit(
 void DebugRouterCore::OnOpen(
     const std::shared_ptr<MessageTransceiver> &transceiver) {
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
-    current_transceiver_->Disconnect();
+    if (current_transceiver_ == transceiver) {
+      return;
+    } else if (current_transceiver_ != nullptr) {
+      current_transceiver_->Disconnect();
+    }
   }
+  LOGI("DebugRouterCore: onOpen.");
   current_transceiver_ = transceiver;
   connection_state_.store(CONNECTED, std::memory_order_relaxed);
   NotifyConnectStateByMessage(CONNECTED);
   ConnectionType connect_type = current_transceiver_->GetType();
 
   for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
+    LOGI("do state_listeners_ onopen.");
     (*it)->OnOpen(connect_type);
   }
 }
 
 void DebugRouterCore::OnClosed(
     const std::shared_ptr<MessageTransceiver> &transceiver) {
+  LOGI("DebugRouterCore: onClosed.");
   if (transceiver != current_transceiver_ ||
       connection_state_.load(std::memory_order_relaxed) == DISCONNECTED) {
     return;
   }
   connection_state_.store(DISCONNECTED, std::memory_order_relaxed);
+  current_transceiver_ = nullptr;
   NotifyConnectStateByMessage(DISCONNECTED);
   if (retry_times_.load(std::memory_order_relaxed) >= 3) {
     for (auto it = state_listeners_.begin(); it != state_listeners_.end();
          it++) {
+      LOGI("do state_listeners_ onclose.");
       (*it)->OnClose(-1, "unknown reason");
     }
   }
@@ -313,16 +326,20 @@ void DebugRouterCore::OnClosed(
 
 void DebugRouterCore::OnFailure(
     const std::shared_ptr<MessageTransceiver> &transceiver) {
-  if (transceiver != current_transceiver_ ||
+  LOGI("DebugRouterCore: onFailure.");
+  if ((current_transceiver_ != nullptr &&
+       transceiver != current_transceiver_) ||
       connection_state_.load(std::memory_order_relaxed) == DISCONNECTED) {
     return;
   }
   connection_state_.store(DISCONNECTED, std::memory_order_relaxed);
+  current_transceiver_ = nullptr;
   NotifyConnectStateByMessage(DISCONNECTED);
   if (retry_times_.load(std::memory_order_relaxed) >= 3) {
     for (auto it = state_listeners_.begin(); it != state_listeners_.end();
          it++) {
       // TODO(zhoumingsong.smile): add more details
+      LOGI("do state_listeners_ onfailure.");
       (*it)->OnError("unknown error");
     }
   }
@@ -342,10 +359,17 @@ void DebugRouterCore::OnMessage(
   if (transceiver != current_transceiver_) {
     return;
   }
+  LOGI("DebugRouter OnMessage.");
   processor_->Process(message);
   for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
+    LOGI("do state_listeners_ onmessage.");
     (*it)->OnMessage(message);
   }
+}
+
+DebugRouterCore::~DebugRouterCore() {
+  // TODO(zhoumingsong.smile): Stop websocketClient's thread
+  // It's not a good way to do this
 }
 
 int DebugRouterCore::AddGlobalHandler(DebugRouterGlobalHandler *handler) {
