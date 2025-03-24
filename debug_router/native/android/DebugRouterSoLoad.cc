@@ -9,6 +9,7 @@
 #include "debug_router/native/android/debug_router_android.h"
 #include "debug_router/native/android/debug_router_global_handler_android.h"
 #include "debug_router/native/android/debug_router_listener_android.h"
+#include "debug_router/native/android/debug_router_session_handler_android.h"
 #include "debug_router/native/android/log/LLog_impl.h"
 #include "debug_router/native/android/message_handler_android.h"
 #include "debug_router/native/android/native_slot_android.h"
@@ -23,6 +24,7 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
   debugrouter::android::DebugRouterListenerAndroid::RegisterJNIUtils(env);
   debugrouter::android::MessageHandlerAndroid::RegisterJNIUtils(env);
   debugrouter::android::DebugRouterGlobalHandlerAndroid::RegisterJNIUtils(env);
+  debugrouter::android::DebugRouterSessionHandlerAndroid::RegisterJNIUtils(env);
   debugrouter::android::MessageAssemberJNI::RegisterJNIUtils(env);
   debugrouter::logging::LoggingDelegateAndroid::RegisterJNI(env);
 

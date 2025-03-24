@@ -13,6 +13,9 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import com.lynx.debugrouter.ConnectionType;
 import com.lynx.debugrouter.DebugRouter;
+import com.lynx.debugrouter.DebugRouterSessionHandler;
+import com.lynx.debugrouter.DebugRouterSlot;
+import com.lynx.debugrouter.DebugRouterSlotDelegate;
 import com.lynx.debugrouter.StateListener;
 import com.lynx.debugrouter.log.LLog;
 
@@ -26,6 +29,8 @@ public class MainActivity extends AppCompatActivity implements StateListener {
     StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
     StrictMode.setThreadPolicy(policy);
     DebugRouter.getInstance();
+
+    testAddSessionHandlerJNI();
 
     Intent intent = getIntent();
     String type = intent.getStringExtra("connection_type");
@@ -47,6 +52,34 @@ public class MainActivity extends AppCompatActivity implements StateListener {
         LLog.e(TAG, errorMsg);
         Toast.makeText(this, errorMsg, Toast.LENGTH_LONG).show();
     }
+  }
+
+  private void testAddSessionHandlerJNI() {
+    DebugRouter.getInstance().addSessionHandler(new DebugRouterSessionHandler() {
+      @Override
+      public void onSessionCreate(int sessionId, String url) {
+        LLog.i(TAG, "onSessionCreate:" + sessionId + url);
+      }
+      @Override
+      public void onSessionDestroy(int sessionId) {
+        LLog.i(TAG, "onSessionDestroy:" + sessionId);
+      }
+      @Override
+      public void onMessage(String message, String type, int sessionId) {
+        LLog.i(TAG, "onMessage:" + message + type + sessionId);
+      }
+    });
+
+    DebugRouter.getInstance().plug(new DebugRouterSlot(new DebugRouterSlotDelegate() {
+      @Override
+      public String getTemplateUrl() {
+        return "templateUrl";
+      }
+      @Override
+      public void onMessage(String type, String message) {
+        LLog.i(TAG, "onMessage:" + type + message);
+      }
+    }));
   }
 
   private void handleUsb(Intent intent) {
@@ -72,7 +105,8 @@ public class MainActivity extends AppCompatActivity implements StateListener {
 
   @Override
   public void onOpen(ConnectionType type) {
-    LLog.i(TAG, "onOpen");
+    LLog.i(TAG, "MainActivity stateListener onOpen.");
+    LLog.i(TAG, "ServerUrl:" + DebugRouter.getInstance().getServerUrl());
   }
 
   @Override
