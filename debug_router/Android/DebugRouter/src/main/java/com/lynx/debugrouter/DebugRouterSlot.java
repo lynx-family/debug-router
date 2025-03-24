@@ -86,6 +86,9 @@ public class DebugRouterSlot {
   }
 
   public void onMessage(String type, String message) {
+    if (type == null || message == null) {
+      return;
+    }
     if (mDelegate != null) {
       mDelegate.onMessage(type, message);
     }
