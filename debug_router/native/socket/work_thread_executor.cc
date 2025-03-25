@@ -40,16 +40,20 @@ void WorkThreadExecutor::shutdown() {
   cond.notify_all();
 
   if (worker && worker->joinable()) {
+#if __cpp_exceptions >= 199711L
     try {
+#endif
       if (worker->get_id() != std::this_thread::get_id()) {
         worker->join();
       } else {
         worker->detach();
       }
+#if __cpp_exceptions >= 199711L
     } catch (const std::exception& e) {
       LOGE("WorkThreadExecutor::shutdown worker->detach() failed, "
            << e.what());
     }
+#endif
   }
   worker.reset();
 }
