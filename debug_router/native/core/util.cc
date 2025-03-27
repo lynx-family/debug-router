@@ -2,12 +2,12 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/native/socket/util.h"
+#include "debug_router/native/core/util.h"
 
-#include <cstring>
+#include <sstream>
 
 namespace debugrouter {
-namespace socket_server {
+namespace util {
 
 uint32_t CharToUInt32(char value) { return ((uint32_t)value) & 0xFF; }
 
@@ -56,5 +56,55 @@ bool CheckHeaderFourthByte(const char *header, uint32_t payload_size_int) {
   return true;
 }
 
-}  // namespace socket_server
+std::string decodeURIComponent(std::string url) {
+  int flag = 0;
+  int code = 0;
+  std::stringstream result_url_;
+  for (char c : url) {
+    if ((flag == 0) && (c == '%')) {
+      flag = 1;
+      continue;
+    } else if (flag == 1) {
+      if (isxdigit(c)) {
+        if (isdigit(c)) {
+          code = c - '0';
+        } else if (c >= 'A' && c <= 'F') {
+          code = (0x0a + (c - 'A'));
+        } else if (c >= 'a' && c <= 'f') {
+          code = (0x0a + (c - 'a'));
+        } else {
+          return std::string();
+        }
+        flag = 2;
+        continue;
+      } else {
+        return std::string();
+      }
+    } else if (flag == 2) {
+      if (isxdigit(c)) {
+        code <<= 4;
+        if (isdigit(c)) {
+          code |= (c - '0');
+        } else if (c >= 'A' && c <= 'F') {
+          code |= (0x0a + (c - 'A'));
+        } else if (c >= 'a' && c <= 'f') {
+          code |= (0x0a + (c - 'a'));
+        } else {
+          return std::string();
+        }
+        result_url_ << (char)(code & 0xff);
+        code = 0;
+        flag = 0;
+        continue;
+      } else {
+        return std::string();
+      }
+    } else {
+      result_url_ << c;
+    }
+  }
+  return result_url_.str();
+}
+
+}  // namespace util
 }  // namespace debugrouter

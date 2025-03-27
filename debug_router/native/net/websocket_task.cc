@@ -4,6 +4,7 @@
 
 #include "debug_router/native/net/websocket_task.h"
 
+#include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
 
 #if defined(_WIN32)
@@ -36,56 +37,6 @@ static int readline(SOCKET sock, char *buf, size_t size) {
   }
   *out = '\0';
   return static_cast<int>(out - buf);
-}
-
-std::string decodeURIComponent(std::string url) {
-  int flag = 0;
-  int code = 0;
-  std::stringstream result_url_;
-  for (char c : url) {
-    if ((flag == 0) && (c == '%')) {
-      flag = 1;
-      continue;
-    } else if (flag == 1) {
-      if (isxdigit(c)) {
-        if (isdigit(c)) {
-          code = c - '0';
-        } else if (c >= 'A' && c <= 'F') {
-          code = (0x0a + (c - 'A'));
-        } else if (c >= 'a' && c <= 'f') {
-          code = (0x0a + (c - 'a'));
-        } else {
-          return std::string();
-        }
-        flag = 2;
-        continue;
-      } else {
-        return std::string();
-      }
-    } else if (flag == 2) {
-      if (isxdigit(c)) {
-        code <<= 4;
-        if (isdigit(c)) {
-          code |= (c - '0');
-        } else if (c >= 'A' && c <= 'F') {
-          code |= (0x0a + (c - 'A'));
-        } else if (c >= 'a' && c <= 'f') {
-          code |= (0x0a + (c - 'a'));
-        } else {
-          return std::string();
-        }
-        result_url_ << (char)(code & 0xff);
-        code = 0;
-        flag = 0;
-        continue;
-      } else {
-        return std::string();
-      }
-    } else {
-      result_url_ << c;
-    }
-  }
-  return result_url_.str();
 }
 
 WebSocketTask::WebSocketTask(
@@ -170,7 +121,7 @@ void WebSocketTask::Stop() {
 
 bool WebSocketTask::do_connect() {
   LOGI("WebSocketTask::do_connect");
-  url_ = decodeURIComponent(url_);
+  url_ = util::decodeURIComponent(url_);
   const char *purl = url_.c_str();
   if (memcmp(purl, "wss://", 6) == 0) {
     purl += 6;

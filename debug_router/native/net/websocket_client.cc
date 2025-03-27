@@ -5,7 +5,6 @@
 #include "debug_router/native/net/websocket_client.h"
 
 #include <memory>
-#include <sstream>
 
 #include "debug_router/native/log/logging.h"
 

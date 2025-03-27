@@ -8,7 +8,7 @@
 #else
 #include "debug_router/native/socket/posix/socket_server_posix.h"
 #endif
-#include "debug_router/native/socket/util.h"
+#include "debug_router/native/core/util.h"
 #include "debug_router/native/thread/debug_router_executor.h"
 
 namespace debugrouter {
