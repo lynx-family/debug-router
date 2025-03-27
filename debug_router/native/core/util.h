@@ -2,13 +2,15 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#ifndef DEBUGROUTER_NATIVE_SOCKET_UTIL_H_
-#define DEBUGROUTER_NATIVE_SOCKET_UTIL_H_
+#ifndef DEBUGROUTER_NATIVE_CORE_UTIL_H_
+#define DEBUGROUTER_NATIVE_CORE_UTIL_H_
 
 #include <cstdint>
+#include <cstring>
+#include <string>
 
 namespace debugrouter {
-namespace socket_server {
+namespace util {
 
 // convert a char value to a uint32_t value
 uint32_t CharToUInt32(char value);
@@ -29,7 +31,10 @@ bool CheckHeaderFourthByte(const char *header, uint32_t payload_size_int);
 // the return value is result, header's len needs equal 16
 bool CheckHeaderThreeBytes(const char *header);
 
-}  // namespace socket_server
+// decode url
+std::string decodeURIComponent(std::string url);
+
+}  // namespace util
 }  // namespace debugrouter
 
-#endif  // DEBUGROUTER_NATIVE_SOCKET_UTIL_H_
+#endif  // DEBUGROUTER_NATIVE_CORE_UTIL_H_
