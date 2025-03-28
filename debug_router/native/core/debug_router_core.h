@@ -119,6 +119,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   std::unordered_map<int32_t, std::shared_ptr<core::NativeSlot> > slots_;
   std::string room_id_;
   std::string server_url_;
+  std::string host_url_;
   std::unordered_map<std::string, DebugRouterMessageHandler *>
       message_handlers_;
   std::unordered_map<std::string, std::string> app_info_;

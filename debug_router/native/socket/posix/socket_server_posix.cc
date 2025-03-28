@@ -9,9 +9,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
 #include "debug_router/native/socket/usb_client.h"
-#include "debug_router/native/socket/util.h"
 
 namespace debugrouter {
 namespace socket_server {

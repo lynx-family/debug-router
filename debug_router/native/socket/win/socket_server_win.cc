@@ -9,8 +9,8 @@
 
 #include <mutex>
 
+#include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
-#include "debug_router/native/socket/util.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 

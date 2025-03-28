@@ -12,6 +12,7 @@
 #include "debug_router/native/core/debug_router_message_handler.h"
 #include "debug_router/native/core/debug_router_state_listener.h"
 #include "debug_router/native/core/native_slot.h"
+#include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
 #include "debug_router/native/net/socket_server_client.h"
 #include "debug_router/native/net/websocket_client.h"
@@ -175,6 +176,24 @@ void DebugRouterCore::Reconnect() {
 
 void DebugRouterCore::Connect(const std::string &url, const std::string &room,
                               bool is_reconnect) {
+  std::string curr_host_ = "";
+  std::size_t pos = url.find("page/android");
+  if (pos != std::string::npos) {
+    curr_host_ = url.substr(0, pos + 12);
+  }
+  LOGI("curr_host_: " << curr_host_ << " host_url_: " << host_url_);
+  LOGI("current status:" << GetConnectionState());
+  LOGI("room: " << room << " LastRoomId: " << GetRoomId());
+  if (is_reconnect) {
+    LOGI("is_reconnect");
+  } else {
+    LOGI("is_first_connect");
+  }
+  if (room == GetRoomId() && curr_host_ == host_url_ &&
+      GetConnectionState() != DISCONNECTED) {
+    LOGI("DebugRouterCore::Connect already connect this host and room.");
+    return;
+  }
   if (!is_reconnect) {
     retry_times_.store(0, std::memory_order_relaxed);
   }
@@ -188,6 +207,7 @@ void DebugRouterCore::Connect(const std::string &url, const std::string &room,
       break;
     }
   }
+  host_url_ = curr_host_;
   server_url_ = url;
   room_id_ = room;
 }
@@ -284,6 +304,11 @@ void DebugRouterCore::OnOpen(
   connection_state_.store(CONNECTED, std::memory_order_relaxed);
   NotifyConnectStateByMessage(CONNECTED);
   ConnectionType connect_type = current_transceiver_->GetType();
+  if (connect_type == ConnectionType::kUsb) {
+    host_url_ = "";
+    server_url_ = "";
+    room_id_ = "";
+  }
 
   for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
     LOGI("do state_listeners_ onopen.");
@@ -437,8 +462,10 @@ bool DebugRouterCore::IsValidSchema(const std::string &schema) {
 std::string DebugRouterCore::GetRoomId() { return room_id_; }
 std::string DebugRouterCore::GetServerUrl() { return server_url_; }
 
-bool DebugRouterCore::HandleSchema(const std::string &schema) {
+bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
   std::string url, room;
+  std::string schema = util::decodeURIComponent(encode_schema);
+  LOGI("handle schema: " << schema);
   int32_t query_index = static_cast<int32_t>(schema.find('?'));
   if (query_index == std::string::npos) {
     LOGE("Invalid schema:" << schema);
@@ -488,9 +515,11 @@ bool DebugRouterCore::HandleSchema(const std::string &schema) {
       LOGE("invalid schema" << schema);
       return false;
     }
+    LOGI("handle schema: enable status makes us connectAsync.");
     ConnectAsync(url, room);
     return true;
   } else if (!cmd.compare("disable")) {
+    LOGI("handle schema: disable status makes us DisconnectAsync.");
     DisconnectAsync();
     return true;
   } else {

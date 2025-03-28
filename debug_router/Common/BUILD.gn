@@ -32,9 +32,7 @@ config("debug_router_private_config") {
 config("debug_router_config") {
   include_dirs = [ "." ]
 
-  defines = [
-    "JSON_USE_EXCEPTION=0",
-  ]
+  defines = [ "JSON_USE_EXCEPTION=0" ]
 }
 
 source_set("debug_router_source") {
@@ -55,6 +53,8 @@ source_set("debug_router_source") {
     "../native/core/message_transceiver.h",
     "../native/core/native_slot.cc",
     "../native/core/native_slot.h",
+    "../native/core/util.cc",
+    "../native/core/util.h",
     "../native/log/logging.cc",
     "../native/log/logging.h",
     "../native/net/socket_server_client.cc",
@@ -66,33 +66,31 @@ source_set("debug_router_source") {
     "../native/processor/message_handler.h",
     "../native/processor/processor.cc",
     "../native/processor/processor.h",
+    "../native/protocol/blocking_queue.h",
     "../native/protocol/md5.cc",
     "../native/protocol/md5.h",
     "../native/protocol/protocol.cc",
     "../native/protocol/protocol.h",
-    "../native/protocol/blocking_queue.h",
     "../native/socket/count_down_latch.cc",
     "../native/socket/count_down_latch.h",
     "../native/socket/socket_server_api.cc",
     "../native/socket/socket_server_api.h",
     "../native/socket/socket_server_type.h",
-    "../native/socket/usb_client_listener.h",
     "../native/socket/usb_client.cc",
     "../native/socket/usb_client.h",
-    "../native/socket/util.cc",
-    "../native/socket/util.h",
+    "../native/socket/usb_client_listener.h",
     "../native/socket/work_thread_executor.cc",
     "../native/socket/work_thread_executor.h",
     "../native/thread/debug_router_executor.cc",
     "../native/thread/debug_router_executor.h",
-    "debug_router_global_handler.h",
-    "debug_router_session_handler.h",
-    "debug_router_slot_delegate.h",
-    "debug_router_slot.cc",
-    "debug_router_slot.h",
-    "debug_router_state_listener.h",
     "debug_router.cc",
     "debug_router.h",
+    "debug_router_global_handler.h",
+    "debug_router_session_handler.h",
+    "debug_router_slot.cc",
+    "debug_router_slot.h",
+    "debug_router_slot_delegate.h",
+    "debug_router_state_listener.h",
     "native_slot_delegate.h",
   ]
   if (is_win) {

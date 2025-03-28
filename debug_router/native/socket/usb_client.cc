@@ -4,9 +4,9 @@
 
 #include "debug_router/native/socket/usb_client.h"
 
+#include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
 #include "debug_router/native/socket/socket_server_api.h"
-#include "debug_router/native/socket/util.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -77,7 +77,7 @@ bool UsbClient::ReadAndCheckMessageHeader(char *header, SocketType socket_fd_) {
     LOGE("read header data error.");
     return false;
   }
-  return CheckHeaderThreeBytes(header);
+  return util::CheckHeaderThreeBytes(header);
 }
 
 /**
@@ -141,7 +141,7 @@ void UsbClient::ReadMessage(SocketType socket_fd_) {
       LOGW("UsbClient: don't match DebugRouter protocol:");
       // need DebugRouterReport to report invailed client.
       for (int i = 0; i < kFrameHeaderLen; i++) {
-        LOGE("header " << i << " : #" << CharToUInt32(header[i]) << "#");
+        LOGE("header " << i << " : #" << util::CharToUInt32(header[i]) << "#");
       }
       if (!isFirst && listener_) {
         listener_->OnError(shared_from_this(), GetErrorMessage(),
@@ -168,13 +168,13 @@ void UsbClient::ReadMessage(SocketType socket_fd_) {
     }
 
     uint32_t payload_size_int =
-        DecodePayloadSize(payload_size, kPayloadSizeLen);
+        util::DecodePayloadSize(payload_size, kPayloadSizeLen);
     LOGI("payload_size_int:" << payload_size_int);
 
-    if (!CheckHeaderFourthByte(header, payload_size_int)) {
+    if (!util::CheckHeaderFourthByte(header, payload_size_int)) {
       LOGE("CheckHeader failed: Drop This Frame!");
       for (int i = 0; i < kFrameHeaderLen; i++) {
-        LOGE("header " << i << " : #" << CharToUInt32(header[i]) << "#");
+        LOGE("header " << i << " : #" << util::CharToUInt32(header[i]) << "#");
       }
       continue;
     }
@@ -261,25 +261,25 @@ void UsbClient::WrapHeader(const std::string &message, std::string &result) {
   char *buffer = &result[0];
   char char_array[4];
   // write kFrameProtocolVersion
-  IntToCharArray(kFrameProtocolVersion, char_array);
+  util::IntToCharArray(kFrameProtocolVersion, char_array);
   memcpy(buffer, char_array, 4);
 
   // write kPTFrameTypeTextMessage
-  IntToCharArray(kPTFrameTypeTextMessage, char_array);
+  util::IntToCharArray(kPTFrameTypeTextMessage, char_array);
   memcpy(buffer + 4, char_array, 4);
 
   // write kFrameDefaultTag
-  IntToCharArray(kFrameDefaultTag, char_array);
+  util::IntToCharArray(kFrameDefaultTag, char_array);
   memcpy(buffer + 8, char_array, 4);
 
   // write len
   uint32_t len =
       static_cast<uint32_t>(kFrameHeaderLen + kPayloadSizeLen + message.size());
-  IntToCharArray(len, char_array);
+  util::IntToCharArray(len, char_array);
   memcpy(buffer + 12, char_array, 4);
 
   // write message.size()
-  IntToCharArray(static_cast<uint32_t>(message.size()), char_array);
+  util::IntToCharArray(static_cast<uint32_t>(message.size()), char_array);
   memcpy(buffer + 16, char_array, 4);
 
   // write message
