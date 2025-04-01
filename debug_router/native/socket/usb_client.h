@@ -23,6 +23,7 @@ static const char *kMessageQuit = "quit";
 // Client of socket_server
 class UsbClient : public std::enable_shared_from_this<UsbClient> {
  public:
+  void Init();
   // below three functions work only on one work thread
   void StartUp(const std::shared_ptr<UsbClientListener> &listener);
   // true means the message are added to message queue

@@ -9,8 +9,14 @@
 namespace debugrouter {
 namespace base {
 
-WorkThreadExecutor::WorkThreadExecutor() : is_shut_down(false) {
-  worker = std::make_unique<std::thread>([this]() { run(); });
+WorkThreadExecutor::WorkThreadExecutor()
+    : is_shut_down(false), alive_flag(std::make_shared<bool>(true)) {}
+
+void WorkThreadExecutor::init() {
+  std::lock_guard<std::mutex> lock(task_mtx);
+  if (!worker) {
+    worker = std::make_unique<std::thread>([this]() { run(); });
+  }
 }
 
 WorkThreadExecutor::~WorkThreadExecutor() { shutdown(); }
@@ -62,7 +68,15 @@ void WorkThreadExecutor::shutdown() {
 }
 
 void WorkThreadExecutor::run() {
-  while (!is_shut_down) {
+  std::weak_ptr<bool> weak_flag = alive_flag;
+  while (true) {
+    auto flag = weak_flag.lock();
+    if (!flag) {
+      break;
+    }
+    if (is_shut_down) {
+      break;
+    }
     std::unique_lock<std::mutex> lock(task_mtx);
     cond.wait(lock, [this] { return !tasks.empty() || is_shut_down; });
     if (is_shut_down) {

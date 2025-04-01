@@ -19,6 +19,7 @@ class WorkThreadExecutor {
   WorkThreadExecutor();
   virtual ~WorkThreadExecutor();
 
+  void init();
   void submit(std::function<void()> task);
   void shutdown();
 
@@ -30,6 +31,7 @@ class WorkThreadExecutor {
   std::queue<std::function<void()>> tasks;
   std::mutex task_mtx;
   std::condition_variable cond;
+  std::shared_ptr<bool> alive_flag;
 };
 
 }  // namespace base
