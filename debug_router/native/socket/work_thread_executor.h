@@ -19,6 +19,7 @@ class WorkThreadExecutor {
   WorkThreadExecutor();
   virtual ~WorkThreadExecutor();
 
+  void init();
   void submit(std::function<void()> task);
   void shutdown();
 
