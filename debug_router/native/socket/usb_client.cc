@@ -55,6 +55,8 @@ void UsbClient::SetConnectStatus(USBConnectStatus status) {
   });
 }
 
+void UsbClient::Init() { work_thread_.init(); }
+
 void UsbClient::StartUp(const std::shared_ptr<UsbClientListener> &listener) {
   LOGI("UsbClient: StartUp.");
   work_thread_.submit([client_ptr = shared_from_this(), listener]() {

@@ -44,9 +44,7 @@ WebSocketTask::WebSocketTask(
     const std::string &url)
     : transceiver_(transceiver),
       url_(url),
-      socket_guard_(std::make_unique<base::SocketGuard>(kInvalidSocket)) {
-  submit([this]() { start(); });
-}
+      socket_guard_(std::make_unique<base::SocketGuard>(kInvalidSocket)) {}
 
 WebSocketTask::~WebSocketTask() { shutdown(); }
 
@@ -98,7 +96,11 @@ void WebSocketTask::SendInternal(const std::string &data) {
   LOGI("send: prefix_len and buf success.");
 }
 
-void WebSocketTask::start() {
+void WebSocketTask::Start() {
+  submit([this]() { StartInternal(); });
+}
+
+void WebSocketTask::StartInternal() {
   if (!do_connect()) {
     onFailure();
     return;

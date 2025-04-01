@@ -19,10 +19,11 @@ class WebSocketTask : public base::WorkThreadExecutor {
   virtual ~WebSocketTask() override;
 
   void Stop();
+  void Start();
   void SendInternal(const std::string &data);
 
  private:
-  void start();
+  void StartInternal();
 
   bool do_connect();
 

@@ -10,7 +10,13 @@ namespace debugrouter {
 namespace base {
 
 WorkThreadExecutor::WorkThreadExecutor() : is_shut_down(false) {
-  worker = std::make_unique<std::thread>([this]() { run(); });
+}
+
+void WorkThreadExecutor::init() {
+    std::lock_guard<std::mutex> lock(task_mtx);
+    if (!worker) {
+        worker = std::make_unique<std::thread>([this]() { run(); });
+    }
 }
 
 WorkThreadExecutor::~WorkThreadExecutor() { shutdown(); }

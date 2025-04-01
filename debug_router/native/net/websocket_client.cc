@@ -36,7 +36,7 @@ WebSocketClient::WebSocketClient() {}
 
 WebSocketClient::~WebSocketClient() { DisconnectInternal(); }
 
-void WebSocketClient::Init() {}
+void WebSocketClient::Init() { work_thread_.init(); }
 
 bool WebSocketClient::Connect(const std::string &url) {
   LOGI("WebSocketClient::Connect");
@@ -51,6 +51,8 @@ bool WebSocketClient::Connect(const std::string &url) {
 void WebSocketClient::ConnectInternal(const std::string &url) {
   LOGI("WebSocketClient::ConnectInternal: use " << url << " to connect.");
   current_task_ = std::make_unique<WebSocketTask>(shared_from_this(), url);
+  current_task_->init();
+  current_task_->Start();
 }
 
 void WebSocketClient::Disconnect() {
