@@ -86,7 +86,7 @@ void SocketServerPosix::Start() {
   LOGI("server socket:" << socket_fd_);
   struct sockaddr_in addr;
   socklen_t addrLen = sizeof(addr);
-  int accept_socket_fd =
+  SocketType accept_socket_fd =
       accept(socket_fd_, (struct sockaddr *)(&addr), &addrLen);
   if (accept_socket_fd == kInvalidSocket) {
     Close();

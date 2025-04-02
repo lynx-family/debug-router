@@ -63,7 +63,7 @@ int32_t SocketServerWin::InitSocket() {
     }
     port = port + 1;
   } while ((port < kStartPort + kTryPortCount) && bind_result == SOCKET_ERROR &&
-           -GetErrorMessage() == WSAEADDRINUSE);
+           GetErrorMessage() == WSAEADDRINUSE);
 
   if (!flag) {
     Close();
@@ -100,11 +100,11 @@ void SocketServerWin::Start() {
     NotifyInit(GetErrorMessage(), "accept socket error");
     return;
   }
-
-  usb_client_ = std::make_shared<UsbClient>(accept_socket_fd);
+  auto temp_usb_client = std::make_shared<UsbClient>(accept_socket_fd);
   std::shared_ptr<ClientListener> listener =
       std::make_shared<ClientListener>(shared_from_this());
-  usb_client_->StartUp(listener);
+  temp_usb_client->Init();
+  temp_usb_client->StartUp(listener);
 }
 
 void SocketServerWin::CloseSocket(int socket_fd) {
