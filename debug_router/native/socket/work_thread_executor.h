@@ -31,6 +31,13 @@ class WorkThreadExecutor {
   std::queue<std::function<void()>> tasks;
   std::mutex task_mtx;
   std::condition_variable cond;
+  // If WorkThreadExecutor automatically destroys itself after reaching
+  // detach(), the run function in the thread will crash because it tries to
+  // lock the variable that has been destroyed.
+  //
+  // Therefore, this std::shared_ptr<bool> alive_flag can be used to show
+  // whether the object has been destroyed. If it has been destroyed, exit early
+  // to avoid crash.
   std::shared_ptr<bool> alive_flag;
 };
 
