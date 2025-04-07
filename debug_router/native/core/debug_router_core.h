@@ -115,6 +115,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
 
  protected:
   std::recursive_mutex slots_mutex_;
+  std::recursive_mutex state_listeners_mutex_;
   friend class MessageHandlerCore;
   std::unordered_map<int32_t, std::shared_ptr<core::NativeSlot> > slots_;
   std::string room_id_;
