@@ -310,9 +310,13 @@ void DebugRouterCore::OnOpen(
     room_id_ = "";
   }
 
-  for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
+  for (const auto &listener : state_listeners_) {
+    if (!listener) {
+      LOGE("Null pointer found in state_listeners_.");
+      continue;
+    }
     LOGI("do state_listeners_ onopen.");
-    (*it)->OnOpen(connect_type);
+    listener->OnOpen(connect_type);
   }
 }
 
@@ -327,10 +331,9 @@ void DebugRouterCore::OnClosed(
   current_transceiver_ = nullptr;
   NotifyConnectStateByMessage(DISCONNECTED);
   if (retry_times_.load(std::memory_order_relaxed) >= 3) {
-    for (auto it = state_listeners_.begin(); it != state_listeners_.end();
-         it++) {
+    for (const auto &listener : state_listeners_) {
       LOGI("do state_listeners_ onclose.");
-      (*it)->OnClose(-1, "unknown reason");
+      listener->OnClose(-1, "unknown reason");
     }
   }
 
@@ -361,11 +364,10 @@ void DebugRouterCore::OnFailure(
   current_transceiver_ = nullptr;
   NotifyConnectStateByMessage(DISCONNECTED);
   if (retry_times_.load(std::memory_order_relaxed) >= 3) {
-    for (auto it = state_listeners_.begin(); it != state_listeners_.end();
-         it++) {
+    for (const auto &listener : state_listeners_) {
       // TODO(zhoumingsong.smile): add more details
       LOGI("do state_listeners_ onfailure.");
-      (*it)->OnError("unknown error");
+      listener->OnError("unknown error");
     }
   }
 
@@ -386,9 +388,10 @@ void DebugRouterCore::OnMessage(
   }
   LOGI("DebugRouter OnMessage.");
   processor_->Process(message);
-  for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
+
+  for (const auto &listener : state_listeners_) {
     LOGI("do state_listeners_ onmessage.");
-    (*it)->OnMessage(message);
+    listener->OnMessage(message);
   }
 }
 
