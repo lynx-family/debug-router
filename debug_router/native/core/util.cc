@@ -56,11 +56,11 @@ bool CheckHeaderFourthByte(const char *header, uint32_t payload_size_int) {
   return true;
 }
 
-std::string decodeURIComponent(std::string url) {
+std::string decodeURIComponent(const std::string &url) {
   int flag = 0;
   int code = 0;
   std::stringstream result_url_;
-  for (char c : url) {
+  for (const char &c : url) {
     if ((flag == 0) && (c == '%')) {
       flag = 1;
       continue;

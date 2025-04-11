@@ -32,7 +32,7 @@ bool CheckHeaderFourthByte(const char *header, uint32_t payload_size_int);
 bool CheckHeaderThreeBytes(const char *header);
 
 // decode url
-std::string decodeURIComponent(std::string url);
+std::string decodeURIComponent(const std::string &url);
 
 }  // namespace util
 }  // namespace debugrouter
