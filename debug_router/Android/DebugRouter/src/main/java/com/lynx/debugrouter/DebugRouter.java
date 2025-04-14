@@ -39,11 +39,11 @@ public class DebugRouter {
   private DebugRouter() {
     loadNativeLibrary();
     LLog.addDebugLoggingDelegate();
-    nativeCreateDebugRouter();
-    initAppInfo();
     DebugRouterReportServiceUtil.init(
         new DebugRouterMetaInfo(getVersion(), getCurrentProcessName()));
     DebugRouterReportServiceUtil.report("DebugRouterInit", null, null, null);
+    nativeCreateDebugRouter();
+    initAppInfo();
     addMessageHandler(new CallStaticVoidMethodHandler());
     addMessageHandler(new OpenUsbTransTemplateSwitchHandler());
     addMessageHandler(new ReceiveTemplateByUsbHandler());
