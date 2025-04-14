@@ -44,6 +44,7 @@ file(GLOB DEBUGROUTER_SRC_LIST
 
         ${CMAKE_SOURCE_DIR}/../../native/processor/*.*
         ${CMAKE_SOURCE_DIR}/../../native/protocol/*.*
+        ${CMAKE_SOURCE_DIR}/../../native/report/*.*
         ${CMAKE_SOURCE_DIR}/../../native/log/*.*
         ${CMAKE_SOURCE_DIR}/../../../third_party/jsoncpp/src/lib_json/*.*
         ${CMAKE_SOURCE_DIR}/../../../third_party/jsoncpp/include/json/*.*
