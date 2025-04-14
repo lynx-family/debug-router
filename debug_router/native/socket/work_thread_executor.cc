@@ -34,6 +34,7 @@ void WorkThreadExecutor::submit(std::function<void()> task) {
 }
 
 void WorkThreadExecutor::shutdown() {
+  std::shared_ptr<std::thread> worker_ptr;
   {
     std::lock_guard<std::mutex> lock(task_mtx);
     if (is_shut_down) {
@@ -42,28 +43,27 @@ void WorkThreadExecutor::shutdown() {
     is_shut_down = true;
     std::queue<std::function<void()>> empty;
     tasks.swap(empty);
+    worker_ptr = std::move(worker);  // 移动 worker 的所有权
   }
   cond.notify_all();
 
-  if (worker && worker->joinable()) {
+  if (worker_ptr && worker_ptr->joinable()) {
 #if __cpp_exceptions >= 199711L
     try {
 #endif
-      if (worker->get_id() != std::this_thread::get_id()) {
-        worker->join();
+      if (worker_ptr->get_id() != std::this_thread::get_id()) {
+        worker_ptr->join();
         LOGI("WorkThreadExecutor::shutdown worker->join() success.");
       } else {
-        worker->detach();
+        worker_ptr->detach();
         LOGI("WorkThreadExecutor::shutdown worker->detach() success.");
       }
 #if __cpp_exceptions >= 199711L
     } catch (const std::exception& e) {
-      LOGE("WorkThreadExecutor::shutdown worker->detach() failed, "
-           << e.what());
+      LOGE("WorkThreadExecutor::shutdown worker->detach() failed, " << e.what());
     }
 #endif
   }
-  worker.reset();
   LOGI("WorkThreadExecutor::shutdown success.");
 }
 
