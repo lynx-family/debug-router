@@ -3,7 +3,6 @@ platform :ios, '9.0'
 
 target 'DebugRouter_Example' do
   pod 'DebugRouter', :path => '../../../'
-  pod 'SocketRocket', :git => 'https://github.com/facebookincubator/SocketRocket.git', :tag => '0.6.0'
 end
 
 target 'DebugRouter_Tests' do

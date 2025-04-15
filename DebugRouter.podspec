@@ -21,7 +21,6 @@ Pod::Spec.new do |s|
   s.subspec 'Framework' do |ss|
     ss.source_files = 'debug_router/iOS/public/*.{h,m,mm}', 'debug_router/iOS/public/base/*.{h,m,mm}', 'debug_router/iOS/*.{h,m,mm}', 'debug_router/iOS/net/*.{h,m,mm}', 'debug_router/iOS/report/*.{h,m,mm}', 'debug_router/iOS/base/*.{h,m,mm}', 'debug_router/iOS/base/report/*.{h,m,mm}', 'debug_router/iOS/base/service/*.{h,m,mm}'
     ss.pod_target_xcconfig  = { "HEADER_SEARCH_PATHS" => "\"${PODS_TARGET_SRCROOT}/debug_router/iOS/\"" }
-    ss.dependency 'SocketRocket','0.6.0'
     ss.dependency 'DebugRouter/Native'
     ss.public_header_files = 'debug_router/iOS/public/DebugRouter.h', 'debug_router/iOS/public/DebugRouterMessageHandler.h', 'debug_router/iOS/public/DebugRouterCommon.h', 'debug_router/iOS/public/DebugRouterMessageHandleResult.h', "debug_router/iOS/public/DebugRouterEventSender.h", "debug_router/iOS/public/DebugRouterGlobalHandler.h", "debug_router/iOS/public/DebugRouterSlot.h", "debug_router/iOS/public/base/DebugRouterReportServiceUtil.h", "debug_router/iOS/public/base/DebugRouterToast.h", "debug_router/iOS/public/DebugRouterSessionHandler.h", "debug_router/iOS/public/base/DebugRouterDefines.h", "debug_router/iOS/public/base/DebugRouterReportServiceProtocol.h", "debug_router/iOS/public/base/DebugRouterService.h", "debug_router/iOS/public/base/DebugRouterServiceProtocol.h"
   end

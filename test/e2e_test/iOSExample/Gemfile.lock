@@ -60,6 +60,7 @@ GEM
     escape (0.0.4)
     ethon (0.16.0)
       ffi (>= 1.15.0)
+    ffi (1.16.3)
     ffi (1.16.3-x86_64-darwin)
     fourflusher (2.3.1)
     fuzzy_match (2.0.4)
@@ -91,6 +92,7 @@ GEM
       rexml (>= 3.3.6, < 4.0)
 
 PLATFORMS
+  arm64-darwin-22
   x86_64-darwin-17
 
 DEPENDENCIES
@@ -98,4 +100,4 @@ DEPENDENCIES
   public_suffix (= 5.0.4)
 
 BUNDLED WITH
-   2.4.20
+   2.4.22
