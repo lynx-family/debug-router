@@ -2,9 +2,8 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router_core.h"
+#include "debug_router/native/core/debug_router_core.h"
 
-#include <atomic>
 #include <mutex>
 
 #include "debug_router/native/base/no_destructor.h"
@@ -310,9 +309,15 @@ void DebugRouterCore::OnOpen(
     room_id_ = "";
   }
 
-  for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
+  std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
+  {
+    std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
+    listeners = state_listeners_;
+  }
+
+  for (const auto &listener : listeners) {
     LOGI("do state_listeners_ onopen.");
-    (*it)->OnOpen(connect_type);
+    listener->OnOpen(connect_type);
   }
 }
 
@@ -327,10 +332,15 @@ void DebugRouterCore::OnClosed(
   current_transceiver_ = nullptr;
   NotifyConnectStateByMessage(DISCONNECTED);
   if (retry_times_.load(std::memory_order_relaxed) >= 3) {
-    for (auto it = state_listeners_.begin(); it != state_listeners_.end();
-         it++) {
+    std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
+    {
+      std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
+      listeners = state_listeners_;
+    }
+
+    for (const auto &listener : listeners) {
       LOGI("do state_listeners_ onclose.");
-      (*it)->OnClose(-1, "unknown reason");
+      listener->OnClose(-1, "unknown reason");
     }
   }
 
@@ -361,11 +371,16 @@ void DebugRouterCore::OnFailure(
   current_transceiver_ = nullptr;
   NotifyConnectStateByMessage(DISCONNECTED);
   if (retry_times_.load(std::memory_order_relaxed) >= 3) {
-    for (auto it = state_listeners_.begin(); it != state_listeners_.end();
-         it++) {
+    std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
+    {
+      std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
+      listeners = state_listeners_;
+    }
+
+    for (const auto &listener : listeners) {
       // TODO(zhoumingsong.smile): add more details
       LOGI("do state_listeners_ onfailure.");
-      (*it)->OnError("unknown error");
+      listener->OnError("unknown error");
     }
   }
 
@@ -386,9 +401,16 @@ void DebugRouterCore::OnMessage(
   }
   LOGI("DebugRouter OnMessage.");
   processor_->Process(message);
-  for (auto it = state_listeners_.begin(); it != state_listeners_.end(); it++) {
+
+  std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
+  {
+    std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
+    listeners = state_listeners_;
+  }
+
+  for (const auto &listener : listeners) {
     LOGI("do state_listeners_ onmessage.");
-    (*it)->OnMessage(message);
+    listener->OnMessage(message);
   }
 }
 
@@ -529,6 +551,11 @@ bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
 
 void DebugRouterCore::AddStateListener(
     const std::shared_ptr<DebugRouterStateListener> &listener) {
+  LOGI("DebugRouterCore: add a state listener.");
+  if (listener == nullptr) {
+    return;
+  }
+  std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
   state_listeners_.push_back(listener);
 }
 
