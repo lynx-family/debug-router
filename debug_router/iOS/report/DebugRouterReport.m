@@ -190,9 +190,9 @@
 }
 
 + (NSString *)getTransceiverType:(MessageTransceiver *)transceiver {
-  if ([transceiver isKindOfClass:[WebSocketClient class]]) {
-    return @"SRWebSocket";
-  }
+  // if ([transceiver isKindOfClass:[WebSocketClient class]]) {
+  //   return @"SRWebSocket";
+  // }
   return @"null";
 }
 

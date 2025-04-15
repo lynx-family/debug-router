@@ -41,7 +41,6 @@
 		2033F20FBD8AFE7D8271E46F /* DebugRouter.podspec */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = DebugRouter.podspec; path = ../DebugRouter.podspec; sourceTree = "<group>"; };
 		2B0529182A9D93C900F5FB18 /* libDebugRouter.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; path = libDebugRouter.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		2B05291E2A9D93C900F5FB18 /* libPods-DebugRouter_Tests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; path = "libPods-DebugRouter_Tests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		2B0529202A9D93C900F5FB18 /* libSocketRocket.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; path = libSocketRocket.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		2B6EEC6A2A9DF1E100F1E004 /* libPods-DebugRouter_Tests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; path = "libPods-DebugRouter_Tests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3965160A962805297A5F058F /* Pods-DebugRouter_Example.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-DebugRouter_Example.release.xcconfig"; path = "Target Support Files/Pods-DebugRouter_Example/Pods-DebugRouter_Example.release.xcconfig"; sourceTree = "<group>"; };
 		6003F58A195388D20070C39A /* DebugRouter_Example.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DebugRouter_Example.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -139,7 +138,6 @@
 				2B6EEC6A2A9DF1E100F1E004 /* libPods-DebugRouter_Tests.a */,
 				2B0529182A9D93C900F5FB18 /* libDebugRouter.a */,
 				2B05291E2A9D93C900F5FB18 /* libPods-DebugRouter_Tests.a */,
-				2B0529202A9D93C900F5FB18 /* libSocketRocket.a */,
 				6003F58D195388D20070C39A /* Foundation.framework */,
 				6003F58F195388D20070C39A /* CoreGraphics.framework */,
 				6003F591195388D20070C39A /* UIKit.framework */,
