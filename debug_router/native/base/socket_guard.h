@@ -26,9 +26,13 @@ namespace base {
 
 class SocketGuard {
  public:
-  SocketType Get() const { return sock_; }
+  SocketType Get() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return sock_;
+  }
 
   void Reset() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (sock_ != kInvalidSocket) {
       CLOSESOCKET(sock_);
     }
@@ -37,16 +41,14 @@ class SocketGuard {
 
   explicit SocketGuard(SocketType sock) : sock_(sock) {}
 
-  ~SocketGuard() {
-    if (sock_ != kInvalidSocket) {
-      CLOSESOCKET(sock_);
-    }
-  }
+  ~SocketGuard() { Reset(); }
+
   SocketGuard(const SocketGuard&) = delete;
   SocketGuard& operator=(const SocketGuard&) = delete;
 
  private:
   SocketType sock_;
+  std::mutex mutex_;
 };
 
 }  // namespace base
