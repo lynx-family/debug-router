@@ -5,6 +5,7 @@
 #ifndef DEBUGROUTER_NATIVE_SOCKET_USB_CLIENT_H_
 #define DEBUGROUTER_NATIVE_SOCKET_USB_CLIENT_H_
 
+#include "debug_router/native/base/socket_guard.h"
 #include "debug_router/native/socket/blocking_queue.h"
 #include "debug_router/native/socket/count_down_latch.h"
 #include "debug_router/native/socket/socket_server_type.h"
@@ -41,13 +42,12 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   void DisconnectInternal();
   void SendInternal(const std::string &message);
 
-  void StartReader(SocketType socket_fd_);
-  void StartWriter(SocketType socket_fd_);
-  void StartMessageDispatcher(SocketType socket_fd_);
-  void ReadMessage(SocketType socket_fd_);
+  void StartReader();
+  void StartWriter();
+  void StartMessageDispatcher();
+  void ReadMessage();
   void MessageDispatcher();
-  void WriteMessage(SocketType socket_fd_);
-  void HandleFirstFrame(SocketType socket_fd);
+  void WriteMessage();
 
   bool Read(SocketType socket_fd_, char *buffer, uint32_t read_size);
   bool ReadAndCheckMessageHeader(char *header, SocketType socket_fd_);
@@ -82,24 +82,19 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
    */
   static void WrapHeader(const std::string &message, std::string &result);
 
-  // work threads
-  static void MessageDispatcherFunc(std::shared_ptr<UsbClient> client);
-  static void ReadThreadFunc(std::shared_ptr<UsbClient> client,
-                             SocketType socket_fd_);
-  static void WriteThreadFunc(std::shared_ptr<UsbClient> client,
-                              SocketType socket_fd_);
-
  private:
   BlockingQueue<std::string> incoming_message_queue_;
   BlockingQueue<std::string> outgoing_message_queue_;
 
   base::WorkThreadExecutor work_thread_;
+  base::WorkThreadExecutor read_thread_;
+  base::WorkThreadExecutor write_thread_;
+  base::WorkThreadExecutor dispatch_thread_;
   std::shared_ptr<UsbClientListener> listener_;
   USBConnectStatus connect_status_ = USBConnectStatus::DISCONNECTED;
   std::unique_ptr<CountDownLatch> latch_;
 
-  // TODO(popoaichuiniu) use unique_fd to manage socket
-  volatile SocketType socket_fd_ = kInvalidSocket;
+  base::SocketGuard socket_guard_;
   // mutex for close socket_fd_
   std::mutex mutex_;
 };

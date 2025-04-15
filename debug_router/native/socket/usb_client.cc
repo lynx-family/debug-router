@@ -45,7 +45,7 @@ void UsbClient::CloseClientSocket(SocketType socket_fd_) {
   socket_fd_ = kInvalidSocket;
 }
 
-UsbClient::UsbClient(SocketType socket_fd) : socket_fd_(socket_fd) {
+UsbClient::UsbClient(SocketType socket_fd) : socket_guard_(socket_fd) {
   LOGI("UsbClient: Constructor.");
 }
 
@@ -55,7 +55,12 @@ void UsbClient::SetConnectStatus(USBConnectStatus status) {
   });
 }
 
-void UsbClient::Init() { work_thread_.init(); }
+void UsbClient::Init() {
+  work_thread_.init();
+  read_thread_.init();
+  write_thread_.init();
+  dispatch_thread_.init();
+}
 
 void UsbClient::StartUp(const std::shared_ptr<UsbClientListener> &listener) {
   LOGI("UsbClient: StartUp.");
@@ -69,9 +74,8 @@ void UsbClient::StartInternal(
   LOGI("UsbClient: StartInternal.");
   connect_status_ = USBConnectStatus::CONNECTING;
   listener_ = listener;
-  latch_ = std::make_unique<CountDownLatch>(kThreadCount);
-  StartReader(socket_fd_);
-  StartWriter(socket_fd_);
+  StartReader();
+  StartWriter();
 }
 
 bool UsbClient::ReadAndCheckMessageHeader(char *header, SocketType socket_fd_) {
@@ -132,14 +136,14 @@ bool UsbClient::Read(SocketType socket_fd_, char *buffer, uint32_t read_size) {
   return true;
 }
 
-void UsbClient::ReadMessage(SocketType socket_fd_) {
-  LOGI("UsbClient: ReadMessage:" << socket_fd_);
+void UsbClient::ReadMessage() {
+  LOGI("UsbClient: ReadMessage:" << socket_guard_.Get());
   bool isFirst = true;
   while (true) {
     char header[kFrameHeaderLen];
     memset(header, 0, kFrameHeaderLen);
     LOGI("UsbClient: start check message header.");
-    if (!ReadAndCheckMessageHeader(header, socket_fd_)) {
+    if (!ReadAndCheckMessageHeader(header, socket_guard_.Get())) {
       LOGW("UsbClient: don't match DebugRouter protocol:");
       // need DebugRouterReport to report invailed client.
       for (int i = 0; i < kFrameHeaderLen; i++) {
@@ -160,7 +164,7 @@ void UsbClient::ReadMessage(SocketType socket_fd_) {
       isFirst = false;
     }
     char payload_size[kPayloadSizeLen];
-    if (!Read(socket_fd_, payload_size, kPayloadSizeLen)) {
+    if (!Read(socket_guard_.Get(), payload_size, kPayloadSizeLen)) {
       LOGE("read payload data error: " << GetErrorMessage());
       if (listener_) {
         listener_->OnError(shared_from_this(), GetErrorMessage(),
@@ -181,7 +185,7 @@ void UsbClient::ReadMessage(SocketType socket_fd_) {
       continue;
     }
     char payload[payload_size_int];
-    if (!Read(socket_fd_, payload, payload_size_int)) {
+    if (!Read(socket_guard_.Get(), payload, payload_size_int)) {
       LOGE("read payload data error: " << GetErrorMessage());
       if (listener_) {
         listener_->OnError(shared_from_this(), GetErrorMessage(),
@@ -204,21 +208,13 @@ void UsbClient::ReadMessage(SocketType socket_fd_) {
   LOGI("UsbClient: ReadMessage thread exit.");
   incoming_message_queue_.put(std::move(kMessageQuit));
   outgoing_message_queue_.put(std::move(kMessageQuit));
-  if (latch_) {
-    latch_->CountDown();
-  }
 }
 
-void UsbClient::ReadThreadFunc(std::shared_ptr<UsbClient> client,
-                               SocketType socket_fd_) {
-  client->ReadMessage(socket_fd_);
-}
-
-void UsbClient::StartReader(SocketType socket_fd_) {
+void UsbClient::StartReader() {
   LOGI("UsbClient: start reader thread.");
-  StartMessageDispatcher(socket_fd_);
-  std::thread read_thread(ReadThreadFunc, shared_from_this(), socket_fd_);
-  read_thread.detach();
+  StartMessageDispatcher();
+  read_thread_.submit(
+      [client_ptr = shared_from_this()]() { client_ptr->ReadMessage(); });
 }
 
 void UsbClient::MessageDispatcher() {
@@ -240,20 +236,13 @@ void UsbClient::MessageDispatcher() {
     }
   }
   LOGI("UsbClient: message dispatcher finished.");
-  if (latch_) {
-    latch_->CountDown();
-  }
 }
 
-void UsbClient::MessageDispatcherFunc(std::shared_ptr<UsbClient> client) {
-  client->MessageDispatcher();
-}
-
-void UsbClient::StartMessageDispatcher(SocketType socket_fd_) {
+void UsbClient::StartMessageDispatcher() {
   LOGI("UsbClient: startMessageDispatcher.");
-  std::thread dispatch_message_thread(MessageDispatcherFunc,
-                                      shared_from_this());
-  dispatch_message_thread.detach();
+
+  dispatch_thread_.submit(
+      [client_ptr = shared_from_this()]() { client_ptr->MessageDispatcher(); });
 }
 
 void UsbClient::WrapHeader(const std::string &message, std::string &result) {
@@ -288,8 +277,8 @@ void UsbClient::WrapHeader(const std::string &message, std::string &result) {
   memcpy(buffer + 20, message.c_str(), message.size());
 }
 
-void UsbClient::WriteMessage(SocketType socket_fd_) {
-  LOGI("UsbClient: WriteMessage:" << socket_fd_);
+void UsbClient::WriteMessage() {
+  LOGI("UsbClient: WriteMessage:" << socket_guard_.Get());
   while (true) {
     std::string message;
     message = outgoing_message_queue_.take();
@@ -303,8 +292,8 @@ void UsbClient::WriteMessage(SocketType socket_fd_) {
       LOGI(message);
       std::string result_message;
       WrapHeader(message, result_message);
-      if (send(socket_fd_, result_message.c_str(), result_message.size(), 0) ==
-          -1) {
+      if (send(socket_guard_.Get(), result_message.c_str(),
+               result_message.size(), 0) == -1) {
         LOGE("send error: " << GetErrorMessage() << " message:" << message);
         if (listener_) {
           listener_->OnError(shared_from_this(), GetErrorMessage(),
@@ -322,38 +311,19 @@ void UsbClient::WriteMessage(SocketType socket_fd_) {
                        "writer thread finished");
   }
   LOGI("UsbClient: WriteMessage thread exit.");
-  if (latch_) {
-    latch_->CountDown();
-  }
 }
 
-void UsbClient::WriteThreadFunc(std::shared_ptr<UsbClient> client,
-                                SocketType socket_fd_) {
-  client->WriteMessage(socket_fd_);
-}
-
-void UsbClient::StartWriter(SocketType socket_fd_) {
+void UsbClient::StartWriter() {
   LOGI("UsbClient: start writer thread.");
-  std::thread write_thread(WriteThreadFunc, shared_from_this(), socket_fd_);
-  write_thread.detach();
+  write_thread_.submit(
+      [client_ptr = shared_from_this()]() { client_ptr->WriteMessage(); });
 }
 
 void UsbClient::DisconnectInternal() {
   LOGI("UsbClient: DisconnectInternal.");
-  if (latch_) {
-    incoming_message_queue_.put(std::move(kMessageQuit));
-    outgoing_message_queue_.put(std::move(kMessageQuit));
-
-    LOGI("UsbClient: DisconnectInternal waiting for threads exit.");
-    latch_->Await();
-    connect_status_ = USBConnectStatus::DISCONNECTED;
-
-    incoming_message_queue_.clear();
-    outgoing_message_queue_.clear();
-    latch_ = nullptr;
-    LOGI("UsbClient: DisconnectInternal successfully.");
-  }
-  CloseClientSocket(socket_fd_);
+  incoming_message_queue_.put(std::move(kMessageQuit));
+  outgoing_message_queue_.put(std::move(kMessageQuit));
+  socket_guard_.Reset();
 }
 
 bool UsbClient::Send(const std::string &message) {
@@ -369,7 +339,16 @@ bool UsbClient::Send(const std::string &message) {
   return true;
 }
 
-void UsbClient::Stop() { work_thread_.shutdown(); }
+void UsbClient::Stop() {
+  DisconnectInternal();
+  dispatch_thread_.shutdown();
+  write_thread_.shutdown();
+  read_thread_.shutdown();
+  work_thread_.shutdown();
+  incoming_message_queue_.clear();
+  outgoing_message_queue_.clear();
+  connect_status_ = USBConnectStatus::DISCONNECTED;
+}
 
 void UsbClient::SendInternal(const std::string &message) {
   LOGI("UsbClient: SendInternal.");
@@ -383,8 +362,7 @@ void UsbClient::SendInternal(const std::string &message) {
 
 UsbClient::~UsbClient() {
   LOGI("UsbClient: ~UsbClient.");
-  // TODO(popoaichuiniu) optimize thread policy of UsbClient's fields
-  DisconnectInternal();
+  Stop();
 }
 
 }  // namespace socket_server
