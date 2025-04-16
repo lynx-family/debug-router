@@ -40,7 +40,6 @@ class MessageTransceiver
   virtual void Disconnect() = 0;
   virtual void Send(const std::string &data) = 0;
   virtual ConnectionType GetType() = 0;
-  virtual void HandleReceivedMessage(const std::string &message);
   virtual void SetDelegate(MessageTransceiverDelegate *delegate);
   virtual MessageTransceiverDelegate *delegate();
 

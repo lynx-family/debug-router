@@ -85,9 +85,5 @@ void SocketServerClient::Send(const std::string &data) {
   socket_server_->Send(data);
 }
 
-void SocketServerClient::HandleReceivedMessage(const std::string &message) {
-  // empty
-}
-
 }  // namespace net
 }  // namespace debugrouter
