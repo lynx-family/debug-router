@@ -94,11 +94,14 @@ void SocketServerPosix::Start() {
     NotifyInit(GetErrorMessage(), "accept socket error");
     return;
   }
-  auto temp_usb_client = std::make_shared<UsbClient>(accept_socket_fd);
+  if (temp_usb_client_) {
+    temp_usb_client_->Stop();
+  }
+  temp_usb_client_ = std::make_shared<UsbClient>(accept_socket_fd);
   std::shared_ptr<ClientListener> listener =
       std::make_shared<ClientListener>(shared_from_this());
-  temp_usb_client->Init();
-  temp_usb_client->StartUp(listener);
+  temp_usb_client_->Init();
+  temp_usb_client_->StartUp(listener);
 }
 
 void SocketServerPosix::CloseSocket(int socket_fd) {

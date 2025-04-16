@@ -65,6 +65,7 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   std::unique_ptr<CountDownLatch> latch_;
   std::mutex queue_lock_;
   std::shared_ptr<UsbClient> usb_client_;
+  std::shared_ptr<UsbClient> temp_usb_client_;
 
   volatile SocketType socket_fd_ = kInvalidSocket;
 };

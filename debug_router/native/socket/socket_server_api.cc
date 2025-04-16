@@ -69,6 +69,7 @@ void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
     if (!usb_client_ || usb_client_ != client) {
       LOGI("SocketServerApi OnMessage: client is null or not match.");
+      client->Stop();
       return;
     }
     usb_client_->Stop();
@@ -85,6 +86,7 @@ void SocketServer::HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
     if (!usb_client_ || usb_client_ != client) {
       LOGI("SocketServerApi OnMessage: client is null or not match.");
+      client->Stop();
       return;
     }
     usb_client_->Stop();
@@ -127,6 +129,7 @@ void SocketServer::Close() {
 void SocketServer::Disconnect() {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
     if (!usb_client_) {
+      usb_client_->Stop();
       usb_client_ = nullptr;
     }
   });
@@ -135,6 +138,9 @@ void SocketServer::Disconnect() {
 SocketServer::~SocketServer() {
   if (!usb_client_) {
     usb_client_->Stop();
+  }
+  if (!temp_usb_client_) {
+    temp_usb_client_->Stop();
   }
   Close();
 }
