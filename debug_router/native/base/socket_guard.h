@@ -22,6 +22,8 @@ constexpr SocketType kInvalidSocket = -1;
 #endif
 #include <mutex>
 
+#include "debug_router/native/log/logging.h"
+
 namespace debugrouter {
 namespace base {
 
@@ -42,7 +44,10 @@ class SocketGuard {
 
   explicit SocketGuard(SocketType sock) : sock_(sock) {}
 
-  ~SocketGuard() { Reset(); }
+  ~SocketGuard() {
+    LOGI("SocketGuard destruct.");
+    Reset();
+  }
 
   SocketGuard(const SocketGuard&) = delete;
   SocketGuard& operator=(const SocketGuard&) = delete;

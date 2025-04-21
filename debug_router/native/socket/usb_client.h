@@ -49,8 +49,8 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   void MessageDispatcher();
   void WriteMessage();
 
-  bool Read(SocketType socket_fd_, char *buffer, uint32_t read_size);
-  bool ReadAndCheckMessageHeader(char *header, SocketType socket_fd_);
+  bool Read(char *buffer, uint32_t read_size);
+  bool ReadAndCheckMessageHeader(char *header);
 
   void CloseClientSocket(SocketType socket_fd_);
   /**

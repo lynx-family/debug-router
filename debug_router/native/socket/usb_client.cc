@@ -27,24 +27,6 @@ int GetErrorMessage() {
 #endif
 }
 
-void UsbClient::CloseClientSocket(SocketType socket_fd_) {
-  LOGI("CloseClientSocket" << socket_fd_);
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (socket_fd_ == kInvalidSocket) {
-    return;
-  }
-#ifdef _WIN32
-  if (closesocket(socket_fd_) != 0) {
-    LOGE("close socket error:" << GetErrorMessage());
-  }
-#else
-  if (close(socket_fd_) != 0) {
-    LOGE("close socket error:" << GetErrorMessage());
-  }
-#endif
-  socket_fd_ = kInvalidSocket;
-}
-
 UsbClient::UsbClient(SocketType socket_fd) : socket_guard_(socket_fd) {
   LOGI("UsbClient: Constructor.");
 }
@@ -78,8 +60,8 @@ void UsbClient::StartInternal(
   StartWriter();
 }
 
-bool UsbClient::ReadAndCheckMessageHeader(char *header, SocketType socket_fd_) {
-  if (!Read(socket_fd_, header, kFrameHeaderLen)) {
+bool UsbClient::ReadAndCheckMessageHeader(char *header) {
+  if (!Read(header, kFrameHeaderLen)) {
     LOGE("read header data error.");
     return false;
   }
@@ -114,12 +96,12 @@ bool UsbClient::ReadAndCheckMessageHeader(char *header, SocketType socket_fd_) {
  *  checkMessageHeader will check header's value.
  */
 
-bool UsbClient::Read(SocketType socket_fd_, char *buffer, uint32_t read_size) {
+bool UsbClient::Read(char *buffer, uint32_t read_size) {
   LOGI("To Read:" << read_size);
   int64_t start = 0;
   while (start < read_size) {
     int64_t read_data_len =
-        recv(socket_fd_, buffer + start, read_size - start, 0);
+        recv(socket_guard_.Get(), buffer + start, read_size - start, 0);
     LOGI("read_data_len:" << read_data_len);
     if (read_data_len <= 0) {
       LOGE("Read: read_data_len <= 0 :"
@@ -143,7 +125,7 @@ void UsbClient::ReadMessage() {
     char header[kFrameHeaderLen];
     memset(header, 0, kFrameHeaderLen);
     LOGI("UsbClient: start check message header.");
-    if (!ReadAndCheckMessageHeader(header, socket_guard_.Get())) {
+    if (!ReadAndCheckMessageHeader(header)) {
       LOGW("UsbClient: don't match DebugRouter protocol:");
       // need DebugRouterReport to report invailed client.
       for (int i = 0; i < kFrameHeaderLen; i++) {
@@ -164,7 +146,7 @@ void UsbClient::ReadMessage() {
       isFirst = false;
     }
     char payload_size[kPayloadSizeLen];
-    if (!Read(socket_guard_.Get(), payload_size, kPayloadSizeLen)) {
+    if (!Read(payload_size, kPayloadSizeLen)) {
       LOGE("read payload data error: " << GetErrorMessage());
       if (listener_) {
         listener_->OnError(shared_from_this(), GetErrorMessage(),
@@ -184,9 +166,9 @@ void UsbClient::ReadMessage() {
       }
       continue;
     }
-    char payload[payload_size_int];
-    if (!Read(socket_guard_.Get(), payload, payload_size_int)) {
-      LOGE("read payload data error: " << GetErrorMessage());
+    std::unique_ptr<char[]> payload(new char[payload_size_int]);
+    if (!Read(payload.get(), payload_size_int)) {
+      LOGI("read payload data error: " << GetErrorMessage());
       if (listener_) {
         listener_->OnError(shared_from_this(), GetErrorMessage(),
                            "protocol error: PAYLOAD");
@@ -194,7 +176,7 @@ void UsbClient::ReadMessage() {
       break;
     }
 
-    std::string payload_str(payload, payload_size_int);
+    std::string payload_str(payload.get(), payload_size_int);
 
     LOGI("[RX]:" << payload_str);
     incoming_message_queue_.put(std::move(payload_str));
@@ -340,6 +322,7 @@ bool UsbClient::Send(const std::string &message) {
 }
 
 void UsbClient::Stop() {
+  LOGI("UsbClient: Stop.");
   DisconnectInternal();
   dispatch_thread_.shutdown();
   write_thread_.shutdown();
