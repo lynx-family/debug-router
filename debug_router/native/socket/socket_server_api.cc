@@ -41,6 +41,7 @@ void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
     std::shared_ptr<UsbClient> old_client_ = usb_client_;
     LOGI("SocketServerApi OnOpen: replace old client.");
     if (old_client_) {
+      LOGI("SocketServerApi HandleOnOpenStatus: stop old client.");
       old_client_->Stop();
     }
     usb_client_ = client;
@@ -68,10 +69,13 @@ void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
                                        const std::string &reason) {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
     if (!usb_client_ || usb_client_ != client) {
-      LOGI("SocketServerApi OnMessage: client is null or not match.");
+      LOGI(
+          "SocketServerApi OnClose: curr client is null or not match, stop "
+          "error client.");
       client->Stop();
       return;
     }
+    LOGI("SocketServerApi HandleOnCloseStatus: close curr client for OnClose.");
     usb_client_->Stop();
     usb_client_ = nullptr;
     if (auto listener = listener_.lock()) {
@@ -85,10 +89,13 @@ void SocketServer::HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
                                        const std::string &reason) {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
     if (!usb_client_ || usb_client_ != client) {
-      LOGI("SocketServerApi OnMessage: client is null or not match.");
+      LOGI(
+          "SocketServerApi OnError: client is null or not match, stop error "
+          "client.");
       client->Stop();
       return;
     }
+    LOGI("SocketServerApi HandleOnErrorStatus: close curr client for OnError.");
     usb_client_->Stop();
     usb_client_ = nullptr;
     if (auto listener = listener_.lock()) {
@@ -128,7 +135,8 @@ void SocketServer::Close() {
 
 void SocketServer::Disconnect() {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
-    if (!usb_client_) {
+    if (usb_client_) {
+      LOGI("SocketServerApi Disconnect: stop curr client.");
       usb_client_->Stop();
       usb_client_ = nullptr;
     }
@@ -136,6 +144,7 @@ void SocketServer::Disconnect() {
 }
 
 SocketServer::~SocketServer() {
+  LOGI("SocketServer::~SocketServer");
   if (!usb_client_) {
     usb_client_->Stop();
   }
