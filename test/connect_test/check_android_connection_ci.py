@@ -77,12 +77,12 @@ def TestAndroidCon(args):
   command_run = ""
   print('cur_work_dir:' + os.getcwd())
   if (args.conection_type == "websocket"):
-    print('start: websocket')
+    print('start: websocket common test.')
     command_run = "../../../buildtools/node/bin/npm install && ../../../buildtools/node/bin/node websocket.js"
   else:
     if(args.conection_type == "usb"):
-      print('start: usb')
-      command_run = "../../../buildtools/node/bin/npm install && ../../../buildtools/node/bin/node usb.js"
+      print('start: usb common test and large message test.')
+      command_run = "../../../buildtools/node/bin/npm install && ../../../buildtools/node/bin/node usb.js && ../../../buildtools/node/bin/node large_message_test.js"
   CheckExecute(command_run)
 
 def CheckBuildDebugRouterTestApk(args):
