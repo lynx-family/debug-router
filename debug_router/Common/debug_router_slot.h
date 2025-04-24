@@ -44,6 +44,7 @@ class DebugRouterSlot : public std::enable_shared_from_this<DebugRouterSlot> {
 
   void SetDelegate(const std::shared_ptr<DebugRouterSlotDelegate> &delegate);
   const std::string &GetType();
+  void SetType(const std::string &type);
 
  private:
   bool plugged_;

@@ -87,6 +87,8 @@ void DebugRouterSlot::SetDelegate(
   delegate_ = delegate;
 }
 
+void DebugRouterSlot::SetType(const std::string &type) { type_ = type; }
+
 const std::string &DebugRouterSlot::GetType() { return type_; }
 
 }  // namespace common
