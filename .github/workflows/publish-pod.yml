@@ -3,15 +3,18 @@ name: Publish Pod
 on:
   push:
     tags:
-      - '*-ios'
+      - "*-ios"
   workflow_dispatch:
 
 jobs:
   publish-pod:
-    runs-on: lynx-darwin-14-medium
+    runs-on: macos-13
     steps:
       - name: Download Source
         uses: actions/checkout@v4.2.2
+      - name: Bundle Install
+        run: |-
+          root_dir=$(pwd) && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk bundle install
       - name: Get Tag Information
         run: |-
           version=$(echo ${{ github.ref }} | awk -F "/" '{print $3}')
