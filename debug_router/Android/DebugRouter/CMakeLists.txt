@@ -62,7 +62,9 @@ find_library(android-lib android)
 
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--exclude-libs,ALL")
 
+MESSAGE(WARNING "Received ENABLE_16KB_ALIGN: ${ENABLE_16KB_ALIGN}")  
 if ((ENABLE_16KB_ALIGN MATCHES "true"))
+    MESSAGE(WARNING "add max-page-size config")
     if (${ANDROID_ABI} STREQUAL "arm64-v8a" OR ${ANDROID_ABI} STREQUAL "x86_64")
         set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384")
     endif()
