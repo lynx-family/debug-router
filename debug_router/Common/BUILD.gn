@@ -40,6 +40,7 @@ source_set("debug_router_source") {
   configs += [ ":debug_router_private_config" ]
 
   sources = [
+    "../native/base/socket_guard.h",
     "../native/core/debug_router_config.cc",
     "../native/core/debug_router_config.h",
     "../native/core/debug_router_core.cc",
@@ -61,16 +62,19 @@ source_set("debug_router_source") {
     "../native/net/socket_server_client.h",
     "../native/net/websocket_client.cc",
     "../native/net/websocket_client.h",
+    "../native/net/websocket_task.cc",
+    "../native/net/websocket_task.h",
     "../native/processor/message_assembler.cc",
     "../native/processor/message_assembler.h",
     "../native/processor/message_handler.h",
     "../native/processor/processor.cc",
     "../native/processor/processor.h",
-    "../native/protocol/blocking_queue.h",
+    "../native/protocol/events.h",
     "../native/protocol/md5.cc",
     "../native/protocol/md5.h",
     "../native/protocol/protocol.cc",
     "../native/protocol/protocol.h",
+    "../native/socket/blocking_queue.h",
     "../native/socket/count_down_latch.cc",
     "../native/socket/count_down_latch.h",
     "../native/socket/socket_server_api.cc",
