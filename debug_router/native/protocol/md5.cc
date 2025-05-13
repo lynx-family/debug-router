@@ -13,7 +13,7 @@
 #include "debug_router/native/protocol/md5.h"
 
 /* for memcpy() */
-#include <string.h>
+#include <cstring>
 /* for stupid systems */
 #include <sys/types.h>
 
@@ -36,7 +36,7 @@ std::string MD5::hexdigest() const {
   if (!finalized) return "";
 
   char txbuf[33];
-  for (int i = 0; i < 16; i++) sprintf(txbuf + i * 2, "%02x", digest[i]);
+  for (int i = 0; i < 16; i++) snprintf(txbuf + i * 2, 33, "%02x", digest[i]);
   txbuf[32] = 0;
   return std::string(txbuf);
 }
