@@ -10,6 +10,7 @@
 #include "debug_router/native/android/base/android/jni_helper.h"
 #include "debug_router/native/android/debug_router_global_handler_android.h"
 #include "debug_router/native/android/debug_router_listener_android.h"
+#include "debug_router/native/android/debug_router_report_android.h"
 #include "debug_router/native/android/debug_router_session_handler_android.h"
 #include "debug_router/native/android/message_handler_android.h"
 #include "debug_router/native/android/native_slot_android.h"
@@ -49,6 +50,12 @@ jint Plug(JNIEnv *env, jobject jcaller, jobject slot) {
   auto native_slot =
       std::make_shared<debugrouter::android::NativeSlotAndroid>(env, slot);
   return debugrouter::core::DebugRouterCore::GetInstance().Plug(native_slot);
+}
+
+void SetReportDelegate(JNIEnv *env, jobject jcaller, jobject delegate) {
+  debugrouter::core::DebugRouterCore::GetInstance().SetReportDelegate(
+      std::make_unique<debugrouter::android::DebugRouterReportAndroid>(
+          env, delegate));
 }
 
 void SetAppInfo(JNIEnv *env, jobject jcaller, jstring key, jstring value) {

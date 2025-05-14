@@ -3,7 +3,7 @@ com/lynx/debugrouter/DebugRouter.java
 com/lynx/debugrouter/GlobalHandlerDelegate.java
 com/lynx/debugrouter/SessionHandlerDelegate.java
 com/lynx/debugrouter/MessageHandlerDelegate.java
-com/lynx/debugrouter/NativeReportServiceDelegate.java
+com/lynx/debugrouter/NativeReportDelegate.java
 com/lynx/debugrouter/NativeSlotDelegate.java
 com/lynx/debugrouter/NativeStateListenerDelegate.java
 com/lynx/debugrouter/log/LLog.java

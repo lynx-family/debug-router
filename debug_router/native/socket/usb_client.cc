@@ -134,7 +134,8 @@ void UsbClient::ReadMessage() {
       }
       if (!isFirst && listener_) {
         listener_->OnError(shared_from_this(), GetErrorMessage(),
-                           "protocol error: ReadAndCheckMessageHeader");
+                           "ReadAndCheckMessageHeader error: don't match "
+                           "DebugRouter protocol");
       }
       break;
     }
@@ -151,7 +152,7 @@ void UsbClient::ReadMessage() {
       LOGE("read payload data error: " << GetErrorMessage());
       if (listener_) {
         listener_->OnError(shared_from_this(), GetErrorMessage(),
-                           "protocol error: payload_size.");
+                           "read payload size data error.");
       }
       break;
     }
@@ -172,7 +173,7 @@ void UsbClient::ReadMessage() {
       LOGI("read payload data error: " << GetErrorMessage());
       if (listener_) {
         listener_->OnError(shared_from_this(), GetErrorMessage(),
-                           "protocol error: PAYLOAD");
+                           "read payload data error:");
       }
       break;
     }
@@ -281,7 +282,7 @@ void UsbClient::WriteMessage() {
         LOGE("send error: " << GetErrorMessage() << " message:" << message);
         if (listener_) {
           listener_->OnError(shared_from_this(), GetErrorMessage(),
-                             "protocol error: send data");
+                             "protocol error: send data failed.");
         }
         break;
       }
