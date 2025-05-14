@@ -79,18 +79,18 @@ void WebSocketTask::SendInternal(const std::string &data) {
   prefix_len += 4;
 
   if (!socket_guard_) {
-    onFailure();
+    onFailure("Socket_guard_ is nullptr.");
     return;
   }
   LOGI("[TX] SendInternal: " << buf);
   if (send(socket_guard_->Get(), (char *)prefix, prefix_len, 0) == -1) {
     LOGI("send prefix_len error.");
-    onFailure();
+    onFailure("Send prefix_len error.");
     return;
   }
   if (send(socket_guard_->Get(), buf, payloadLen, 0) == -1) {
-    LOGI("send: buf error.");
-    onFailure();
+    LOGI("send buf error.");
+    onFailure("Send buf error.");
     return;
   }
   LOGI("send: prefix_len and buf success.");
@@ -102,7 +102,7 @@ void WebSocketTask::Start() {
 
 void WebSocketTask::StartInternal() {
   if (!do_connect()) {
-    onFailure();
+    onFailure("Websocket connect failed.");
     return;
   }
 
@@ -211,32 +211,33 @@ bool WebSocketTask::do_read(std::string &msg) {
   } head;
 
   if (!socket_guard_) {
-    onFailure();
+    onFailure("WebSocket do_read: socket_guard_ is nullptr.");
     return false;
   }
 
   if (recv(socket_guard_->Get(), (char *)&head, sizeof(head), 0) !=
       sizeof(head)) {
     LOGE("failed to read websocket message");
-    onFailure();
+    onFailure("Failed to read WebSocket message header, incomplete read.");
     return false;
   }
   if ((head.flag_opcode & 0x80) == 0) {  // FIN
     LOGE("read_message not final fragment");
-    onFailure();
+    onFailure("Received non-final WebSocket message fragment, not supported.");
     return false;
   }
   const uint8_t flags = head.flag_opcode >> 4;
   if ((head.mask_payload_len & 0x80) != 0) {  // masked payload
     LOGE("read_message masked");
-    onFailure();
+    onFailure(
+        "Received unexpected masked WebSocket message payload from server.");
     return false;
   }
   size_t payloadLen = head.mask_payload_len & 0x7f;
   bool deflated = (flags & 4 /*FLAG_RSV1*/) != 0;
   if (deflated) {
     LOGE("deflated message unimplemented");
-    onFailure();
+    onFailure("Deflated message unimplemented");
     return false;
   }
 
@@ -255,7 +256,7 @@ bool WebSocketTask::do_read(std::string &msg) {
   if (recv(socket_guard_->Get(), const_cast<char *>(msg.data()), payloadLen,
            0) != payloadLen) {
     LOGE("failed to read websocket message");
-    onFailure();
+    onFailure("Failed to read websocket message");
     return false;
   }
   LOGI("WebSocketTask::do_read websocket message success.");
@@ -270,11 +271,11 @@ void WebSocketTask::onOpen() {
   }
 }
 
-void WebSocketTask::onFailure() {
+void WebSocketTask::onFailure(const std::string &error_message) {
   LOGI("WebSocketTask::onFailure");
   auto transceiver = transceiver_.lock();
   if (transceiver) {
-    transceiver->delegate()->OnFailure(transceiver);
+    transceiver->delegate()->OnFailure(transceiver, error_message);
   }
 }
 

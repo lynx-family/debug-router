@@ -36,6 +36,7 @@ public class DebugRouterReportServiceUtil {
     if (logExtend == null) {
       logExtend = new JSONObject();
     }
+    eventName = "New" + eventName;
     InnerClass.service.report(eventName, category, metric, logExtend);
   }
 

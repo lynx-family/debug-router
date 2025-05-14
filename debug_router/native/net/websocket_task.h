@@ -26,11 +26,10 @@ class WebSocketTask : public base::WorkThreadExecutor {
   void StartInternal();
 
   bool do_connect();
-
   bool do_read(std::string &msg);
 
   void onOpen();
-  void onFailure();
+  void onFailure(const std::string &error_message);
   void onMessage(const std::string &msg);
 
  private:

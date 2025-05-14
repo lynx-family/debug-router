@@ -5,6 +5,7 @@
 #import "DebugRouter.h"
 #import <DebugRouterReportServiceUtil.h>
 #import <DebugRouterToast.h>
+#include <memory>
 #import "DebugRouterGlobalHandler.h"
 #import "DebugRouterInternalStateListener.h"
 #import "DebugRouterLog.h"
@@ -14,7 +15,7 @@
 #import "DebugRouterVersion.h"
 #include "debug_router/native/core/debug_router_config.h"
 #include "debug_router/native/core/debug_router_core.h"
-#include "debug_router/native/report/debug_router_report_service.h"
+#include "debug_router/native/report/debug_router_native_report.h"
 
 #include <json/json.h>
 
@@ -40,14 +41,36 @@ class NativeSlotDeleagate : public debugrouter::core::NativeSlot {
   DebugRouterSlot *slot_ios_;
 };
 
-class DebugRouterReportServiceiOS : public debugrouter::report::DebugRouterReportService {
+class DebugRouterReportiOS : public debugrouter::report::DebugRouterNativeReport {
  public:
-  DebugRouterReportServiceiOS() {}
+  DebugRouterReportiOS() {}
+  virtual ~DebugRouterReportiOS() override = default;
 
   virtual void report(const std::string &eventName, const std::string &category,
                       const std::string &metric, const std::string &extra) override {
     NSString *tag = [NSString stringWithUTF8String:eventName.c_str()];
-    [DebugRouterReport report:tag withCategory:nil];
+    NSString *categoryStr = [NSString stringWithUTF8String:category.c_str()];
+    NSString *metricStr = [NSString stringWithUTF8String:metric.c_str()];
+
+    NSError *error;
+    NSData *categoryData = [categoryStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *categoryDict = [NSJSONSerialization JSONObjectWithData:categoryData
+                                                                 options:kNilOptions
+                                                                   error:&error];
+    if (error) {
+      NSLog(@"parse category JSON failed: %@", error.localizedDescription);
+      categoryDict = nil;
+    }
+    NSData *metricData = [metricStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *metricDict = [NSJSONSerialization JSONObjectWithData:metricData
+                                                               options:kNilOptions
+                                                                 error:&error];
+    if (error) {
+      NSLog(@"parse metric JSON failed: %@", error.localizedDescription);
+      metricDict = nil;
+    }
+
+    [DebugRouterReport report:tag withCategory:categoryDict withMetric:nil];
   }
 };
 
@@ -202,6 +225,8 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
     debugrouter::core::DebugRouterCore::GetInstance().SetAppInfo(
         "bundleId", [[[NSBundle mainBundle] bundleIdentifier] UTF8String]);
     debugrouter::core::DebugRouterCore::GetInstance().SetAppInfo("osType", "iOS");
+    debugrouter::core::DebugRouterCore::GetInstance().SetReportDelegate(
+        std::make_unique<DebugRouterReportiOS>());
     NSUUID *id_generate = [NSUUID UUID];
     NSString *id_string = [id_generate UUIDString];
     // A process-level id that identifies the unique id of a debugRouter connection
@@ -255,7 +280,8 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 
 - (void)connect:(NSString *)url ToRoom:(NSString *)room {
   LLogInfo(@"connect url: %@, room: %@", url, room);
-  debugrouter::core::DebugRouterCore::GetInstance().Connect([url UTF8String], [room UTF8String]);
+  debugrouter::core::DebugRouterCore::GetInstance().ConnectAsync([url UTF8String],
+                                                                 [room UTF8String]);
 }
 
 - (void)disconnect {

@@ -50,17 +50,19 @@
   NSString *httpUrlString = [NSString stringWithFormat:@"http://%@:%@", host, port];
   NSURL *url = [NSURL URLWithString:httpUrlString];
   NSURLSession *session = [NSURLSession sharedSession];
-  NSURLSessionDataTask *task =
-      [session dataTaskWithURL:url
-             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-               dispatch_async(self->update_data_queue_, ^{
-                 if (error) {
-                   [DebugRouterReport reportHostCannotAccess:host
-                                                    WithPort:[port stringValue]
-                                                     WithUrl:wsUrl];
-                 }
-               });
-             }];
+  NSURLSessionDataTask *task = [session
+        dataTaskWithURL:url
+      completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(self->update_data_queue_, ^{
+          if (error) {
+            NSString *hostString = (host == nil) ? @"unknown" : host;
+            NSString *portString = [port stringValue];
+            portString = (portString == nil) ? @"unknown" : portString;
+            [DebugRouterReport report:@"OnErrorCannotAccess"
+                         withCategory:@{@"host" : hostString, @"port" : portString, @"url" : url}];
+          }
+        });
+      }];
   [task resume];
 }
 

@@ -11,25 +11,26 @@ import com.lynx.debugrouter.log.LLog;
 import org.json.JSONObject;
 
 @Keep
-public class NativeReportServiceDelegate {
-  private static final String TAG = "NativeReportServiceDelegate";
+public class NativeReportDelegate {
+  private static final String TAG = "NativeReportDelegate";
 
-  public NativeReportServiceDelegate() {}
+  public NativeReportDelegate() {}
 
-  private static JSONObject stringToJSONObject(String jsonString) {
+  private static JSONObject stringToJSONObject(String jsonName, String jsonString) {
     try {
       return new JSONObject(jsonString);
     } catch (org.json.JSONException e) {
-      LLog.e(TAG, "Failed to parse JSON: " + e.getMessage());
+      LLog.e(TAG, "Failed to parse " + jsonName + " JSON: " + e.getMessage());
       return new JSONObject();
     }
   }
 
   @CalledByNative
   public void report(String eventName, String category, String metric, String extra) {
-    JSONObject categoryObject = stringToJSONObject(category);
-    JSONObject metricObject = stringToJSONObject(metric);
-    JSONObject extraObject = stringToJSONObject(extra);
+    LLog.i(TAG, "report: " + eventName + ", " + category + ", " + metric + ", " + extra);
+    JSONObject categoryObject = stringToJSONObject("category", category);
+    JSONObject metricObject = stringToJSONObject("metric", metric);
+    JSONObject extraObject = stringToJSONObject("extra", extra);
     DebugRouterReportServiceUtil.report(eventName, categoryObject, metricObject, extraObject);
   }
 }

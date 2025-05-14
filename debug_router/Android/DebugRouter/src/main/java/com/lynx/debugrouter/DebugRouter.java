@@ -119,7 +119,10 @@ public class DebugRouter {
     // debugRouterId will
     // be generated
     nativeSetAppInfo("debugRouterId", id_string.toString());
+    nativeSetReportDelegate(new NativeReportDelegate());
   }
+
+  private native void nativeSetReportDelegate(NativeReportDelegate delegate);
 
   public synchronized void setAppInfo(Map<String, String> appInfo) {
     setAppInfo(null, appInfo);

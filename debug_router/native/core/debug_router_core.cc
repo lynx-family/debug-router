@@ -121,6 +121,7 @@ DebugRouterCore::DebugRouterCore()
     : connection_state_(DISCONNECTED),
       current_transceiver_(nullptr),
       max_session_id_(0),
+      report_(nullptr),
       processor_(nullptr),
       retry_times_(0),
       handler_count_(1) {
@@ -136,6 +137,11 @@ DebugRouterCore::DebugRouterCore()
       std::make_unique<MessageHandlerCore>();
   processor_ = std::make_unique<processor::Processor>(std::move(handler));
   thread::DebugRouterExecutor::GetInstance().Start();
+}
+
+void DebugRouterCore::SetReportDelegate(
+    std::unique_ptr<report::DebugRouterNativeReport> report) {
+  report_ = std::move(report);
 }
 
 void DebugRouterCore::Connect(const std::string &url, const std::string &room) {
@@ -183,19 +189,30 @@ void DebugRouterCore::Connect(const std::string &url, const std::string &room,
   LOGI("curr_host_: " << curr_host_ << " host_url_: " << host_url_);
   LOGI("current status:" << GetConnectionState());
   LOGI("room: " << room << " LastRoomId: " << GetRoomId());
-  if (is_reconnect) {
-    LOGI("is_reconnect");
-  } else {
-    LOGI("is_first_connect");
-  }
+
+  Json::Value catagaryJson;
+  catagaryJson["url"] = url;
+  catagaryJson["room"] = room;
   if (room == GetRoomId() && curr_host_ == host_url_ &&
       GetConnectionState() != DISCONNECTED) {
+    catagaryJson["attribution"] = "User Incorrect Call";
+    std::string catagary = catagaryJson.toStyledString();
     LOGI("DebugRouterCore::Connect already connect this host and room.");
+    Report("RedundantConnect", catagary, "", "");
     return;
   }
-  if (!is_reconnect) {
+
+  // report all connect event.
+  std::string catagary = catagaryJson.toStyledString();
+  if (is_reconnect) {
+    LOGI("is_reconnect");
+    Report("Reconnect", catagary, "", "");
+  } else {
+    LOGI("is_first_connect");
     retry_times_.store(0, std::memory_order_relaxed);
+    Report("Connect", catagary, "", "");
   }
+
   LOGI(
       "connect. retry times: " << retry_times_.load(std::memory_order_relaxed));
   Disconnect();
@@ -289,6 +306,15 @@ void DebugRouterCore::OnInit(
   usb_port_.store(std::stoi(port), std::memory_order_relaxed);
 }
 
+void DebugRouterCore::Report(const std::string &eventName,
+                             const std::string &category,
+                             const std::string &metric,
+                             const std::string &extra) {
+  if (report_ != nullptr) {
+    report_->report(eventName, category, metric, extra);
+  }
+}
+
 void DebugRouterCore::OnOpen(
     const std::shared_ptr<MessageTransceiver> &transceiver) {
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
@@ -307,6 +333,15 @@ void DebugRouterCore::OnOpen(
     host_url_ = "";
     server_url_ = "";
     room_id_ = "";
+    Json::Value catagaryJson;
+    catagaryJson["connect_type"] = "usb";
+    std::string catagary = catagaryJson.toStyledString();
+    Report("OnOpen", catagary, "", "");
+  } else {
+    Json::Value catagaryJson;
+    catagaryJson["connect_type"] = "websocket";
+    std::string catagary = catagaryJson.toStyledString();
+    Report("OnOpen", catagary, "", "");
   }
 
   std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
@@ -360,12 +395,26 @@ void DebugRouterCore::OnClosed(
 }
 
 void DebugRouterCore::OnFailure(
-    const std::shared_ptr<MessageTransceiver> &transceiver) {
+    const std::shared_ptr<MessageTransceiver> &transceiver,
+    const std::string &error_message) {
   LOGI("DebugRouterCore: onFailure.");
   if ((current_transceiver_ != nullptr &&
        transceiver != current_transceiver_) ||
       connection_state_.load(std::memory_order_relaxed) == DISCONNECTED) {
     return;
+  }
+  if (current_transceiver_->GetType() == ConnectionType::kUsb) {
+    Json::Value catagaryJson;
+    catagaryJson["connect_type"] = "usb";
+    catagaryJson["error_msg"] = error_message;
+    std::string catagary = catagaryJson.toStyledString();
+    Report("OnFailure", catagary, "", "");
+  } else {
+    Json::Value catagaryJson;
+    catagaryJson["connect_type"] = "websocket";
+    catagaryJson["error_msg"] = error_message;
+    std::string catagary = catagaryJson.toStyledString();
+    Report("OnFailure", catagary, "", "");
   }
   connection_state_.store(DISCONNECTED, std::memory_order_relaxed);
   current_transceiver_ = nullptr;
@@ -488,14 +537,24 @@ bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
   std::string url, room;
   std::string schema = util::decodeURIComponent(encode_schema);
   LOGI("handle schema: " << schema);
+  Json::Value catagaryJson;
+  catagaryJson["schema"] = schema;
+  std::string catagary = catagaryJson.toStyledString();
+  Report("HandleSchema", catagary, "", "");
   int32_t query_index = static_cast<int32_t>(schema.find('?'));
   if (query_index == std::string::npos) {
+    catagaryJson["attribution"] = "User Incorrect Useage";
+    catagary = catagaryJson.toStyledString();
+    Report("InvalidSchema", catagary, "", "");
     LOGE("Invalid schema:" << schema);
     return false;
   }
   std::string path = schema.substr(0, query_index);
   int32_t cmd_index = static_cast<int32_t>(path.find_last_of('/'));
   if (cmd_index == std::string::npos) {
+    catagaryJson["attribution"] = "User Incorrect Useage";
+    catagary = catagaryJson.toStyledString();
+    Report("InvalidSchema", catagary, "", "");
     LOGE("Invalid schema:" << schema);
     return false;
   }
@@ -534,6 +593,9 @@ bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
     }
 
     if (url.empty()) {
+      catagaryJson["attribution"] = "User Incorrect Useage";
+      catagary = catagaryJson.toStyledString();
+      Report("InvalidSchema", catagary, "", "");
       LOGE("invalid schema" << schema);
       return false;
     }
@@ -545,6 +607,9 @@ bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
     DisconnectAsync();
     return true;
   } else {
+    catagaryJson["attribution"] = "User Incorrect Useage";
+    catagary = catagaryJson.toStyledString();
+    Report("InvalidSchema", catagary, "", "");
     return false;
   }
 }
