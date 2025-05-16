@@ -35,6 +35,7 @@ class SocketGuard {
   }
 
   void Reset() {
+    LOGI("SocketGuard reset.");
     std::lock_guard<std::mutex> lock(mutex_);
     if (sock_ != kInvalidSocket) {
       CLOSESOCKET(sock_);

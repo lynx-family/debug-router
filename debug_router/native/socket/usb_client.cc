@@ -55,6 +55,7 @@ void UsbClient::StartInternal(
     const std::shared_ptr<UsbClientListener> &listener) {
   LOGI("UsbClient: StartInternal.");
   connect_status_ = USBConnectStatus::CONNECTING;
+  LOGI("StartInternal, listener is:" << listener.get());
   listener_ = listener;
   StartReader();
   StartWriter();
@@ -211,6 +212,7 @@ void UsbClient::MessageDispatcher() {
 
     if (message.length() > 0) {
       if (listener_) {
+        LOGI("UsbClient: listener exists, do OnMessage.");
         listener_->OnMessage(shared_from_this(), message);
       }
     } else {
