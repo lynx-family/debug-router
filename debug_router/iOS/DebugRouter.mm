@@ -10,13 +10,14 @@
 #import "DebugRouterLog.h"
 #import "DebugRouterReport.h"
 #import "DebugRouterSlot.h"
-#include "DebugRouterUtil.h"
+#import "DebugRouterUtil.h"
 #import "DebugRouterVersion.h"
+#import "LocalNetworkPermissionChecker.h"
+
+#include <json/json.h>
 #include "debug_router/native/core/debug_router_config.h"
 #include "debug_router/native/core/debug_router_core.h"
 #include "debug_router/native/report/debug_router_report_service.h"
-
-#include <json/json.h>
 
 typedef enum : NSUInteger {
   CONNECTION_SCENE_UNINIT,
