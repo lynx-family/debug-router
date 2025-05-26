@@ -14,6 +14,15 @@
   return YES;
 }
 
+- (UISceneConfiguration *)application:(UIApplication *)application
+    configurationForConnectingSceneSession:(UISceneSession *)connectingSceneSession
+                                   options:(UISceneConnectionOptions *)options {
+  // Called when a new scene session is being created.
+  // Use this method to select a configuration to create the new scene with.
+  return [[UISceneConfiguration alloc] initWithName:@"Default Configuration"
+                                        sessionRole:connectingSceneSession.role];
+}
+
 - (void)applicationWillResignActive:(UIApplication *)application {
   // Sent when the application is about to move from active to inactive state.
   // This can occur for certain types of temporary interruptions (such as an
