@@ -138,7 +138,19 @@ DebugRouterCore::DebugRouterCore()
   thread::DebugRouterExecutor::GetInstance().Start();
 }
 
+void DebugRouterCore::SetCustomWebSocketTransceiver(
+    const std::shared_ptr<MessageTransceiver> &message_transceiver) {
+  std::lock_guard<std::mutex> lock_guard(custom_transceiver_mutex_);
+  custom_websocket_transceiver_ = message_transceiver;
+}
+
 void DebugRouterCore::Connect(const std::string &url, const std::string &room) {
+  {
+    std::lock_guard<std::mutex> lock_guard(custom_transceiver_mutex_);
+    if (custom_websocket_transceiver_) {
+      message_transceivers_[0] = custom_websocket_transceiver_;
+    }
+  }
   Connect(url, room, false);
 }
 
