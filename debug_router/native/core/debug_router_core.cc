@@ -403,15 +403,23 @@ void DebugRouterCore::OnFailure(
       connection_state_.load(std::memory_order_relaxed) == DISCONNECTED) {
     return;
   }
-  if (current_transceiver_->GetType() == ConnectionType::kUsb) {
-    Json::Value catagaryJson;
-    catagaryJson["connect_type"] = "usb";
-    catagaryJson["error_msg"] = error_message;
-    std::string catagary = catagaryJson.toStyledString();
-    Report("OnFailure", catagary, "", "");
+  if (current_transceiver_ != nullptr) {
+    if (current_transceiver_->GetType() == ConnectionType::kUsb) {
+      Json::Value catagaryJson;
+      catagaryJson["connect_type"] = "usb";
+      catagaryJson["error_msg"] = error_message;
+      std::string catagary = catagaryJson.toStyledString();
+      Report("OnFailure", catagary, "", "");
+    } else {
+      Json::Value catagaryJson;
+      catagaryJson["connect_type"] = "websocket";
+      catagaryJson["error_msg"] = error_message;
+      std::string catagary = catagaryJson.toStyledString();
+      Report("OnFailure", catagary, "", "");
+    }
   } else {
     Json::Value catagaryJson;
-    catagaryJson["connect_type"] = "websocket";
+    catagaryJson["connect_type"] = "none";
     catagaryJson["error_msg"] = error_message;
     std::string catagary = catagaryJson.toStyledString();
     Report("OnFailure", catagary, "", "");
