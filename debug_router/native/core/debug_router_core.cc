@@ -124,7 +124,8 @@ DebugRouterCore::DebugRouterCore()
       report_(nullptr),
       processor_(nullptr),
       retry_times_(0),
-      handler_count_(1) {
+      handler_count_(1),
+      is_first_connect_(UNINIT) {
   message_transceivers_.push_back(std::make_shared<net::WebSocketClient>());
   message_transceivers_.push_back(std::make_shared<net::SocketServerClient>());
 
@@ -145,6 +146,7 @@ void DebugRouterCore::SetReportDelegate(
 }
 
 void DebugRouterCore::Connect(const std::string &url, const std::string &room) {
+  is_first_connect_.store(FIRST_CONNECT);
   Connect(url, room, false);
 }
 
@@ -337,9 +339,17 @@ void DebugRouterCore::OnOpen(
     catagaryJson["connect_type"] = "usb";
     std::string catagary = catagaryJson.toStyledString();
     Report("OnOpen", catagary, "", "");
+  } else if (is_first_connect_.load() == FIRST_CONNECT) {
+    Json::Value catagaryJson;
+    catagaryJson["connect_type"] = "websocket";
+    catagaryJson["is_first_connect"] = "true";
+    std::string catagary = catagaryJson.toStyledString();
+    Report("OnOpen", catagary, "", "");
+    is_first_connect_.store(NON_FIRST_CONNECT);
   } else {
     Json::Value catagaryJson;
     catagaryJson["connect_type"] = "websocket";
+    catagaryJson["is_first_connect"] = "false";
     std::string catagary = catagaryJson.toStyledString();
     Report("OnOpen", catagary, "", "");
   }
@@ -420,6 +430,10 @@ void DebugRouterCore::OnFailure(
   } else {
     Json::Value catagaryJson;
     catagaryJson["connect_type"] = "none";
+    if (is_first_connect_.load() == FIRST_CONNECT) {
+      is_first_connect_.store(NON_FIRST_CONNECT);
+      catagaryJson["is_websocket_first_connect"] = "true";
+    }
     catagaryJson["error_msg"] = error_message;
     std::string catagary = catagaryJson.toStyledString();
     Report("OnFailure", catagary, "", "");
@@ -437,7 +451,7 @@ void DebugRouterCore::OnFailure(
     for (const auto &listener : listeners) {
       // TODO(zhoumingsong.smile): add more details
       LOGI("do state_listeners_ onfailure.");
-      listener->OnError("unknown error");
+      listener->OnError(error_message);
     }
   }
 
