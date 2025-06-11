@@ -33,6 +33,12 @@ class Processor;
 namespace core {
 
 typedef enum { DISCONNECTED = -1, CONNECTING, CONNECTED } ConnectionState;
+// whether the connection is the first connection
+typedef enum {
+  UNINIT = -1,
+  FIRST_CONNECT,
+  NON_FIRST_CONNECT
+} WebSocketConnectType;
 
 class DebugRouterSlot;
 
@@ -155,6 +161,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   std::string GetConnectionStateMsg(ConnectionState state);
   std::atomic<int32_t> usb_port_;
   std::atomic<int> handler_count_;
+  std::atomic<WebSocketConnectType> is_first_connect_;
 };
 
 }  // namespace core

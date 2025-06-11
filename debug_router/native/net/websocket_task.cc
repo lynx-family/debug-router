@@ -131,6 +131,7 @@ bool WebSocketTask::do_connect() {
     purl += 5;
   } else {
     LOGE("Parse url error, url: " << purl);
+    onFailure("Websocket Task: Parse url error.");
     return false;
   }
 
@@ -143,6 +144,7 @@ bool WebSocketTask::do_connect() {
   } else if (sscanf(purl, "%[^:/]", host) == 1) {
   } else {
     LOGE("Parse url error, url: " << purl);
+    onFailure("Websocket Task: Parse url error.");
     return false;
   }
 
@@ -152,12 +154,33 @@ bool WebSocketTask::do_connect() {
   ai.ai_socktype = SOCK_STREAM;
   char str_port[16];
   snprintf(str_port, sizeof(str_port), "%d", port);
+  /*
+  Reason why getaddrinfo fails:
+  - DNS resolution issues:
+    getaddrinfo fails if the hostname cannot be resolved to an IP address via
+  DNS. For example, an incorrect hostname was entered, or the DNS server is not
+  configured correctly.
+  - Network connection issues:
+    In some cases, an unstable or unavailable network connection may prevent the
+  DNS server from being accessed, causing resolution to fail.
+  - Configuration errors:
+    The hostname or port number entered is in the wrong format, or an
+  unsupported address family is used (for example, IPv6 is specified but the
+  system does not support it).
+  - Network isolation:
+    The network environment is isolated, which limits DNS query requests and can
+  also cause getaddrinfo to fail to work properly.
+  */
   int ret = getaddrinfo(host, str_port, &ai, &servinfo);
   if (ret != 0) {
     LOGE("getaddrinfo Error");
+    onFailure(
+        "Websocket Task: getaddrinfo Error, no internet, dns error or Network "
+        "Isolation.");
     return false;
   }
 
+  bool is_connect_success = false;
   for (auto p = servinfo; p != NULL; p = p->ai_next) {
     auto sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
     if (sockfd == -1) {
@@ -165,11 +188,36 @@ bool WebSocketTask::do_connect() {
     }
     if (connect(sockfd, p->ai_addr, p->ai_addrlen) != -1) {
       socket_guard_ = std::make_unique<base::SocketGuard>(sockfd);
+      is_connect_success = true;
       LOGI("Connect socket success. sockfd: " << sockfd);
       break;
     }
     CLOSESOCKET(sockfd);
   }
+  /*
+  Reason why connect fails:
+  - Target host unreachable:
+    The target host may not be powered on or may be unreachable on the network,
+  for example, it may not be in the same subnet, or the network device (such as
+  a router) may be misconfigured.
+  - Target port not listening:
+    There is no corresponding service listening on the specified port on the
+  target host, and the connection attempt will be rejected.
+  - Connection queue full:
+    The connection queue of the target host is full and cannot accept new
+  connection requests.
+  - Firewall or network device restrictions:
+    The firewall or other network devices may block the connection request,
+  causing the connect to fail.
+  - Operating system restrictions:
+    The operating system may have certain restrictions on the number of
+  connections or resource usage. When these restrictions are reached, new
+  connection requests will fail.
+  */
+  if (!is_connect_success) {
+    onFailure("Websocket Task: socket connect failed.");
+  }
+
   if (socket_guard_ == nullptr) {
     LOGE("Connect " << url_.c_str() << "Error: socket_guard_ is nullptr.");
     return false;
@@ -187,11 +235,28 @@ bool WebSocketTask::do_connect() {
            path, host, port);
   send(socket_guard_->Get(), buf, strlen(buf), 0);
 
+  /*
+  Reason why connect fails:
+  - Connection interruption:
+    When reading data, the connection may have been closed by the other party,
+  or the network may be interrupted, making it impossible to continue reading
+  data.
+  - Timeout:
+    If not enough data is received within the specified time, readline may time
+  out and return an error.
+  - Data format error:
+    If the data format sent by the other party does not meet the expectations of
+  readline, it may cause reading failure.
+  - Buffer overflow:
+    If the amount of data read exceeds the size of the buffer, it may cause data
+  loss or reading errors.
+  */
   int status;
   if (readline(socket_guard_->Get(), buf, sizeof(buf)) < 10 ||
       sscanf(buf, "HTTP/1.1 %d Switching Protocols\r\n", &status) != 1 ||
       status != 101) {
     LOGE("Connect Error: " << url_.c_str());
+    onFailure("Websocket Task: do_connect readline failed.");
     return false;
   }
 
