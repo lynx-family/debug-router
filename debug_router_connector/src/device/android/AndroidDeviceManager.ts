@@ -95,6 +95,9 @@ export class AndroidDeviceManager extends DeviceManager {
         await this.adbClient.kill();
       } catch (e: any) {
         defaultLogger.debug(e?.message ?? "kill adb: unknown error");
+        getDriverReportService()?.report("android_watch_device_error", null, {
+          msg: "adbClient kill error",
+        });
       }
       this.retryCount = 0;
     }
@@ -194,6 +197,9 @@ export class AndroidDeviceManager extends DeviceManager {
     );
     const androidDevice = await this.createDevice(adbClient, deviceData);
     if (!androidDevice) {
+      getDriverReportService()?.report("android_register_device_error", null, {
+        msg: "androidDevice does not exist",
+      });
       return;
     }
     this.driver.registerDevice(androidDevice);

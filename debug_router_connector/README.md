@@ -28,6 +28,7 @@ const connector = new DebugRouterConnector({
   enableWebSocket: false, // deprecated
   enableAndroid: true,
   enableIOS: true,
+  enableHarmony: true,
   enableDesktop: true,
   enableNetworkDevice: true,
   networkDeviceOpt: {

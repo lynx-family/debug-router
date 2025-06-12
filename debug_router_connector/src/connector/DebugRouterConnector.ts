@@ -11,6 +11,7 @@ import { DeviceManager } from "../device/DeviceManager";
 import NetworkDeviceManager from "../device/network/NetworkDeviceManager";
 import DesktopDeviceManager from "../device/desktop/DesktopDeviceManager";
 import iOSDeviceManager from "../device/ios/iOSDeviceManager";
+import HarmonyDeviceManager from "../device/Harmony/HarmonyDeviceManager";
 import { DebugerRouterDriverEvents } from "../utils/type";
 import { WebSocketController } from "../websocket/WebSocketServer";
 import detectPort from "detect-port";
@@ -43,9 +44,14 @@ export type devOption = {
   manualConnect?: boolean;
   enableAndroid?: boolean;
   enableIOS?: boolean;
+  enableHarmony?: boolean;
   enableDesktop?: boolean;
   enableNetworkDevice?: boolean;
   adbHostPort?: {
+    host?: string;
+    port?: number;
+  };
+  hdcHostPort?: {
     host?: string;
     port?: number;
   };
@@ -78,6 +84,7 @@ export class DebugRouterConnector {
   private nextClientId: number = 0;
   private enableAndroid: boolean;
   private enableIOS: boolean;
+  private enableHarmony: boolean;
   private enableDesktop: boolean;
   private readonly enableNetworkDevice: boolean;
   private readonly driverClient: DriverClient;
@@ -88,6 +95,7 @@ export class DebugRouterConnector {
       }
     | undefined;
   readonly adbOption: any;
+  readonly hdcOption: any;
   readonly usbConnectOpt: {
     retryTime: number;
   };
@@ -105,6 +113,7 @@ export class DebugRouterConnector {
       enableWebSocket: false, // deprecated
       enableAndroid: true,
       enableIOS: true,
+      enableHarmony: true,
       enableDesktop: false,
       enableNetworkDevice: false,
       websocketOption: {},
@@ -135,7 +144,9 @@ export class DebugRouterConnector {
     this.enableAndroid = option.enableAndroid ?? true;
     this.adbOption = option.adbHostPort;
     this.enableIOS =
-      process.platform !== "darwin" ? false : (option.enableIOS ?? true);
+      process.platform !== "darwin" ? false : option.enableIOS ?? true;
+    this.enableHarmony = option.enableHarmony ?? true;
+    this.hdcOption = option.hdcHostPort;
     this.enableDesktop = option.enableDesktop ?? false;
     this.enableNetworkDevice = option.enableNetworkDevice ?? false;
     if (this.enableNetworkDevice) {
@@ -155,6 +166,9 @@ export class DebugRouterConnector {
     }
     if (this.enableIOS) {
       this.devicesManager.add(new iOSDeviceManager(this));
+    }
+    if (this.enableHarmony) {
+      this.devicesManager.add(new HarmonyDeviceManager(this, this.hdcOption));
     }
     if (this.enableDesktop) {
       this.devicesManager.add(new DesktopDeviceManager(this));
