@@ -7,6 +7,7 @@ async function main() {
     enableWebSocket: false,
     enableAndroid: true,
     enableIOS: true,
+    enableHarmony: true,
     enableDesktop: false,
     websocketOption: {}
   });

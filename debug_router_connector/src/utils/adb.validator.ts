@@ -115,9 +115,8 @@ export class AdbValidator {
     await ensureDir(dirname(path));
     await ensureDir(adbPath);
     const stream = createWriteStream(path);
-    (
-      (await Axios.get(adbAddress, { responseType: "stream" })).data as Stream
-    ).pipe(stream);
+    ((await Axios.get(adbAddress, { responseType: "stream" }))
+      .data as Stream).pipe(stream);
     await new Promise((resolve, reject) => {
       stream.on("finish", resolve);
       stream.on("error", reject);

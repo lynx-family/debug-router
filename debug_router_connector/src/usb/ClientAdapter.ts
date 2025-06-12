@@ -312,14 +312,12 @@ export default class ClientAdapter {
 
         this.tcpClient.on("close", (hadError: boolean) => {
           defaultLogger.debug(
-            platform + " device close:" + this.port + hadError,
+            platform + " device close:" + this.port + " hadError:" + hadError,
           );
           this.handleOff(this.tcpClient);
         });
         this.tcpClient.on("connect", () => {
-          defaultLogger.debug(
-            platform + " device device onConnect:" + this.port,
-          );
+          defaultLogger.debug(platform + " device onConnect:" + this.port);
           this.onConnect();
         });
         const host = this.device_host;

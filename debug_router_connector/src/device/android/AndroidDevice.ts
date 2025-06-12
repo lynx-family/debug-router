@@ -50,12 +50,19 @@ export default class AndroidDevice extends BaseDevice {
   private async forward(remotePorts: number[]) {
     const device = this.adb.getDevice(this.serial);
     if (!device) {
+      getDriverReportService()?.report("android_device_forward_error", null, {
+        msg: "device not found",
+      });
       return;
     }
     try {
       await this.adbForwardRemove(device);
-    } catch (e) {
+    } catch (e: any) {
       defaultLogger.debug(JSON.stringify(e));
+      getDriverReportService()?.report("android_device_forward_error", null, {
+        msg: "remove forward failed",
+        error: e?.message,
+      });
     }
     this.port = [];
     // randomBase <=19 && randomBase>=0
@@ -74,7 +81,7 @@ export default class AndroidDevice extends BaseDevice {
         do {
           hostport++;
           hostport = await detectPort(hostport);
-          defaultLogger.debug("try hostport:" + hostport);
+          defaultLogger.debug("adb try hostport:" + hostport);
         } while (this.port.indexOf(hostport) != -1);
         try {
           const result = await device.forward(
@@ -83,7 +90,7 @@ export default class AndroidDevice extends BaseDevice {
           );
           if (result) {
             defaultLogger.debug(
-              "forward success:" + remotePort + " hostport:" + hostport,
+              "adb forward success:" + remotePort + " hostport:" + hostport,
             );
             this.port.push(hostport);
             break;

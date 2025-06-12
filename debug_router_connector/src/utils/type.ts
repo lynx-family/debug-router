@@ -33,6 +33,7 @@ export enum CustomizedEventType {
 export enum DeviceOS {
   Android = "Android",
   iOS = "iOS",
+  Harmony = "Harmony",
   Mac = "Mac",
   Windows = "Windows",
   Linux = "Linux",
