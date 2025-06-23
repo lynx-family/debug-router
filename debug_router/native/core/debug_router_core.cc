@@ -146,7 +146,6 @@ void DebugRouterCore::SetReportDelegate(
 }
 
 void DebugRouterCore::Connect(const std::string &url, const std::string &room) {
-  is_first_connect_.store(FIRST_CONNECT);
   Connect(url, room, false);
 }
 
@@ -211,6 +210,7 @@ void DebugRouterCore::Connect(const std::string &url, const std::string &room,
     Report("Reconnect", catagary, "", "");
   } else {
     LOGI("is_first_connect");
+    is_first_connect_.store(FIRST_CONNECT);
     retry_times_.store(0, std::memory_order_relaxed);
     Report("Connect", catagary, "", "");
   }
