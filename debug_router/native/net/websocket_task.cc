@@ -11,7 +11,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
-
+#include <errno.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -22,6 +22,14 @@
 
 namespace debugrouter {
 namespace net {
+
+int GetErrorMessage() {
+#ifdef _WIN32
+  return WSAGetLastError();
+#else
+  return errno;
+#endif
+}
 
 static int readline(SOCKET sock, char *buf, size_t size) {
   char *out = buf;
@@ -79,18 +87,18 @@ void WebSocketTask::SendInternal(const std::string &data) {
   prefix_len += 4;
 
   if (!socket_guard_) {
-    onFailure("Socket_guard_ is nullptr.");
+    onFailure("Socket_guard_ is nullptr.", kNullSocketGuard);
     return;
   }
   LOGI("[TX] SendInternal: " << buf);
   if (send(socket_guard_->Get(), (char *)prefix, prefix_len, 0) == -1) {
     LOGI("send prefix_len error.");
-    onFailure("Send prefix_len error.");
+    onFailure("Send prefix_len error.", GetErrorMessage());
     return;
   }
   if (send(socket_guard_->Get(), buf, payloadLen, 0) == -1) {
     LOGI("send buf error.");
-    onFailure("Send buf error.");
+    onFailure("Send buf error.", GetErrorMessage());
     return;
   }
   LOGI("send: prefix_len and buf success.");
@@ -102,7 +110,7 @@ void WebSocketTask::Start() {
 
 void WebSocketTask::StartInternal() {
   if (!do_connect()) {
-    onFailure("Websocket connect failed.");
+    LOGI("Websocket connect failed.");
     return;
   }
 
@@ -131,7 +139,7 @@ bool WebSocketTask::do_connect() {
     purl += 5;
   } else {
     LOGE("Parse url error, url: " << purl);
-    onFailure("Websocket Task: Parse url error.");
+    onFailure("Websocket Task: Parse url error.", kParseUrlErrorCode);
     return false;
   }
 
@@ -144,7 +152,7 @@ bool WebSocketTask::do_connect() {
   } else if (sscanf(purl, "%[^:/]", host) == 1) {
   } else {
     LOGE("Parse url error, url: " << purl);
-    onFailure("Websocket Task: Parse url error.");
+    onFailure("Websocket Task: Parse url error.", kParseUrlErrorCode);
     return false;
   }
 
@@ -173,10 +181,14 @@ bool WebSocketTask::do_connect() {
   */
   int ret = getaddrinfo(host, str_port, &ai, &servinfo);
   if (ret != 0) {
-    LOGE("getaddrinfo Error");
-    onFailure(
-        "Websocket Task: getaddrinfo Error, no internet, dns error or Network "
-        "Isolation.");
+    // Other system error; errno is set to indicate the error.
+    if (ret == EAI_SYSTEM) {
+      LOGE("getaddrinfo Error: " << strerror(errno));
+      onFailure("Websocket Task: getaddrinfo Error.", errno);
+    } else {
+      LOGE("getaddrinfo Error: " << gai_strerror(ret));
+      onFailure("Websocket Task: getaddrinfo Error.", ret);
+    }
     return false;
   }
 
@@ -186,11 +198,15 @@ bool WebSocketTask::do_connect() {
     if (sockfd == -1) {
       continue;
     }
+    // Upon successful completion, connect() shall return 0; otherwise, -1 shall
+    // be returned and errno set to indicate the error.
     if (connect(sockfd, p->ai_addr, p->ai_addrlen) != -1) {
       socket_guard_ = std::make_unique<base::SocketGuard>(sockfd);
       is_connect_success = true;
       LOGI("Connect socket success. sockfd: " << sockfd);
       break;
+    } else {
+      LOGE("connect Error: " << strerror(errno));
     }
     CLOSESOCKET(sockfd);
   }
@@ -213,9 +229,13 @@ bool WebSocketTask::do_connect() {
     The operating system may have certain restrictions on the number of
   connections or resource usage. When these restrictions are reached, new
   connection requests will fail.
+
+  Error code:
+  You can check errmsg by
+  https://pubs.opengroup.org/onlinepubs/7908799/xns/syssocket.h.html
   */
   if (!is_connect_success) {
-    onFailure("Websocket Task: socket connect failed.");
+    onFailure("Websocket Task: socket connect failed.", GetErrorMessage());
   }
 
   if (socket_guard_ == nullptr) {
@@ -233,7 +253,11 @@ bool WebSocketTask::do_connect() {
            "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\n"
            "Sec-WebSocket-Version: 13\r\n\r\n",
            path, host, port);
-  send(socket_guard_->Get(), buf, strlen(buf), 0);
+  if (send(socket_guard_->Get(), buf, strlen(buf), 0) == -1) {
+    LOGE("send http upgrade error: " << strerror(errno));
+    onFailure("Websocket Task: socket send failed.", GetErrorMessage());
+    return false;
+  }
 
   /*
   Reason why connect fails:
@@ -256,7 +280,8 @@ bool WebSocketTask::do_connect() {
       sscanf(buf, "HTTP/1.1 %d Switching Protocols\r\n", &status) != 1 ||
       status != 101) {
     LOGE("Connect Error: " << url_.c_str());
-    onFailure("Websocket Task: do_connect readline failed.");
+    onFailure("Websocket Task: do_connect Switching Protocol failed.",
+              GetErrorMessage());
     return false;
   }
 
@@ -276,33 +301,37 @@ bool WebSocketTask::do_read(std::string &msg) {
   } head;
 
   if (!socket_guard_) {
-    onFailure("WebSocket do_read: socket_guard_ is nullptr.");
+    onFailure("WebSocket do_read: socket_guard_ is nullptr.", kNullSocketGuard);
     return false;
   }
 
   if (recv(socket_guard_->Get(), (char *)&head, sizeof(head), 0) !=
       sizeof(head)) {
     LOGE("failed to read websocket message");
-    onFailure("Failed to read WebSocket message header, incomplete read.");
+    onFailure(
+        "Failed to read WebSocket message header, incomplete read. recv error.",
+        GetErrorMessage());
     return false;
   }
   if ((head.flag_opcode & 0x80) == 0) {  // FIN
     LOGE("read_message not final fragment");
-    onFailure("Received non-final WebSocket message fragment, not supported.");
+    onFailure("Received non-final WebSocket message fragment, not supported.",
+              kUnexpectedOpcode);
     return false;
   }
   const uint8_t flags = head.flag_opcode >> 4;
   if ((head.mask_payload_len & 0x80) != 0) {  // masked payload
     LOGE("read_message masked");
     onFailure(
-        "Received unexpected masked WebSocket message payload from server.");
+        "Received unexpected masked WebSocket message payload from server.",
+        kUnexpectedMaskPayloadLen);
     return false;
   }
   size_t payloadLen = head.mask_payload_len & 0x7f;
   bool deflated = (flags & 4 /*FLAG_RSV1*/) != 0;
   if (deflated) {
     LOGE("deflated message unimplemented");
-    onFailure("Deflated message unimplemented");
+    onFailure("Deflated message unimplemented.", kDeflatedMessageUnimplemented);
     return false;
   }
 
@@ -321,7 +350,8 @@ bool WebSocketTask::do_read(std::string &msg) {
   if (recv(socket_guard_->Get(), const_cast<char *>(msg.data()), payloadLen,
            0) != payloadLen) {
     LOGE("failed to read websocket message");
-    onFailure("Failed to read websocket message");
+    onFailure("Failed to read websocket message, recv failed.",
+              GetErrorMessage());
     return false;
   }
   LOGI("WebSocketTask::do_read websocket message success.");
@@ -336,11 +366,12 @@ void WebSocketTask::onOpen() {
   }
 }
 
-void WebSocketTask::onFailure(const std::string &error_message) {
-  LOGI("WebSocketTask::onFailure");
+void WebSocketTask::onFailure(const std::string &error_message,
+                              int error_code) {
+  LOGI("WebSocketTask::onFailure with error_code.");
   auto transceiver = transceiver_.lock();
   if (transceiver) {
-    transceiver->delegate()->OnFailure(transceiver, error_message);
+    transceiver->delegate()->OnFailure(transceiver, error_message, error_code);
   }
 }
 

@@ -54,7 +54,8 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   virtual void OnClosed(
       const std::shared_ptr<MessageTransceiver> &transceiver) override;
   virtual void OnFailure(const std::shared_ptr<MessageTransceiver> &transceiver,
-                         const std::string &error_message) override;
+                         const std::string &error_message,
+                         int error_code) override;
   virtual void OnMessage(
       const std::string &message,
       const std::shared_ptr<MessageTransceiver> &transceiver) override;
