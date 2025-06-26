@@ -282,7 +282,7 @@ void UsbClient::WriteMessage() {
         LOGE("send error: " << GetErrorMessage() << " message:" << message);
         if (listener_) {
           listener_->OnError(shared_from_this(), GetErrorMessage(),
-                             "protocol error: send data failed.");
+                             "UsbClient::WriteMessage send data failed.");
         }
         break;
       }

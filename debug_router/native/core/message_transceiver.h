@@ -22,7 +22,7 @@ class MessageTransceiverDelegate {
   virtual void OnClosed(
       const std::shared_ptr<MessageTransceiver> &transceiver) = 0;
   virtual void OnFailure(const std::shared_ptr<MessageTransceiver> &transceiver,
-                         const std::string &error_message) = 0;
+                         const std::string &error_message, int error_code) = 0;
   virtual void OnMessage(
       const std::string &message,
       const std::shared_ptr<MessageTransceiver> &transceiver) = 0;

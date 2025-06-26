@@ -45,7 +45,7 @@ class ConnectionListener
         delegate->OnClosed(client);
       } else if (status == debugrouter::socket_server::kError) {
         LOGI("OnError: code :" << code << ", info:" << info);
-        delegate->OnFailure(client, info);
+        delegate->OnFailure(client, info, code);
       }
     }
   }
