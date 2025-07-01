@@ -96,9 +96,6 @@ class LogMessageVoidify {
 #define DEBUGROUTER_MIN_LOG_LEVEL DEBUGROUTER_LOG_LEVEL_VERBOSE
 #endif
 
-// TODO(zhixuan): Currently, the usage of log macros is like "LOGI("abc" <<
-// variable)", which is mixed of stream pattern and format string pattern.
-// Change the loggin fashion entirely to format string pattern in future.
 #if DEBUGROUTER_MIN_LOG_LEVEL <= DEBUGROUTER_LOG_LEVEL_VERBOSE
 #define LOGV(msg) LAZY_STREAM(LOG_STREAM(VERBOSE), LOG_IS_ON(VERBOSE)) << msg
 #define DLOGV(msg) LAZY_STREAM(LOG_STREAM(VERBOSE), LOG_IS_ON(VERBOSE)) << msg

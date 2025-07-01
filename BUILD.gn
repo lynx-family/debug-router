@@ -2,5 +2,6 @@ group("root") {
   testonly = true
   deps = [
     "//debug_router/native/test:example_unittest",
+    "//debug_router/harmony:harmony",
   ]
 }
