@@ -1,0 +1,74 @@
+name: harmony sdk release
+
+on:
+  push:
+    tags:
+      - "*-harmony"
+
+jobs:
+  harmony-release:
+    runs-on: lynx-custom-dind
+    container:
+      image: ghcr.io/lynx-family/ubuntu24.04-harmony:lastest
+      options: --cap-add=NET_ADMIN
+      credentials:
+        username: lynx-family
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Set MTU
+        run: |
+          sudo apt install --no-install-recommends -y iproute2 
+          sudo ip link set dev eth0 mtu 1450 # remain 50 for k8s overlay
+          echo "MTU set successfully"
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Install git-cliff
+        run: |
+          cargo install git-cliff --locked
+          git-cliff --version
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - name: Get Tag Information
+        run: |-
+          version=$(echo ${{ github.ref }} | awk -F "/" '{print $3}')
+          version=$(echo "$version" | awk -F "-harmony" '{print $1}')
+          echo "VERSION=$version" >> $GITHUB_OUTPUT;
+        id: get_tag
+      - name: Install Common Dependencies
+        uses: ./.github/actions/common-deps
+      - name: Generate Change Log
+        shell: bash
+        run: |
+          git-cliff --config debug_router/harmony/debug_router/cliff.toml \
+          --latest | sed 's/<!-- version -->/${{ steps.get_tag.outputs.VERSION }}/g' > debug_router/harmony/debug_router/CHANGELOG.md
+          echo "CHANGELOG.md generated successfully"
+          cat debug_router/harmony/debug_router/CHANGELOG.md
+      - name: Build & Publish
+        shell: bash
+        run: |
+          export PUBLISH_KEY_PASSPHRASE=${{ secrets.HARMONY_PUBLISH_KEY_PASSPHRASE }}
+          cat << EOF > publish_key
+          ${{ secrets.HARMONY_PUBLISH_KEY }}
+          EOF
+          PROJECT_ROOT=$(pwd)
+          ohpm config set publish_registry https://ohpm.openharmony.cn/ohpm
+          pushd test/e2e_test/harmony_example
+          ohpm install
+          ./script/build.py --build_har --modules debug_router --override_version ${{ steps.get_tag.outputs.VERSION }}
+          popd
+          pushd debug_router/harmony/debug_router/build/default/outputs/default
+          ls -al
+          ohpm publish debug_router.har --publish_id ${{ secrets.HARMONY_PUBLISH_ID }} --key_path $PROJECT_ROOT/publish_key
+          popd
+      - name: Push to release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.get_tag.outputs.VERSION }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          replacesArtifacts: true
+          allowUpdates: true
+          artifacts: "debug_router/harmony/debug_router/build/default/outputs/default/debug_router.har"
