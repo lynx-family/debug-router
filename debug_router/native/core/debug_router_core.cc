@@ -77,18 +77,17 @@ class MessageHandlerCore : public processor::MessageHandler {
 
     const auto &session_handler_map =
         DebugRouterCore::GetInstance().session_handler_map_;
-    std::lock_guard<std::recursive_mutex> lock(
-        DebugRouterCore::GetInstance().slots_mutex_);
-    const auto &slots = DebugRouterCore::GetInstance().slots_;
     for (auto it : session_handler_map) {
       it.second->OnMessage(message, type, session_id);
     }
 
-    if (!slots.empty()) {
-      auto it = slots.find(session_id);
-      if (it != slots.end()) {
-        it->second->OnMessage(message, type);
-      }
+    // reduce the holding time of slots_mutex_
+    std::lock_guard<std::recursive_mutex> lock(
+        DebugRouterCore::GetInstance().slots_mutex_);
+    const auto &slots = DebugRouterCore::GetInstance().slots_;
+    auto it = slots.find(session_id);
+    if (it != slots.end()) {
+      it->second->OnMessage(message, type);
     }
   }
 
@@ -263,9 +262,11 @@ void DebugRouterCore::SendDataAsync(const std::string &data,
 }
 
 int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
-  std::lock_guard<std::recursive_mutex> lock(slots_mutex_);
-  max_session_id_++;
-  slots_[max_session_id_] = slot;
+  {
+    std::lock_guard<std::recursive_mutex> lock(slots_mutex_);
+    max_session_id_++;
+    slots_[max_session_id_] = slot;
+  }
   LOGI("plug session: " << max_session_id_);
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     processor_->FlushSessionList();
@@ -283,8 +284,10 @@ int32_t DebugRouterCore::GetUSBPort() {
 
 void DebugRouterCore::Pull(int32_t session_id_) {
   LOGI("pull session: " << session_id_);
-  std::lock_guard<std::recursive_mutex> lock(slots_mutex_);
-  slots_.erase(session_id_);
+  {
+    std::lock_guard<std::recursive_mutex> lock(slots_mutex_);
+    slots_.erase(session_id_);
+  }
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     processor_->FlushSessionList();
   }
