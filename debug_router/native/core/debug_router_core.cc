@@ -379,7 +379,9 @@ void DebugRouterCore::OnClosed(
   connection_state_.store(DISCONNECTED, std::memory_order_relaxed);
   current_transceiver_ = nullptr;
   NotifyConnectStateByMessage(DISCONNECTED);
-  if (retry_times_.load(std::memory_order_relaxed) >= 3) {
+  if (transceiver->GetType() == ConnectionType::kUsb ||
+      (transceiver->GetType() == ConnectionType::kWebSocket &&
+       retry_times_.load(std::memory_order_relaxed) >= 3)) {
     std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
     {
       std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
@@ -448,7 +450,10 @@ void DebugRouterCore::OnFailure(
   connection_state_.store(DISCONNECTED, std::memory_order_relaxed);
   current_transceiver_ = nullptr;
   NotifyConnectStateByMessage(DISCONNECTED);
-  if (retry_times_.load(std::memory_order_relaxed) >= 3) {
+
+  if (transceiver->GetType() == ConnectionType::kUsb ||
+      (transceiver->GetType() == ConnectionType::kWebSocket &&
+       retry_times_.load(std::memory_order_relaxed) >= 3)) {
     std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
     {
       std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
