@@ -95,9 +95,12 @@ class StateListenerDeleagte : public debugrouter::core::DebugRouterStateListener
   virtual void OnClose(int32_t code, const std::string &reason) override {
     [listener_ios_ onClose:code withReason:[NSString stringWithUTF8String:reason.c_str()]];
   }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   virtual void OnMessage(const std::string &message) override {
     [listener_ios_ onMessage:[NSString stringWithUTF8String:message.c_str()]];
   }
+#pragma clang diagnostic pop
   virtual void OnError(const std::string &error) override {
     [listener_ios_ onError:[NSString stringWithUTF8String:error.c_str()]];
   }
@@ -110,9 +113,12 @@ class GlobalHandlerDelegate : public debugrouter::core::DebugRouterGlobalHandler
  public:
   GlobalHandlerDelegate(id<DebugRouterGlobalHandler> handler) : handler_(handler) {}
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   virtual void OpenCard(const std::string &url) override {
     [handler_ openCard:[NSString stringWithUTF8String:url.c_str()]];
   }
+#pragma clang diagnostic pop
   virtual void OnMessage(const std::string &message, const std::string &type) override {
     [handler_ onMessage:[NSString stringWithUTF8String:message.c_str()]
                withType:[NSString stringWithUTF8String:type.c_str()]];
@@ -295,7 +301,7 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 }
 
 - (void)sendData:(NSString *)data WithType:(NSString *)type ForSession:(int)session {
-  [self sendData:data WithType:type ForSession:session WithMark:-1];
+  [self sendData:data WithType:type ForSession:session WithMark:-1 isObject:NO];
 }
 
 - (void)sendData:(NSString *)data
@@ -306,7 +312,15 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 }
 
 - (void)sendObject:(NSDictionary *)data WithType:(NSString *)type ForSession:(int)session {
-  [self sendObject:data WithType:type ForSession:session WithMark:-1];
+  NSError *error;
+  NSData *jsonData = [NSJSONSerialization dataWithJSONObject:data
+                                                     options:NSJSONWritingPrettyPrinted
+                                                       error:&error];
+  NSString *jsonString;
+  if (jsonData) {
+    jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    [self sendData:jsonString WithType:type ForSession:session WithMark:-1 isObject:YES];
+  }
 }
 
 - (void)sendObject:(NSDictionary *)data
@@ -341,7 +355,11 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 }
 
 - (void)sendDataAsync:(NSString *)data WithType:(NSString *)type ForSession:(int)session {
-  [self sendDataAsync:data WithType:type ForSession:session WithMark:-1];
+  if (data == nil || type == nil) {
+    return;
+  }
+  debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(
+      [data UTF8String], [type UTF8String], session, -1, false);
 }
 
 - (void)sendDataAsync:(NSString *)data
@@ -356,7 +374,19 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 }
 
 - (void)sendObjectAsync:(NSDictionary *)data WithType:(NSString *)type ForSession:(int)session {
-  [self sendObjectAsync:data WithType:type ForSession:session WithMark:-1];
+  if (type == nil) {
+    return;
+  }
+  NSError *error;
+  NSData *jsonData = [NSJSONSerialization dataWithJSONObject:data
+                                                     options:NSJSONWritingPrettyPrinted
+                                                       error:&error];
+  NSString *jsonString;
+  if (jsonData) {
+    jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(
+        [jsonString UTF8String], [type UTF8String], session, -1, true);
+  }
 }
 
 - (void)sendObjectAsync:(NSDictionary *)data
