@@ -22,15 +22,6 @@ def get_build_type(args):
         build_type = 'release'
     return build_type
 
-
-def run_sync(verbose):
-    print (HARMONY_DIR)
-    cmd = '../../tools/hab sync ../.. -f --no-history --target harmony'
-    if verbose:
-        print(f'run command {cmd}')
-    check_call(cmd, shell=True, cwd=HARMONY_DIR)
-
-
 def run_gn(is_debug, gn_out_dir):
     cmd = f'gn gen {gn_out_dir} --args=\'target_os="harmony" is_debug={str(is_debug).lower()} target_cpu="arm64" harmony_sdk_version="default"\' --export-compile-commands'
     check_call(cmd, shell=True, cwd=HARMONY_DIR)
@@ -89,14 +80,6 @@ def collect_module_config_list(args):
         print('module_config_list is' + str(module_config_list))
     return module_config_list
 
-
-def run_package_hap(args):
-    build_type = get_build_type(args)
-    cmd = f"hvigorw assembleApp --mode project -p product=default -p buildMode={build_type} -p skipGn=true --no-daemon"
-    if args.verbose:
-        print(f'run command {cmd}')
-    check_call(cmd, shell=True, cwd=HARMONY_DIR)
-
 def packDebugrouterHeaderFiles():
     src_path = os.path.join(HARMONY_DIR, "..", "common")
 
@@ -109,6 +92,7 @@ def packDebugrouterHeaderFiles():
         f"cp -rL {src_path}/*.h ./"
     ]
     cmd = " && ".join(cmds)
+    print(f'packDebugrouterHeaderFiles: run command {cmd}')
     check_call(cmd, shell=True, cwd=dest_path)
     pass
 
@@ -120,13 +104,12 @@ def main(argv):
     parser.add_argument("--sync", action="store_true", default=False, help="run lcm sync")
     parser.add_argument("--sync_only", action="store_true", default=False, help="run lcm sync only")
     parser.add_argument("--override_version", type=str, required=False, help="override version")
-    parser.add_argument("--build_lynx_core", action="store_true", default=False, help="build lynx core")
     parser.add_argument("--verbose", action="store_true", default=False, help="print all commands")
     parser.add_argument("--build_har", action="store_true", default=False, help=" build har")
     parser.add_argument("--build_hap", action="store_true", default=False, help=" build hap")
     args = parser.parse_args()
 
-    print(f'start build with args {args} environ is {os.environ}')
+    print(f'start build with args {args}, environ is {os.environ}')
 
     if args.modules:
         if len(args.modules) == 1 and args.modules[0].lower() == "default":
@@ -138,21 +121,18 @@ def main(argv):
     else:
         modules = []
 
-    if args.sync:
-        run_sync(args.verbose)
-        if args.sync_only:
-            return
-
     gn_out_dir = get_out_dir(args)
     run_gn(args.is_debug, gn_out_dir)
     run_build_so(gn_out_dir, args)
     run_cp_so(gn_out_dir, args)
 
     if args.build_har and len(modules) > 0:
+        harmony_home = os.getenv('HARMONY_HOME')
+        if not harmony_home:
+            raise Exception('HARMONY_HOME is not set')
+
         commit_hash = os.popen('git rev-parse HEAD').read().strip()
         print('commit hash is ' + commit_hash)
-
-        # add_node_home_env()
 
         if args.override_version:
             publish_version = args.override_version
@@ -162,7 +142,7 @@ def main(argv):
 
         # remove .gitignore file before build har
         # since har package will ignore files in .gitignore
-        delete_gitignore_file()
+        # delete_gitignore_file()
 
         print('publish version is ' + publish_version)
 
@@ -180,9 +160,6 @@ def main(argv):
             if module == 'debug_router':
                 packDebugrouterHeaderFiles()
             run_package_har(module, module_full_path, args.verbose)
-
-    if args.build_hap:
-        run_package_hap(args)
 
     return 0
 

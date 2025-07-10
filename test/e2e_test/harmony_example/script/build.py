@@ -25,7 +25,7 @@ def get_build_type(args):
 
 def run_sync(verbose):
     print (HARMONY_DIR)
-    cmd = '../../tools/hab sync ../.. -f --no-history --target harmony'
+    cmd = '../../../tools/hab sync ../../.. -f --no-history --target harmony'
     if verbose:
         print(f'run command {cmd}')
     check_call(cmd, shell=True, cwd=HARMONY_DIR)
@@ -46,7 +46,7 @@ def run_build_so(output_path, args):
 
 def run_cp_so(output_path, args):
     shared_object_cp_map = {
-        'libdebugrouter.so': 'debug_router/libs/arm64-v8a/',
+        'libdebugrouter.so': '../../../debug_router/harmony/debug_router/libs',
     }
     for so, dst in shared_object_cp_map.items():
         src = os.path.join(output_path, so)
@@ -62,7 +62,7 @@ def run_cp_so(output_path, args):
 
 def get_out_dir(args):
     dir_name = f'harmony_{get_build_type(args)}_arm64'
-    out_dir = os.path.join(HARMONY_DIR, '..', '..', 'out', dir_name)
+    out_dir = os.path.join(HARMONY_DIR, '..', '..', '..', 'out', dir_name)
     return out_dir
 
 

@@ -1,8 +1,8 @@
 <div>
 
 ## Introduction
+DebugRouter serves as the infrastructure for [Lynx DevTool](https://github.com/lynx-family/lynx-devtool), providing a stable connection between apps and the Lynx DevTool Desktop App. The Lynx DevTool Desktop App uses it to send, receive and transmit debugging protocols to [Lynx](https://github.com/lynx-family/lynx). It also supports the registration of custom protocols. You can implement a cross-platform testing framework based on DebugRouter (not limited to Lynx). DebugRouter offers multiple connection methods, including USB, WebSocket, local device sockets and remote device sockets.
 
-PrimJS is a lightweight, high-performance JavaScript engine designed specifically for the [Lynx](https://github.com/lynx-family/lynx) cross-platform framework. Fully supporting ES2019, PrimJS is built on top of [QuickJS](https://bellard.org/quickjs/) and delivers superior performance and a better development experience compared to QuickJS.
 
 ## Installation
 
@@ -11,8 +11,6 @@ ohpm install @lynx/debug_router
 ```
 
 ## How to use
-
-As the underlying JS engine of Lynx, PrimJS currently has no scenarios for independent integration or usage. For apps that need to integrate Lynx, they must simultaneously introduce the PrimJS dependency.
 
 You can add dependency in oh-package.json5 like this:
 

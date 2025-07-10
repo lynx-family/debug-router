@@ -235,6 +235,15 @@ jobs:
           ./xctestrunner --xctestrun `pwd`/Build/Products/DebugRouter_Tests_iphonesimulator$(cat sdk.txt)-arm64.xctestrun --work_dir `pwd` --output_dir `pwd`/iOSCoreBuild/DerivedData simulator_test
           popd
 
+  # harmony-example-build:
+  #   runs-on: lynx-custom-dind
+  #   container: 
+  #     image: ghcr.io/lynx-family/ubuntu24.04-harmony:lastest
+  #     options: --cap-add=NET_ADMIN
+  #     credentials:
+  #       username: lynx-family
+  #       password: ${{ secrets.GITHUB_TOKEN }}
+
   debug-router-connector-npm-package-build:
     runs-on: lynx-ubuntu-22.04-avd-large
     steps:
