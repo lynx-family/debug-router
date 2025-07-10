@@ -81,7 +81,7 @@ jobs:
           python3 test/unit_test/check_test_build.py
           python3 test/unit_test/check_test_run.py
 
-  android-example-build:
+  android-aar-build:
     runs-on: lynx-ubuntu-22.04-avd-large
     steps:
       - name: Download Source
@@ -97,11 +97,11 @@ jobs:
         with:
           version: 7.33.6
       - name: Grant execute permission for gradlew
-        run: cd $GITHUB_WORKSPACE/test/e2e_test/AndroidExample &&  chmod +x ./gradlew
+        run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
       - name: Build the AAR
         run: |-
           source tools/envsetup.sh
-          pushd test/e2e_test/AndroidExample
+          pushd test/e2e_test/android_example
           ./gradlew :DebugRouter:assemblerelease
           popd
 
@@ -121,7 +121,7 @@ jobs:
         with:
           version: 7.33.6
       - name: Grant execute permission for gradlew
-        run: cd $GITHUB_WORKSPACE/test/e2e_test/AndroidExample &&  chmod +x ./gradlew
+        run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
       - name: Run the android websocket connection check
         run: |-
           python3 -m pip install PyYAML
@@ -146,7 +146,7 @@ jobs:
         with:
           version: 7.33.6
       - name: Grant execute permission for gradlew
-        run: cd $GITHUB_WORKSPACE/test/e2e_test/AndroidExample &&  chmod +x ./gradlew
+        run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
       - name: Run the android usb connection check
         run: |-
           python3 -m pip install PyYAML
@@ -171,7 +171,7 @@ jobs:
         with:
           version: 7.33.6
       - name: Grant execute permission for gradlew
-        run: cd $GITHUB_WORKSPACE/test/e2e_test/AndroidExample &&  chmod +x ./gradlew
+        run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
       - name: Run the android unittests check
         run: |-
           python3 -m pip install PyYAML
@@ -197,7 +197,7 @@ jobs:
         run: |-
           set -e
           git config --global url."https://github.com/".insteadOf "git@github.com:"
-          pushd test/e2e_test/iOSExample
+          pushd test/e2e_test/ios_example
           root_dir=$(pwd) && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk bundle install
           bundle exec pod install --verbose --repo-update
           xcodebuild clean -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug
@@ -223,7 +223,7 @@ jobs:
           source tools/envsetup.sh
           set -e
           git config --global url."https://github.com/".insteadOf "git@github.com:"
-          pushd test/e2e_test/iOSExample
+          pushd test/e2e_test/ios_example
           root_dir=$(pwd) && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk bundle install
           bundle exec pod install --verbose --repo-update
           xcodebuild clean -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug

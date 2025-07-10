@@ -88,7 +88,7 @@ deps = {
         "commit": "9572e56a12c88c011d504a707ca94952be4664f9",
         "ignore_in_git": True,
     },
-    'test/e2e_test/iOSExample/xctestrunner': {
+    'test/e2e_test/ios_example/xctestrunner': {
         "type": "http",
         "url": "https://github.com/google/xctestrunner/releases/download/0.2.15/ios_test_runner.par",
         "decompress": False,

@@ -12,9 +12,9 @@
 #include <unordered_set>
 #include <vector>
 
-#include "debug_router/Common/debug_router_global_handler.h"
-#include "debug_router/Common/debug_router_session_handler.h"
-#include "debug_router/Common/debug_router_slot.h"
+#include "debug_router/common/debug_router_global_handler.h"
+#include "debug_router/common/debug_router_session_handler.h"
+#include "debug_router/common/debug_router_slot.h"
 #include "debug_router/native/base/no_destructor.h"
 
 namespace debugrouter {
@@ -24,6 +24,8 @@ typedef enum { Unknown = -1, WebSocket = 0, USB } ConnectionType;
 
 class DebugRouterStateListener {
  public:
+  DebugRouterStateListener() = default;
+  virtual ~DebugRouterStateListener() = default;
   virtual void OnOpen(ConnectionType type) = 0;
   virtual void OnClose(int32_t code, const std::string &reason) = 0;
   virtual void OnMessage(const std::string &message) = 0;

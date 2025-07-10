@@ -31,7 +31,7 @@ Let's introduce how to quickly get started with DebugRouter. For detailed integr
 
 #### Android
 ``` bash
-cd test/e2e_test/AndroidExample
+cd test/e2e_test/android_example
 ./gradlew app:assembleDebug
 ```
 then you can find the apk in ```app/build/outputs/apk/debug/app-debug.apk```.  
@@ -39,7 +39,7 @@ then you can find the apk in ```app/build/outputs/apk/debug/app-debug.apk```.
 #### iOS
 
 ``` bash
-cd test/e2e_test/iOSExample
+cd test/e2e_test/ios_example
 bundle install && bundle exec pod install
 ```
 - Open DebugRouter.xcworkspace

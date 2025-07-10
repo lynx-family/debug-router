@@ -6,7 +6,7 @@
 
 #include <android/log.h>
 
-#include "debug_router/Android/build/gen/LLog_jni.h"
+#include "debug_router/android/build/gen/LLog_jni.h"
 
 void SetNativeMinLogLevel(JNIEnv *env, jclass jcaller, jint level) {
   debugrouter::logging::SetMinLogLevel(level);

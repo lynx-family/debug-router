@@ -31,7 +31,7 @@ def AndroidBuildSetup():
   print('\nStarting checking if DebugRouter can be built.')
   print('debugrouter_root_dir:' + debugrouter_root_dir)
   os.chdir(debugrouter_root_dir)
-  cur_work_dir = os.getcwd() + "/test/e2e_test/AndroidExample"
+  cur_work_dir = os.getcwd() + "/test/e2e_test/android_example"
   os.chdir(cur_work_dir)
   print('cur_work_dir:' + os.getcwd())
 

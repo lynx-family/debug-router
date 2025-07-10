@@ -4,7 +4,7 @@
 
 #include "debug_router/native/android/message_handler_android.h"
 
-#include "debug_router/Android/build/gen/MessageHandlerDelegate_jni.h"
+#include "debug_router/android/build/gen/MessageHandlerDelegate_jni.h"
 #include "debug_router/native/android/base/android/jni_helper.h"
 
 namespace debugrouter {

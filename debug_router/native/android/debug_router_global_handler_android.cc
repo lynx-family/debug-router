@@ -4,7 +4,7 @@
 
 #include "debug_router/native/android/debug_router_global_handler_android.h"
 
-#include "debug_router/Android/build/gen/GlobalHandlerDelegate_jni.h"
+#include "debug_router/android/build/gen/GlobalHandlerDelegate_jni.h"
 #include "debug_router/native/android/base/android/android_jni.h"
 #include "debug_router/native/android/base/android/jni_helper.h"
 

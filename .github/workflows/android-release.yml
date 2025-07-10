@@ -31,11 +31,11 @@ jobs:
           echo "VERSION=$version" >> $GITHUB_OUTPUT;
         id: get_tag
       - name: Grant execute permission for gradlew
-        run: cd $GITHUB_WORKSPACE/test/e2e_test/AndroidExample &&  chmod +x ./gradlew
+        run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
       - name: Build artifact
         run: |-
           source tools/envsetup.sh
-          pushd test/e2e_test/AndroidExample
+          pushd test/e2e_test/android_example
           ./gradlew :DebugRouter:assemblerelease
           ./gradlew :DebugRouter:publish \
           -Pversion=${{ steps.get_tag.outputs.VERSION }} \
@@ -44,7 +44,7 @@ jobs:
           -Psigning.secretKey=${{ secrets.SIGNING_SECRET_KEY }}
           ./gradlew :DebugRouter:zipArtifacts -Pversion=${{ steps.get_tag.outputs.VERSION }} :DebugRouter:getArtifactList
           popd
-          pushd debug_router/Android/DebugRouter/build/
+          pushd debug_router/android/debug_router/build/
           artifact_list=$(<artifact-list)
           echo $artifact_list
           echo "::set-output name=artifact_list::$artifact_list"

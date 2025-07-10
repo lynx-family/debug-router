@@ -9,7 +9,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "debug_router/Common/debug_router_slot_delegate.h"
+#include "debug_router/common/debug_router_slot_delegate.h"
 
 namespace debugrouter {
 namespace common {
@@ -22,13 +22,8 @@ class DebugRouterSlot : public std::enable_shared_from_this<DebugRouterSlot> {
 
   int32_t Plug();
   void Pull();
-  void Send(const std::string &message);
-  void SendData(const std::string &data, const std::string &type);
-  void SendData(const std::string &data, const std::string &type, int32_t mark);
   void SendAsync(const std::string &message);
   void SendDataAsync(const std::string &data, const std::string &type);
-  void SendDataAsync(const std::string &data, const std::string &type,
-                     int32_t mark);
 
   // delegate methods
   std::string GetTemplateUrl() const;
