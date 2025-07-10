@@ -2,13 +2,13 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/Common/debug_router.h"
+#include "debug_router/common/debug_router.h"
 
 #include <chrono>
 #include <memory>
 
-#include "debug_router/Common/debug_router_slot.h"
-#include "debug_router/Common/native_slot_delegate.h"
+#include "debug_router/common/debug_router_slot.h"
+#include "debug_router/common/native_slot_delegate.h"
 #include "debug_router/native/base/no_destructor.h"
 #include "debug_router/native/core/debug_router_core.h"
 #include "debug_router/native/core/debug_router_state_listener.h"
@@ -21,6 +21,9 @@ class DebugRouterStateListenerDelegate : public core::DebugRouterStateListener {
   explicit DebugRouterStateListenerDelegate(
       const std::shared_ptr<common::DebugRouterStateListener> listener)
       : listener_(listener) {}
+  DebugRouterStateListenerDelegate() = default;
+  virtual ~DebugRouterStateListenerDelegate() = default;
+
   void OnOpen(core::ConnectionType type) override {
     ConnectionType type_ = ConnectionType::Unknown;
     switch (type) {

@@ -1,4 +1,0 @@
-include ':DebugRouter'
-project(':DebugRouter').projectDir = new File(rootProject.projectDir, '../../../debug_router/Android/DebugRouter')
-
-include ':app'

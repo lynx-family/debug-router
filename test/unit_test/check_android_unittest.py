@@ -31,7 +31,7 @@ def AndroidBuildSetup():
   print('Starting checking if DebugRouter can be built.')
   print('debugrouter_root_dir:' + debugrouter_root_dir)
   os.chdir(debugrouter_root_dir)
-  cur_work_dir = os.getcwd() + "/test/e2e_test/AndroidExample"
+  cur_work_dir = os.getcwd() + "/test/e2e_test/android_example"
   os.chdir(cur_work_dir)
   print('cur_work_dir:' + os.getcwd())
 
@@ -62,7 +62,7 @@ def CheckUnitTestInstallAndRun(args):
   print("start emu:")
   CheckExecute(command)
 
-  debug_router_android_apk_file = '../../../debug_router/Android/DebugRouter/build/outputs/apk/androidTest/debug/DebugRouter-debug-androidTest.apk'
+  debug_router_android_apk_file = '../../../debug_router/android/debug_router/build/outputs/apk/androidTest/debug/DebugRouter-debug-androidTest.apk'
   print("install test apk:" + debug_router_android_apk_file)
   CheckExecute("adb install -r %s" % (debug_router_android_apk_file))
 

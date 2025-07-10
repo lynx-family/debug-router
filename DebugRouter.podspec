@@ -19,10 +19,10 @@ Pod::Spec.new do |s|
   s.ios.deployment_target = '9.0'
 
   s.subspec 'Framework' do |ss|
-    ss.source_files = 'debug_router/iOS/public/*.{h,m,mm}', 'debug_router/iOS/public/base/*.{h,m,mm}', 'debug_router/iOS/*.{h,m,mm}', 'debug_router/iOS/net/*.{h,m,mm}', 'debug_router/iOS/report/*.{h,m,mm}', 'debug_router/iOS/base/*.{h,m,mm}', 'debug_router/iOS/base/report/*.{h,m,mm}', 'debug_router/iOS/base/service/*.{h,m,mm}'
-    ss.pod_target_xcconfig  = { "HEADER_SEARCH_PATHS" => "\"${PODS_TARGET_SRCROOT}/debug_router/iOS/\"" }
+    ss.source_files = 'debug_router/ios/public/*.{h,m,mm}', 'debug_router/ios/public/base/*.{h,m,mm}', 'debug_router/ios/*.{h,m,mm}', 'debug_router/ios/net/*.{h,m,mm}', 'debug_router/ios/report/*.{h,m,mm}', 'debug_router/ios/base/*.{h,m,mm}', 'debug_router/ios/base/report/*.{h,m,mm}', 'debug_router/ios/base/service/*.{h,m,mm}'
+    ss.pod_target_xcconfig  = { "HEADER_SEARCH_PATHS" => "\"${PODS_TARGET_SRCROOT}/debug_router/ios/\"" }
     ss.dependency 'DebugRouter/Native'
-    ss.public_header_files = 'debug_router/iOS/public/DebugRouter.h', 'debug_router/iOS/public/DebugRouterMessageHandler.h', 'debug_router/iOS/public/DebugRouterCommon.h', 'debug_router/iOS/public/DebugRouterMessageHandleResult.h', "debug_router/iOS/public/DebugRouterEventSender.h", "debug_router/iOS/public/DebugRouterGlobalHandler.h", "debug_router/iOS/public/DebugRouterSlot.h", "debug_router/iOS/public/base/DebugRouterReportServiceUtil.h", "debug_router/iOS/public/base/DebugRouterToast.h", "debug_router/iOS/public/DebugRouterSessionHandler.h", "debug_router/iOS/public/base/DebugRouterDefines.h", "debug_router/iOS/public/base/DebugRouterReportServiceProtocol.h", "debug_router/iOS/public/base/DebugRouterService.h", "debug_router/iOS/public/base/DebugRouterServiceProtocol.h", "debug_router/iOS/public/LocalNetworkPermissionChecker.h"
+    ss.public_header_files = 'debug_router/ios/public/DebugRouter.h', 'debug_router/ios/public/DebugRouterMessageHandler.h', 'debug_router/ios/public/DebugRouterCommon.h', 'debug_router/ios/public/DebugRouterMessageHandleResult.h', "debug_router/ios/public/DebugRouterEventSender.h", "debug_router/ios/public/DebugRouterGlobalHandler.h", "debug_router/ios/public/DebugRouterSlot.h", "debug_router/ios/public/base/DebugRouterReportServiceUtil.h", "debug_router/ios/public/base/DebugRouterToast.h", "debug_router/ios/public/DebugRouterSessionHandler.h", "debug_router/ios/public/base/DebugRouterDefines.h", "debug_router/ios/public/base/DebugRouterReportServiceProtocol.h", "debug_router/ios/public/base/DebugRouterService.h", "debug_router/ios/public/base/DebugRouterServiceProtocol.h", "debug_router/ios/public/LocalNetworkPermissionChecker.h"
   end
 
   s.subspec 'Native' do |ss|

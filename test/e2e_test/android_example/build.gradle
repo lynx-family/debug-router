@@ -23,9 +23,9 @@ allprojects {
 task clean(type: Delete) {
     delete rootProject.buildDir
     description "Clean JNI files."
-    delete "../../../debug_router/Android/build/gen"
+    delete "../../../debug_router/android/build/gen"
     description "Clean export files."
-    delete "../../../debug_router/Android/DebugRouter/src/main/export"
+    delete "../../../debug_router/android/debug_router/src/main/export"
 }
 
 ext.enable_coverage_bool = (enable_coverage == 'true')

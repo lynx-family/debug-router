@@ -2,11 +2,11 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/Common/debug_router_slot.h"
+#include "debug_router/common/debug_router_slot.h"
 
 #include <unordered_map>
 
-#include "debug_router/Common/debug_router.h"
+#include "debug_router/common/debug_router.h"
 #include "debug_router/native/processor/message_assembler.h"
 #include "json/reader.h"
 

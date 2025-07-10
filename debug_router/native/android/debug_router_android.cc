@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "debug_router/Android/build/gen/DebugRouter_jni.h"
+#include "debug_router/android/build/gen/DebugRouter_jni.h"
 #include "debug_router/native/android/base/android/jni_helper.h"
 #include "debug_router/native/android/debug_router_global_handler_android.h"
 #include "debug_router/native/android/debug_router_listener_android.h"

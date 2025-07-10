@@ -5,7 +5,7 @@
 #ifndef DEBUG_ROUTER_COMMON_NATIVE_SLOT_DELEGATE_H_
 #define DEBUG_ROUTER_COMMON_NATIVE_SLOT_DELEGATE_H_
 
-#include "debug_router/Common/debug_router_slot.h"
+#include "debug_router/common/debug_router_slot.h"
 #include "debug_router/native/core/native_slot.h"
 
 namespace debugrouter {
@@ -17,6 +17,7 @@ class NativeSlotDelegate : public core::NativeSlot {
       : core::NativeSlot(slot->GetType(), slot->GetTemplateUrl()) {
     slot_ = slot;
   }
+  ~NativeSlotDelegate() override { slot_ = nullptr; }
 
   std::string GetUrl() { return slot_->GetTemplateUrl(); }
 
