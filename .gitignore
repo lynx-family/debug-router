@@ -37,6 +37,8 @@ test/e2e_test/ios_example/DebugRouter.xcworkspace
 test/e2e_test/ios_example/Pods
 test/e2e_test/ios_example/xctestrunner
 
+test/e2e_test/harmony_example/entry/libs/**/*.so
+
 # tools file
 tools/android_tools/
 

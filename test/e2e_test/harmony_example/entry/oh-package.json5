@@ -8,6 +8,6 @@
   "main": "",
   "version": "1.0.0",
   "dependencies": {
-    "@lynx/debug_router": "file:../debug_router",
+    "@lynx/debug_router": "file:../../../../debug_router/harmony/debug_router/",
   },
 }
