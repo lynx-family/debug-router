@@ -1,0 +1,17 @@
+{
+  "name": "debug_router",
+  "license": "Apache-2.0",
+  "devDependencies": {},
+  "repository": "https://github.com/lynx-family/debug-router",
+  "author": "Lynx",
+  "version": "0.0.1",
+  "modelVersion": "5.0.3",
+  "description": "A Connector for Debugging",
+  "scripts": {
+    "prepare": "./script/build.py --verbose",
+    "build:release": "./script/build.py --build_har --modules debug_router --verbose",
+  },
+  "dependencies": {
+  },
+  "parameterFile": "./parameter.json",
+}

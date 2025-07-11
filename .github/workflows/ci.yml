@@ -9,268 +9,308 @@ on:
       - main
 
 jobs:
-  static-check:
-    runs-on: lynx-ubuntu-22.04-avd-medium
+  # static-check:
+  #   runs-on: lynx-ubuntu-22.04-avd-medium
+  #   steps:
+  #     - name: Python Setup
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.13"
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #       with:
+  #         fetch-depth: 2
+  #         ref: ${{ github.event.pull_request.head.sha }}
+  #         path: ${{ github.workspace }}
+  #     - name: Install Common Dependencies
+  #       uses: nick-fields/retry@v2
+  #       with:
+  #         timeout_minutes: 10
+  #         max_attempts: 3
+  #         command: |-
+  #           set -e
+  #           python3 -m pip install PyYAML -i https://pypi.org/simple
+  #           python3 -m pip install requests
+  #           tools/hab sync .
+  #     - name: Run file type check
+  #       run: |
+  #         source tools/envsetup.sh
+  #         python3 tools_shared/git_lynx.py check --checkers file-type
+  #     - name: Run java-lint check
+  #       run: |
+  #         source tools/envsetup.sh
+  #         python3 tools_shared/git_lynx.py check --checkers java-lint
+  #     - name: Run android-check-style check
+  #       run: |
+  #         source tools/envsetup.sh
+  #         python3 tools_shared/git_lynx.py check --checkers android-check-style
+  #     - name: Run commit-message check
+  #       run: |
+  #         source tools/envsetup.sh
+  #         python3 tools_shared/git_lynx.py check --checkers commit-message
+  #     - name: Run coding-style check
+  #       run: |
+  #         cd tools_shared
+  #         ./hab sync -f .
+  #         source envsetup.sh
+  #         cd ..
+  #         source tools/envsetup.sh
+  #         git lynx check --checkers coding-style
+
+  # unittest-build-check:
+  #   runs-on: lynx-ubuntu-22.04-avd-large
+  #   steps:
+  #     - name: Python Setup
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.13"
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #     - name: Install Common Dependencies
+  #       uses: nick-fields/retry@v2
+  #       with:
+  #         timeout_minutes: 10
+  #         max_attempts: 3
+  #         command: |-
+  #           python3 -m pip install PyYAML -i https://pypi.org/simple
+  #           tools/hab sync .
+  #     - name: Run Unittests
+  #       run: |
+  #         set -e
+  #         source tools/envsetup.sh
+  #         python3 test/unit_test/check_test_build.py
+  #         python3 test/unit_test/check_test_run.py
+
+  # android-aar-build:
+  #   runs-on: lynx-ubuntu-22.04-avd-large
+  #   steps:
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #     - name: Python Setup
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.13"
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 18
+  #     - uses: pnpm/action-setup@v4.0.0
+  #       with:
+  #         version: 7.33.6
+  #     - name: Grant execute permission for gradlew
+  #       run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
+  #     - name: Build the AAR
+  #       run: |-
+  #         source tools/envsetup.sh
+  #         pushd test/e2e_test/android_example
+  #         ./gradlew :DebugRouter:assemblerelease
+  #         popd
+
+  # android-websocket-connection-ci-check:
+  #   runs-on: lynx-ubuntu-22.04-physical-medium
+  #   steps:
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #     - name: Python Setup
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.13"
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 18
+  #     - uses: pnpm/action-setup@v4.0.0
+  #       with:
+  #         version: 7.33.6
+  #     - name: Grant execute permission for gradlew
+  #       run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
+  #     - name: Run the android websocket connection check
+  #       run: |-
+  #         python3 -m pip install PyYAML
+  #         python3 -m pip install requests
+  #         tools/hab sync . -f
+  #         source tools/envsetup.sh
+  #         python3 test/connect_test/check_android_connection_ci.py -t websocket
+
+  # android-usb-connection-ci-check:
+  #   runs-on: lynx-ubuntu-22.04-physical-medium
+  #   steps:
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #     - name: Python Setup
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.13"
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 18
+  #     - uses: pnpm/action-setup@v4.0.0
+  #       with:
+  #         version: 7.33.6
+  #     - name: Grant execute permission for gradlew
+  #       run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
+  #     - name: Run the android usb connection check
+  #       run: |-
+  #         python3 -m pip install PyYAML
+  #         python3 -m pip install requests
+  #         tools/hab sync . -f
+  #         source tools/envsetup.sh
+  #         python3 test/connect_test/check_android_connection_ci.py -t usb
+
+  # android-unittest-check:
+  #   runs-on: lynx-ubuntu-22.04-physical-medium
+  #   steps:
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #     - name: Python Setup
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.13"
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 18
+  #     - uses: pnpm/action-setup@v4.0.0
+  #       with:
+  #         version: 7.33.6
+  #     - name: Grant execute permission for gradlew
+  #       run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
+  #     - name: Run the android unittests check
+  #       run: |-
+  #         python3 -m pip install PyYAML
+  #         python3 -m pip install requests
+  #         tools/hab sync . -f
+  #         source tools/envsetup.sh
+  #         python3 test/unit_test/check_android_unittest.py
+
+  # ios-debugrouter-lib-build:
+  #   runs-on: lynx-darwin-14-medium
+  #   env:
+  #     POD_VERSION: 5.0.5
+  #   steps:
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 18
+  #     - uses: pnpm/action-setup@v4.0.0
+  #       with:
+  #         version: 7.33.6
+  #     - name: Build Example App
+  #       run: |-
+  #         set -e
+  #         git config --global url."https://github.com/".insteadOf "git@github.com:"
+  #         pushd test/e2e_test/ios_example
+  #         root_dir=$(pwd) && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk bundle install
+  #         bundle exec pod install --verbose --repo-update
+  #         xcodebuild clean -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug
+  #         xcodebuild -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug -arch arm64 -derivedDataPath iOSCoreBuild/DerivedData -sdk iphonesimulator
+  #         popd
+
+  # ios-unittest-check:
+  #   runs-on: lynx-darwin-14-medium
+  #   env:
+  #     POD_VERSION: 5.0.5
+  #   steps:
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 18
+  #     - uses: pnpm/action-setup@v4.0.0
+  #       with:
+  #         version: 7.33.6
+  #     - name: Run the ios unittests check
+  #       run: |-
+  #         tools/hab sync . -f
+  #         source tools/envsetup.sh
+  #         set -e
+  #         git config --global url."https://github.com/".insteadOf "git@github.com:"
+  #         pushd test/e2e_test/ios_example
+  #         root_dir=$(pwd) && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk bundle install
+  #         bundle exec pod install --verbose --repo-update
+  #         xcodebuild clean -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug
+  #         xcodebuild -showsdks | grep -Eo -m 1 "iphonesimulator([0-9]{1,}\.)+[0-9]{1,}" > sdk.txt
+  #         sdkVersion=$(awk '{ sub(/iphonesimulator/,""); print $0 }' sdk.txt)
+  #         echo $sdkVersion > sdk.txt
+  #         xcodebuild build-for-testing ARCHS=arm64 -workspace DebugRouter.xcworkspace -scheme DebugRouter_Tests -enableCodeCoverage YES -configuration Debug -sdk iphonesimulator$(cat sdk.txt) COMPILER_INDEX_STORE_ENABLE=NO -derivedDataPath iOSCoreBuild/DerivedData -dest"platform=iOS Simulator,OS=$(cat sdk.txt),name=iPhone 11" SYMROOT=`pwd`/Build/Products
+  #         chmod u+x xctestrunner
+  #         ./xctestrunner --xctestrun `pwd`/Build/Products/DebugRouter_Tests_iphonesimulator$(cat sdk.txt)-arm64.xctestrun --work_dir `pwd` --output_dir `pwd`/iOSCoreBuild/DerivedData simulator_test
+  #         popd
+
+  harmony-har-build:
+    runs-on: lynx-custom-dind
+    container: 
+      image: ghcr.io/lynx-family/ubuntu24.04-harmony:lastest
+      options: --cap-add=NET_ADMIN
+      credentials:
+        username: lynx-family
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Set MTU
+        run: |
+          sudo apt-get update && sudo apt-get install --no-install-recommends -y iproute2
+          sudo ip link set dev eth0 mtu 1450
+          echo "MTU set successfully"
       - name: Python Setup
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
       - name: Download Source
         uses: actions/checkout@v4.2.2
-        with:
-          fetch-depth: 2
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: ${{ github.workspace }}
       - name: Install Common Dependencies
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |-
-            set -e
-            python3 -m pip install PyYAML -i https://pypi.org/simple
-            python3 -m pip install requests
-            tools/hab sync .
-      - name: Run file type check
+        uses: ./.github/actions/common-deps
+      - name: Build har
+        shell: bash
         run: |
-          source tools/envsetup.sh
-          python3 tools_shared/git_lynx.py check --checkers file-type
-      - name: Run java-lint check
-        run: |
-          source tools/envsetup.sh
-          python3 tools_shared/git_lynx.py check --checkers java-lint
-      - name: Run android-check-style check
-        run: |
-          source tools/envsetup.sh
-          python3 tools_shared/git_lynx.py check --checkers android-check-style
-      - name: Run commit-message check
-        run: |
-          source tools/envsetup.sh
-          python3 tools_shared/git_lynx.py check --checkers commit-message
-      - name: Run coding-style check
-        run: |
-          cd tools_shared
-          ./hab sync -f .
-          source envsetup.sh
-          cd ..
-          source tools/envsetup.sh
-          git lynx check --checkers coding-style
-
-  unittest-build-check:
-    runs-on: lynx-ubuntu-22.04-avd-large
-    steps:
-      - name: Python Setup
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Download Source
-        uses: actions/checkout@v4.2.2
-      - name: Install Common Dependencies
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |-
-            python3 -m pip install PyYAML -i https://pypi.org/simple
-            tools/hab sync .
-      - name: Run Unittests
-        run: |
-          set -e
-          source tools/envsetup.sh
-          python3 test/unit_test/check_test_build.py
-          python3 test/unit_test/check_test_run.py
-
-  android-aar-build:
-    runs-on: lynx-ubuntu-22.04-avd-large
-    steps:
-      - name: Download Source
-        uses: actions/checkout@v4.2.2
-      - name: Python Setup
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-      - uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 7.33.6
-      - name: Grant execute permission for gradlew
-        run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
-      - name: Build the AAR
-        run: |-
-          source tools/envsetup.sh
-          pushd test/e2e_test/android_example
-          ./gradlew :DebugRouter:assemblerelease
-          popd
-
-  android-websocket-connection-ci-check:
-    runs-on: lynx-ubuntu-22.04-physical-medium
-    steps:
-      - name: Download Source
-        uses: actions/checkout@v4.2.2
-      - name: Python Setup
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-      - uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 7.33.6
-      - name: Grant execute permission for gradlew
-        run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
-      - name: Run the android websocket connection check
-        run: |-
-          python3 -m pip install PyYAML
-          python3 -m pip install requests
-          tools/hab sync . -f
-          source tools/envsetup.sh
-          python3 test/connect_test/check_android_connection_ci.py -t websocket
-
-  android-usb-connection-ci-check:
-    runs-on: lynx-ubuntu-22.04-physical-medium
-    steps:
-      - name: Download Source
-        uses: actions/checkout@v4.2.2
-      - name: Python Setup
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-      - uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 7.33.6
-      - name: Grant execute permission for gradlew
-        run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
-      - name: Run the android usb connection check
-        run: |-
-          python3 -m pip install PyYAML
-          python3 -m pip install requests
-          tools/hab sync . -f
-          source tools/envsetup.sh
-          python3 test/connect_test/check_android_connection_ci.py -t usb
-
-  android-unittest-check:
-    runs-on: lynx-ubuntu-22.04-physical-medium
-    steps:
-      - name: Download Source
-        uses: actions/checkout@v4.2.2
-      - name: Python Setup
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-      - uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 7.33.6
-      - name: Grant execute permission for gradlew
-        run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
-      - name: Run the android unittests check
-        run: |-
-          python3 -m pip install PyYAML
-          python3 -m pip install requests
-          tools/hab sync . -f
-          source tools/envsetup.sh
-          python3 test/unit_test/check_android_unittest.py
-
-  ios-debugrouter-lib-build:
-    runs-on: lynx-darwin-14-medium
-    env:
-      POD_VERSION: 5.0.5
-    steps:
-      - name: Download Source
-        uses: actions/checkout@v4.2.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-      - uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 7.33.6
-      - name: Build Example App
-        run: |-
-          set -e
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          pushd test/e2e_test/ios_example
-          root_dir=$(pwd) && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk bundle install
-          bundle exec pod install --verbose --repo-update
-          xcodebuild clean -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug
-          xcodebuild -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug -arch arm64 -derivedDataPath iOSCoreBuild/DerivedData -sdk iphonesimulator
-          popd
-
-  ios-unittest-check:
-    runs-on: lynx-darwin-14-medium
-    env:
-      POD_VERSION: 5.0.5
-    steps:
-      - name: Download Source
-        uses: actions/checkout@v4.2.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-      - uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 7.33.6
-      - name: Run the ios unittests check
-        run: |-
-          tools/hab sync . -f
-          source tools/envsetup.sh
-          set -e
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          pushd test/e2e_test/ios_example
-          root_dir=$(pwd) && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk bundle install
-          bundle exec pod install --verbose --repo-update
-          xcodebuild clean -workspace DebugRouter.xcworkspace -scheme DebugRouter -configuration Debug
-          xcodebuild -showsdks | grep -Eo -m 1 "iphonesimulator([0-9]{1,}\.)+[0-9]{1,}" > sdk.txt
-          sdkVersion=$(awk '{ sub(/iphonesimulator/,""); print $0 }' sdk.txt)
-          echo $sdkVersion > sdk.txt
-          xcodebuild build-for-testing ARCHS=arm64 -workspace DebugRouter.xcworkspace -scheme DebugRouter_Tests -enableCodeCoverage YES -configuration Debug -sdk iphonesimulator$(cat sdk.txt) COMPILER_INDEX_STORE_ENABLE=NO -derivedDataPath iOSCoreBuild/DerivedData -dest"platform=iOS Simulator,OS=$(cat sdk.txt),name=iPhone 11" SYMROOT=`pwd`/Build/Products
-          chmod u+x xctestrunner
-          ./xctestrunner --xctestrun `pwd`/Build/Products/DebugRouter_Tests_iphonesimulator$(cat sdk.txt)-arm64.xctestrun --work_dir `pwd` --output_dir `pwd`/iOSCoreBuild/DerivedData simulator_test
-          popd
-
-  debug-router-connector-npm-package-build:
-    runs-on: lynx-ubuntu-22.04-avd-large
-    steps:
-      - name: Download Source
-        uses: actions/checkout@v4.2.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-      - uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 7.33.6
-      - name: Build debug-router-connector
-        run: |-
-          set -e
-          pushd debug_router_connector/
-          npm install
-          npm run build
+          PROJECT_ROOT=$(pwd)
+          pushd debug_router/harmony
+          ohpm install
+          ./script/build.py --build_har --modules debug_router
+          pushd debug_router/build/default/outputs/default
           ls -al
           popd
-
-  remote-debug-driver-npm-package-build:
-    runs-on: lynx-ubuntu-22.04-avd-large
-    steps:
-      - name: Download Source
-        uses: actions/checkout@v4.2.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-      - uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 7.33.6
-      - name: Build remote_debug_driver
-        run: |-
-          set -e
-          pushd remote_debug_driver/
-          npm install
-          npm run build
-          ls -al
           popd
+
+  # debug-router-connector-npm-package-build:
+  #   runs-on: lynx-ubuntu-22.04-avd-large
+  #   steps:
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 18
+  #     - uses: pnpm/action-setup@v4.0.0
+  #       with:
+  #         version: 7.33.6
+  #     - name: Build debug-router-connector
+  #       run: |-
+  #         set -e
+  #         pushd debug_router_connector/
+  #         npm install
+  #         npm run build
+  #         ls -al
+  #         popd
+
+  # remote-debug-driver-npm-package-build:
+  #   runs-on: lynx-ubuntu-22.04-avd-large
+  #   steps:
+  #     - name: Download Source
+  #       uses: actions/checkout@v4.2.2
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 18
+  #     - uses: pnpm/action-setup@v4.0.0
+  #       with:
+  #         version: 7.33.6
+  #     - name: Build remote_debug_driver
+  #       run: |-
+  #         set -e
+  #         pushd remote_debug_driver/
+  #         npm install
+  #         npm run build
+  #         ls -al
+  #         popd
