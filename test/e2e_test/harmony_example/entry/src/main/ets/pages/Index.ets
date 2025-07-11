@@ -97,9 +97,9 @@ struct Index {
 
     // tset add slot and sessionhandler
     const delegate = new testSlotDelegate();
-    const slot = new DebugRouterSlot();
+    let slot: DebugRouterSlot = new DebugRouterSlot();
     slot.setDelegate(delegate);
-    const sessionId = DebugRouter.plug(slot);
+    let sessionId: number = DebugRouter.plug(slot);
     hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: add a new slot get sessionId: ' + sessionId);
   }
   build() {

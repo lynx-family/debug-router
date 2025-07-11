@@ -1,10 +1,12 @@
 {
   "apiType": "stageMode",
   "buildOption": {
-    "externalNativeOptions": {
-      "path": "./src/main/cpp/CMakeLists.txt",
-      "arguments": "",
-      "cppFlags": "",
+    "arkOptions": {
+      "runtimeOnly": {
+        "packages": [
+          "@lynx/debug_router"
+        ]
+      }
     }
   },
   "buildOptionSet": [

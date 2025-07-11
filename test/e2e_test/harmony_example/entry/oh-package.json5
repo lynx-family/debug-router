@@ -2,12 +2,12 @@
   "license": "Apache-2.0",
   "devDependencies": {
   },
-  "author": "debug-router",
+  "author": "Lynx",
   "name": "entry",
   "description": "Please describe the basic information.",
   "main": "",
   "version": "1.0.0",
   "dependencies": {
-    "@lynx/debug_router": "file:../../../../debug_router/harmony/debug_router/",
+    "@lynx/debug_router": "0.0.1",
   },
 }

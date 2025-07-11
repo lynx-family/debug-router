@@ -6,18 +6,12 @@
   "author": "lynx",
   "description": "A Connector for Debugging",
   "scripts": {
-    "prepare": "python3 ./script/build.py --sync --verbose",
-    "dev": "python3 ./script/build.py --is_debug --verbose",
-    "build": "python3 ./script/build.py --is_debug --build_hap --sync --verbose",
-    "build:release": "python3 ./script/build.py --build_hap --sync --verbose",
+    "prepare": "python3 ./script/build.py --is_debug --verbose",
+    "build": "python3 ./script/build.py --is_debug --build_hap --verbose",
   },
   "version": "0.0.1",
-  "dependencies": {
-  },
-  "dynamicDependencies": {},
-  "parameterFile": "./parameter.json",
   "overrides": {
-    "@lynx/debug_router": "file:./debug_router",
+    "@lynx/debug_router": "file:../../../debug_router/harmony/debug_router",
   },
   "modelVersion": "5.0.3"
 }

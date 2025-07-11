@@ -3,7 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 import type { DebugRouterGlobalHandlerHarmony, DebugRouterSessionHandlerHarmony, DebugRouterMessageHandlerHarmony, DebugRouterStateListenerHarmony } from 'libdebugrouter.so';
-import { DebugRouterHarmony } from 'libdebugrouter.so';
+import { DebugRouterHarmony } from 'libdebugrouter.so'
 import { DebugRouterSlot } from './DebugRouterSlot'
 import { LynxView } from '@lynx/lynx/src/main/ets/tasm/LynxView'
 

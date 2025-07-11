@@ -23,13 +23,13 @@ def get_build_type(args):
     return build_type
 
 def run_gn(is_debug, gn_out_dir):
-    cmd = f'gn gen {gn_out_dir} --args=\'target_os="harmony" is_debug={str(is_debug).lower()} target_cpu="arm64" harmony_sdk_version="default"\' --export-compile-commands'
+    cmd = f'../../buildtools/gn/gn gen {gn_out_dir} --args=\'target_os="harmony" is_debug={str(is_debug).lower()} target_cpu="arm64" harmony_sdk_version="default"\''
     check_call(cmd, shell=True, cwd=HARMONY_DIR)
 
 
 def run_build_so(output_path, args):
     target = 'debug_router/harmony:harmony'
-    cmd = f'ninja -C {output_path} {target}'
+    cmd = f'../../buildtools/ninja/ninja -C {output_path} {target}'
     if args.verbose:
         print(f'run command {cmd}')
     check_call(cmd, shell=True, cwd=HARMONY_DIR)
@@ -96,6 +96,16 @@ def packDebugrouterHeaderFiles():
     check_call(cmd, shell=True, cwd=dest_path)
     pass
 
+def patch_debug_router_version(version, module_path):
+    cmd = 'ohpm version {}'.format(version)
+    print(f'run command {cmd} in {module_path}')
+    check_call(cmd, shell=True, cwd=module_path)
+    
+    package_file = os.path.join(module_path, "oh-package.json5")
+    # print replaced file
+    with open(package_file, "r") as f:
+        print(f.read())
+
 def main(argv):
     parser = argparse.ArgumentParser()
 
@@ -106,7 +116,6 @@ def main(argv):
     parser.add_argument("--override_version", type=str, required=False, help="override version")
     parser.add_argument("--verbose", action="store_true", default=False, help="print all commands")
     parser.add_argument("--build_har", action="store_true", default=False, help=" build har")
-    parser.add_argument("--build_hap", action="store_true", default=False, help=" build hap")
     args = parser.parse_args()
 
     print(f'start build with args {args}, environ is {os.environ}')
@@ -121,30 +130,21 @@ def main(argv):
     else:
         modules = []
 
+    harmony_home = os.getenv('HARMONY_HOME')
+    if not harmony_home:
+        print('HARMONY_HOME is not set')
+        raise Exception('HARMONY_HOME is not set')
+    else:
+        print('harmony_home is ' + harmony_home)
+
     gn_out_dir = get_out_dir(args)
     run_gn(args.is_debug, gn_out_dir)
     run_build_so(gn_out_dir, args)
     run_cp_so(gn_out_dir, args)
 
     if args.build_har and len(modules) > 0:
-        harmony_home = os.getenv('HARMONY_HOME')
-        if not harmony_home:
-            raise Exception('HARMONY_HOME is not set')
-
         commit_hash = os.popen('git rev-parse HEAD').read().strip()
         print('commit hash is ' + commit_hash)
-
-        if args.override_version:
-            publish_version = args.override_version
-        else:
-            # default version, just for package test
-            publish_version = "0.0.1-placeholder"
-
-        # remove .gitignore file before build har
-        # since har package will ignore files in .gitignore
-        # delete_gitignore_file()
-
-        print('publish version is ' + publish_version)
 
         module_paths = {}
         for module in modules:
@@ -157,6 +157,13 @@ def main(argv):
             else:
                 raise Exception(f'module {module} not found in build-profile.json5')
             module_full_path = os.path.join(HARMONY_DIR, module_path)
+            print(f'module {module} full path is {module_full_path}')
+
+            if args.override_version:
+                publish_version = args.override_version
+                patch_debug_router_version(publish_version, module_full_path)
+                print(f'override version to {publish_version}')
+
             if module == 'debug_router':
                 packDebugrouterHeaderFiles()
             run_package_har(module, module_full_path, args.verbose)

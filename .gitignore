@@ -3,6 +3,7 @@
 # Android build cache
 debug_router/android/debug_router/build
 debug_router/android/debug_router/.cxx
+debug_router/android/debug_router/.gradle
 test/e2e_test/android_example/local.properties
 
 # export files, copy from DebugRouter task
@@ -51,4 +52,5 @@ tools/android_tools/
 **/build
 **/.hvigor
 **/oh-package-lock.json5
+**/.idea
 
