@@ -236,7 +236,7 @@ jobs:
           popd
 
   harmony-har-build:
-    runs-on: lynx-container
+    runs-on: lynx-custom-dind
     container:
       image: ghcr.io/lynx-family/ubuntu24.04-harmony:lastest
       options: --cap-add=NET_ADMIN
@@ -244,6 +244,11 @@ jobs:
         username: lynx-family
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Set MTU
+        run: |
+          sudo apt-get update && sudo apt-get install --no-install-recommends -y iproute2
+          sudo ip link set dev eth0 mtu 1450
+          echo "MTU set successfully"
       - name: Python Setup
         uses: actions/setup-python@v5
         with:
@@ -271,7 +276,7 @@ jobs:
           popd
 
   harmony-hap-build:
-    runs-on: lynx-container
+    runs-on: lynx-custom-dind
     container:
       image: ghcr.io/lynx-family/ubuntu24.04-harmony:lastest
       options: --cap-add=NET_ADMIN
@@ -279,6 +284,11 @@ jobs:
         username: lynx-family
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Set MTU
+        run: |
+          sudo apt-get update && sudo apt-get install --no-install-recommends -y iproute2
+          sudo ip link set dev eth0 mtu 1450
+          echo "MTU set successfully"
       - name: Python Setup
         uses: actions/setup-python@v5
         with:
