@@ -31,7 +31,6 @@ Let's introduce how to quickly get started with DebugRouter. For detailed integr
 
 #### Android
 ``` bash
-# export ANDROID_HOME and ANDROID_NDK first
 cd test/e2e_test/android_example
 ./gradlew app:assembleDebug
 ```
@@ -47,20 +46,6 @@ bundle install && bundle exec pod install
 - Connect your mobile phone to your Mac using a USB cable.
 - Use Xcode to build and install DebugRouterExample to your phone.
 
-### Harmony
-
-```bash
-# export HARMONY_HOME and ohpm path first
-nvm use 18
-source tools/envsetup.sh --target harmony
-tools/hab sync . -f --no-history --target harmony
-
-cd test/e2e_test/harmony_example
-
-ohpm run prepare
-```
-
-- Open DevEco-Studio and build && install HarmonyExample
 
 ### Run debug_router_connector
 Compile debug_router_connector
