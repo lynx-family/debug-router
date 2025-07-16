@@ -18,7 +18,6 @@
 #include "debug_router/native/processor/message_handler.h"
 #include "debug_router/native/processor/processor.h"
 #include "debug_router/native/thread/debug_router_executor.h"
-#include "debug_router_state_listener.h"
 #include "json/value.h"
 
 namespace debugrouter {
