@@ -35,25 +35,21 @@ jobs:
       - name: Run file type check
         run: |
           source tools/envsetup.sh
-          python3 tools_shared/git_lynx.py check --checkers file-type
+          git lynx check --checkers file-type
       - name: Run java-lint check
         run: |
           source tools/envsetup.sh
-          python3 tools_shared/git_lynx.py check --checkers java-lint
+          git lynx check --checkers java-lint
       - name: Run android-check-style check
         run: |
           source tools/envsetup.sh
-          python3 tools_shared/git_lynx.py check --checkers android-check-style
+          git lynx check --checkers android-check-style
       - name: Run commit-message check
         run: |
           source tools/envsetup.sh
-          python3 tools_shared/git_lynx.py check --checkers commit-message
+          git lynx check --checkers commit-message
       - name: Run coding-style check
         run: |
-          cd tools_shared
-          ./hab sync -f .
-          source envsetup.sh
-          cd ..
           source tools/envsetup.sh
           git lynx check --checkers coding-style
 
