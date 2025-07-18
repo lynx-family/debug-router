@@ -1,0 +1,32 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "arkOptions": {
+      "byteCodeHar": false
+    },
+  },
+  "buildOptionSet": [
+    {
+      "name": "debug",
+    },
+    {
+      "name": "release",
+      "copyFrom": "debug",
+      "arkOptions": {
+        "obfuscation": {
+          "ruleOptions": {
+            "enable": true,
+            "files": [
+              "./obfuscation-rules.txt"
+            ]
+          }
+        }
+      }
+    },
+  ],
+  "targets": [
+    {
+      "name": "default"
+    }
+  ]
+}
