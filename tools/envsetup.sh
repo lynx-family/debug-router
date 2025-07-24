@@ -21,7 +21,6 @@ lynx_envsetup() {
   export DEBUGROUTER_DIR="$(dirname $TOOLS_ABSOLUTE_PATH)"
   export BUILDTOOLS_DIR="${DEBUGROUTER_DIR}/buildtools"
   export PATH="${BUILDTOOLS_DIR}/llvm/bin:${BUILDTOOLS_DIR}/ninja:${TOOLS_ABSOLUTE_PATH}/gn_tools:$PATH"
-  export PATH="tools_shared:$PATH"
 }
 
 function android_env_setup() {

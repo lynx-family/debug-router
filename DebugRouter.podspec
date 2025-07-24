@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
   s.homepage         = 'https://github.com/lynx-family/debug-router'
   s.license          = 'Apache'
   s.author           = 'Lynx'
-  s.source           = { :git => 'https://github.com/lynx-family/debug-router.git'}
+  s.source           = { :git => 'https://github.com/lynx-family/debug-router.git', :tag => s.version.to_s + '-ios'  }
   s.pod_target_xcconfig = { "GCC_PREPROCESSOR_DEFINITIONS" => "OS_IOS=1" }
 
   s.ios.deployment_target = '9.0'
