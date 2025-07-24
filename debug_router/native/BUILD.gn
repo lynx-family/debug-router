@@ -1,0 +1,154 @@
+# Copyright 2025 The Lynx Authors. All rights reserved.
+# Licensed under the Apache License Version 2.0 that can be found in the
+# LICENSE file in the root directory of this source tree.
+
+import("//build/config/harmony/config.gni")
+
+source_set("debug_router_core") {
+  defines = [ "JSON_USE_EXCEPTION=0" ]
+
+  include_dirs = [
+    ".",
+    "../../",
+    "../../third_party/jsoncpp/include",
+  ]
+
+  cflags_cc = [
+    "-Wno-extra-semi",
+    "-Wno-unused-private-field",
+    "-Wno-reorder-ctor",
+    "-Wno-implicit-fallthrough",
+    "-Wno-invalid-noreturn",
+    "-Wno-potentially-evaluated-expression",
+    "-Wno-sign-compare",
+    "-Wno-delete-non-abstract-non-virtual-dtor",
+  ]
+
+  sources = [
+    "base/socket_guard.h",
+    "core/debug_router_config.cc",
+    "core/debug_router_config.h",
+    "core/debug_router_core.cc",
+    "core/debug_router_core.h",
+    "core/debug_router_global_handler.h",
+    "core/debug_router_message_handler.h",
+    "core/debug_router_session_handler.h",
+    "core/debug_router_state_listener.cc",
+    "core/debug_router_state_listener.h",
+    "core/message_transceiver.cc",
+    "core/message_transceiver.h",
+    "core/native_slot.cc",
+    "core/native_slot.h",
+    "core/util.cc",
+    "core/util.h",
+    "log/logging.cc",
+    "log/logging.h",
+    "net/socket_server_client.cc",
+    "net/socket_server_client.h",
+    "net/websocket_client.cc",
+    "net/websocket_client.h",
+    "net/websocket_task.cc",
+    "net/websocket_task.h",
+    "processor/message_assembler.cc",
+    "processor/message_assembler.h",
+    "processor/message_handler.h",
+    "processor/processor.cc",
+    "processor/processor.h",
+    "protocol/events.h",
+    "protocol/md5.cc",
+    "protocol/md5.h",
+    "protocol/protocol.cc",
+    "protocol/protocol.h",
+    "socket/blocking_queue.h",
+    "socket/count_down_latch.cc",
+    "socket/count_down_latch.h",
+    "socket/socket_server_api.cc",
+    "socket/socket_server_api.h",
+    "socket/socket_server_type.h",
+    "socket/usb_client.cc",
+    "socket/usb_client.h",
+    "socket/usb_client_listener.h",
+    "socket/work_thread_executor.cc",
+    "socket/work_thread_executor.h",
+    "thread/debug_router_executor.cc",
+    "thread/debug_router_executor.h",
+  ]
+  if (is_win) {
+    sources += [
+      "socket/win/socket_server_win.cc",
+      "socket/win/socket_server_win.h",
+    ]
+  } else {
+    sources += [
+      "socket/posix/socket_server_posix.cc",
+      "socket/posix/socket_server_posix.h",
+    ]
+  }
+  if (is_harmony) {
+    # napi cpp files
+    sources += [
+      "harmony/debug_router_global_handler_harmony.cc",
+      "harmony/debug_router_global_handler_harmony.h",
+      "harmony/debug_router_harmony.cc",
+      "harmony/debug_router_harmony.h",
+      "harmony/debug_router_log_harmony.cc",
+      "harmony/debug_router_log_harmony.h",
+      "harmony/debug_router_message_handler_harmony.cc",
+      "harmony/debug_router_message_handler_harmony.h",
+      "harmony/debug_router_session_handler_harmony.cc",
+      "harmony/debug_router_session_handler_harmony.h",
+      "harmony/debug_router_state_listener_harmony.cc",
+      "harmony/debug_router_state_listener_harmony.h",
+      "harmony/native_slot_harmony.cc",
+      "harmony/native_slot_harmony.h",
+    ]
+
+    # fml and napi related files
+    sources += [
+      "base/no_destructor.h",
+      "harmony/base/base_export.h",
+      "harmony/base/closure.h",
+      "harmony/base/compiler_specific.h",
+      "harmony/base/fml/delayed_task.cc",
+      "harmony/base/fml/delayed_task.h",
+      "harmony/base/fml/eintr_wrapper.h",
+      "harmony/base/fml/macros.h",
+      "harmony/base/fml/make_copyable.h",
+      "harmony/base/fml/memory/ref_counted.h",
+      "harmony/base/fml/memory/ref_counted_internal.h",
+      "harmony/base/fml/memory/ref_ptr.h",
+      "harmony/base/fml/memory/ref_ptr_internal.h",
+      "harmony/base/fml/message_loop.cc",
+      "harmony/base/fml/message_loop.h",
+      "harmony/base/fml/message_loop_harmony.cc",
+      "harmony/base/fml/message_loop_harmony.h",
+      "harmony/base/fml/message_loop_impl.cc",
+      "harmony/base/fml/message_loop_impl.h",
+      "harmony/base/fml/message_loop_task_queues.cc",
+      "harmony/base/fml/message_loop_task_queues.h",
+      "harmony/base/fml/synchronization/waitable_event.cc",
+      "harmony/base/fml/synchronization/waitable_event.h",
+      "harmony/base/fml/task_queue_id.h",
+      "harmony/base/fml/task_runner.cc",
+      "harmony/base/fml/task_runner.h",
+      "harmony/base/fml/task_source.cc",
+      "harmony/base/fml/task_source.h",
+      "harmony/base/fml/task_source_grade.h",
+      "harmony/base/fml/time/time_delta.h",
+      "harmony/base/fml/time/time_point.cc",
+      "harmony/base/fml/time/time_point.h",
+      "harmony/base/fml/time/time_utils.cc",
+      "harmony/base/fml/time/time_utils.h",
+      "harmony/base/fml/timerfd.cc",
+      "harmony/base/fml/timerfd.h",
+      "harmony/base/fml/unique_fd.cc",
+      "harmony/base/fml/unique_fd.h",
+      "harmony/base/fml/unique_object.h",
+      "harmony/base/fml/wakeable.h",
+      "harmony/base/napi_util.cc",
+      "harmony/base/napi_util.h",
+    ]
+  }
+
+  public_deps = [ "//third_party/jsoncpp:jsoncpp" ]
+}

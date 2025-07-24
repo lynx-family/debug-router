@@ -107,3 +107,20 @@ source_set("debug_router_source") {
     ]
   }
 }
+source_set("debug_router_cpp_interface") {
+  include_dirs = [
+    ".",
+    "../../third_party/jsoncpp/include",
+  ]
+  sources = [
+    "debug_router.cc",
+    "debug_router.h",
+    "debug_router_global_handler.h",
+    "debug_router_session_handler.h",
+    "debug_router_slot.cc",
+    "debug_router_slot.h",
+    "debug_router_slot_delegate.h",
+    "debug_router_state_listener.h",
+    "native_slot_delegate.h",
+  ]
+}
