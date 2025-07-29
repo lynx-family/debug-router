@@ -24,6 +24,8 @@ android {
     }
 
     buildTypes {
+        def enable16KBAlign = project.hasProperty("enable_16kb") ? project.property("enable_16kb") : "false"
+        println("enable16KBAlign: " + enable16KBAlign)
         release {
             externalNativeBuild {
                 cmake {
@@ -31,6 +33,7 @@ android {
                             '-DBUILD_LEPUS_COMPILE=false',
                             '-DANDROID_TOOLCHAIN=clang',
                             '-DANDROID_STL=c++_static',
+                            ("-DENABLE_16KB_ALIGN="+enable16KBAlign).toString(),
                             '-DCMAKE_BUILD_TYPE=Release',
                             '-DLOCAL_ARM_NEON=true',
                             '-LH'
@@ -50,6 +53,7 @@ android {
                     arguments '-DANDROID_PLATFORM=android-14',
                             '-DBUILD_LEPUS_COMPILE=false',
                             '-DANDROID_TOOLCHAIN=clang',
+                            ("-DENABLE_16KB_ALIGN="+enable16KBAlign).toString(),
                             '-DLOCAL_ARM_NEON=true',
                             '-LH'
 
