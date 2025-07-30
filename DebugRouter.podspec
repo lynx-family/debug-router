@@ -28,7 +28,7 @@ Pod::Spec.new do |s|
   s.subspec 'Native' do |ss|
     ss.header_mappings_dir  = "."
     ss.source_files = 'debug_router/native/**/*'
-    ss.exclude_files = 'debug_router/native/android/**/*','debug_router/native/test/*','debug_router/native/socket/win/*', 'debug_router/native/harmony/**/*'
+    ss.exclude_files = 'debug_router/native/android/**/*','debug_router/native/test/*','debug_router/native/socket/win/*'
     ss.pod_target_xcconfig  = { "HEADER_SEARCH_PATHS" =>  "\"${PODS_TARGET_SRCROOT}\" \"${PODS_TARGET_SRCROOT}/third_party/jsoncpp/include\""}
     ss.dependency 'DebugRouter/third_party'
     ss.private_header_files = 'debug_router/native/**/*.{h}'

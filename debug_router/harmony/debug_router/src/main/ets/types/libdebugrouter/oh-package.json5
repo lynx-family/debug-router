@@ -1,6 +1,0 @@
-{
-  "name": "libdebugrouter.so",
-  "types": "./index.d.ts",
-  "version": "",
-  "description": "debug_router"
-}
