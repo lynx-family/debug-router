@@ -1,2 +1,0 @@
-test/e2e_test/harmony_example/AppScope/resources/base/media/app_icon.png filter=lfs diff=lfs merge=lfs -text
-test/e2e_test/harmony_example/entry/src/main/resources/base/media/app_icon.png filter=lfs diff=lfs merge=lfs -text

@@ -13,7 +13,6 @@ namespace core {
 class NativeSlot {
  public:
   NativeSlot(const std::string &type, const std::string &url);
-  virtual ~NativeSlot() = default;
   std::string GetUrl();
   std::string GetType();
   virtual void OnMessage(const std::string &message,
