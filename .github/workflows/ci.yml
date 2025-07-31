@@ -235,6 +235,76 @@ jobs:
           ./xctestrunner --xctestrun `pwd`/Build/Products/DebugRouter_Tests_iphonesimulator$(cat sdk.txt)-arm64.xctestrun --work_dir `pwd` --output_dir `pwd`/iOSCoreBuild/DerivedData simulator_test
           popd
 
+  harmony-har-build:
+    runs-on: lynx-container
+    container:
+      image: ghcr.io/lynx-family/ubuntu24.04-harmony:lastest
+      options: --cap-add=NET_ADMIN
+      credentials:
+        username: lynx-family
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - name: Install Common Dependencies
+        uses: ./.github/actions/common-deps
+      - name: Build har
+        shell: bash
+        run: |
+          PROJECT_ROOT=$(pwd)
+          pushd test/e2e_test/harmony_example
+          ohpm install
+          ./script/build.py --build_har --modules debug_router --verbose
+          popd
+          pushd debug_router/harmony/debug_router/build/default/outputs/default
+          ls -al
+          popd
+
+  harmony-hap-build:
+    runs-on: lynx-container
+    container:
+      image: ghcr.io/lynx-family/ubuntu24.04-harmony:lastest
+      options: --cap-add=NET_ADMIN
+      credentials:
+        username: lynx-family
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - name: Install Common Dependencies
+        uses: ./.github/actions/common-deps
+      - name: Build hap
+        shell: bash
+        run: |
+          PROJECT_ROOT=$(pwd)
+          pushd test/e2e_test/harmony_example
+          ohpm install
+          ./script/build.py --build_hap --is_debug --modules debug_router --verbose
+          popd
+          pushd test/e2e_test/harmony_example/entry/build/default/outputs/default
+          ls -al
+          popd
+
   debug-router-connector-npm-package-build:
     runs-on: lynx-ubuntu-22.04-avd-large
     steps:
