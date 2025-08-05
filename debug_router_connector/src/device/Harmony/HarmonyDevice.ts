@@ -117,11 +117,17 @@ export default class HarmonyDevice extends BaseDevice {
     return new Promise<void>(async (resolve, reject) => {
       const forwards: Forward[] = await device.listForwards();
       for (let i = 0; i < forwards.length; i++) {
-        const result = await device.removeForward(
-          forwards[i].local,
-          forwards[i].remote,
-        );
-        defaultLogger.debug("removeForward result:" + result);
+        const local = forwards[i].local;
+        const remote = forwards[i].remote;
+        const remotePort = parseInt(remote.replace(/^tcp:/, ""), 10);
+        if (this.remotePorts.includes(remotePort)) {
+          const result = await device.removeForward(local, remote);
+          defaultLogger.debug("removeForward result:" + result);
+        } else {
+          defaultLogger.debug(
+            "not remove forward:" + local + ". for not used by connector",
+          );
+        }
       }
       resolve();
     });
