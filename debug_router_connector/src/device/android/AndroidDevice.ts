@@ -127,10 +127,19 @@ export default class AndroidDevice extends BaseDevice {
     return new Promise<void>(async (resolve, reject) => {
       const forwards: Forward[] = await device.listForwards();
       for (let i = 0; i < forwards.length; i++) {
-        const shellCmd = `adb -H ${this.adb.options.host} -P ${this.adb.options.port} forward --remove ${forwards[i].local}`;
-        defaultLogger.debug(shellCmd);
-        const result = await this.exeCmd(shellCmd);
-        defaultLogger.debug(result);
+        const local = forwards[i].local;
+        const remote = forwards[i].remote;
+        const remotePort = parseInt(remote.replace(/^tcp:/, ""), 10);
+        if (this.remotePorts.includes(remotePort)) {
+          const shellCmd = `adb -H ${this.adb.options.host} -P ${this.adb.options.port} forward --remove ${local}`;
+          defaultLogger.debug(shellCmd);
+          const result = await this.exeCmd(shellCmd);
+          defaultLogger.debug(result);
+        } else {
+          defaultLogger.debug(
+            "not remove forward:" + local + ". for not used by connector",
+          );
+        }
       }
       resolve();
     });
