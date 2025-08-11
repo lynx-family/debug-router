@@ -10,7 +10,7 @@ on:
 
 jobs:
   static-check:
-    runs-on: lynx-ubuntu-22.04-avd-medium
+    runs-on: lynx-ubuntu-22.04-medium
     steps:
       - name: Python Setup
         uses: actions/setup-python@v5
@@ -58,7 +58,7 @@ jobs:
           git lynx check --checkers coding-style
 
   unittest-build-check:
-    runs-on: lynx-ubuntu-22.04-avd-large
+    runs-on: lynx-ubuntu-22.04-medium
     steps:
       - name: Python Setup
         uses: actions/setup-python@v5
@@ -82,7 +82,7 @@ jobs:
           python3 test/unit_test/check_test_run.py
 
   android-aar-build:
-    runs-on: lynx-ubuntu-22.04-avd-large
+    runs-on: lynx-ubuntu-22.04-medium
     steps:
       - name: Download Source
         uses: actions/checkout@v4.2.2
@@ -306,7 +306,7 @@ jobs:
           popd
 
   debug-router-connector-npm-package-build:
-    runs-on: lynx-ubuntu-22.04-avd-large
+    runs-on: lynx-ubuntu-22.04-medium
     steps:
       - name: Download Source
         uses: actions/checkout@v4.2.2
@@ -326,7 +326,7 @@ jobs:
           popd
 
   remote-debug-driver-npm-package-build:
-    runs-on: lynx-ubuntu-22.04-avd-large
+    runs-on: lynx-ubuntu-22.04-medium
     steps:
       - name: Download Source
         uses: actions/checkout@v4.2.2
