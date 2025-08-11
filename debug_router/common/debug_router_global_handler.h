@@ -7,10 +7,12 @@
 
 #include <string>
 
+#include "debug_router/common/debug_router_export.h"
+
 namespace debugrouter {
 namespace common {
 
-class DebugRouterGlobalHandler {
+class DEBUG_ROUTER_EXPORT DebugRouterGlobalHandler {
  public:
   virtual void OpenCard(const std::string &url) = 0;
   virtual void OnMessage(const std::string &message,

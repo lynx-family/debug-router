@@ -12,6 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "debug_router/common/debug_router_export.h"
 #include "debug_router/common/debug_router_global_handler.h"
 #include "debug_router/common/debug_router_session_handler.h"
 #include "debug_router/common/debug_router_slot.h"
@@ -39,7 +40,7 @@ class DebugRouterGlobalHandlerDelegate;
 class DebugRouterSessionHandlerDelegate;
 
 // DebugRouter for Common
-class DebugRouter {
+class DEBUG_ROUTER_EXPORT DebugRouter {
  public:
   static DebugRouter &GetInstance();
 
