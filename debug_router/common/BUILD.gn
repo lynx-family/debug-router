@@ -24,7 +24,10 @@ config("debug_router_private_config") {
   ]
 
   # FIXME(): definition controlled by the args
-  defines = [ "JSON_USE_EXCEPTION=0" ]
+  defines = [ 
+    "JSON_USE_EXCEPTION=0", 
+    "DEBUG_ROUTER_EXPORTS",
+  ]
 }
 
 config("debug_router_config") {
@@ -87,6 +90,7 @@ source_set("debug_router_source") {
     "../native/thread/debug_router_executor.h",
     "debug_router.cc",
     "debug_router.h",
+    "debug_router_export.h",
     "debug_router_global_handler.h",
     "debug_router_session_handler.h",
     "debug_router_slot.cc",
