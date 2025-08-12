@@ -38,15 +38,6 @@ int32_t SocketServerWin::InitSocket() {
     return kInvalidPort;
   }
 
-  bool on = true;
-  if (setsockopt(socket_fd_, SOL_SOCKET, SO_REUSEADDR, (char *)&on,
-                 sizeof(on)) == -1) {
-    Close();
-    LOGE("setsockopt error:" << GetErrorMessage());
-    NotifyInit(GetErrorMessage(), "setsockopt error");
-    return kInvalidPort;
-  }
-
   bool flag = false;
   PORT_TYPE port = kStartPort;
   int bind_result = SOCKET_ERROR;
