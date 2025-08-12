@@ -13,6 +13,8 @@ export async function getHdcInstance(hdcOption: any) {
     const hdcVersion = await exeCmd("hdc --version");
     defaultLogger.debug("You already have hdc tool installed");
     defaultLogger.debug("hdc tool info :" + hdcVersion);
+    await exeCmd("hdc start");
+    defaultLogger.debug("hdc tool start success");
   } catch (error) {
     const message = (error as Error).message;
     defaultLogger.debug(message);
