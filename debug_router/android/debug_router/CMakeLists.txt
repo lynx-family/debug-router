@@ -71,6 +71,12 @@ if ((ENABLE_16KB_ALIGN MATCHES "true"))
     endif()
 endif()
 
+MESSAGE(WARNING "Received ENABLE_MESSAGE_IMPL: ${ENABLE_MESSAGE_IMPL}")
+if ((ENABLE_MESSAGE_IMPL MATCHES "true"))
+    MESSAGE(WARNING "Enable message implementation")
+    add_definitions(-DENABLE_MESSAGE_IMPL=1)
+endif()
+
 # liblynxdebugrouter
 target_link_libraries(lynxdebugrouter
     ${log-lib}

@@ -5,6 +5,7 @@
 #ifndef DEBUGROUTER_NATIVE_CORE_DEBUG_ROUTER_CORE_H_
 #define DEBUGROUTER_NATIVE_CORE_DEBUG_ROUTER_CORE_H_
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -41,6 +42,12 @@ typedef enum {
 } WebSocketConnectType;
 
 class DebugRouterSlot;
+
+#if ENABLE_MESSAGE_IMPL
+static constexpr size_t kTransceiverCount = 2;
+#else
+static constexpr size_t kTransceiverCount = 0;
+#endif
 
 class DebugRouterCore : public MessageTransceiverDelegate {
  public:
@@ -150,7 +157,8 @@ class DebugRouterCore : public MessageTransceiverDelegate {
                bool is_reconnect);
   std::atomic<ConnectionState> connection_state_;
   std::shared_ptr<MessageTransceiver> current_transceiver_;
-  std::vector<std::shared_ptr<MessageTransceiver> > message_transceivers_;
+  std::array<std::shared_ptr<MessageTransceiver>, kTransceiverCount>
+      message_transceivers_;
   int32_t max_session_id_;
   std::unique_ptr<report::DebugRouterNativeReport> report_;
   std::unique_ptr<debugrouter::processor::Processor> processor_;

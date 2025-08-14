@@ -126,13 +126,16 @@ DebugRouterCore::DebugRouterCore()
       retry_times_(0),
       handler_count_(1),
       is_first_connect_(UNINIT) {
-  message_transceivers_.push_back(std::make_shared<net::WebSocketClient>());
-  message_transceivers_.push_back(std::make_shared<net::SocketServerClient>());
-
-  for (auto it = message_transceivers_.begin();
-       it != message_transceivers_.end(); ++it) {
-    (*it)->Init();
-    (*it)->SetDelegate(this);
+#if ENABLE_MESSAGE_IMPL
+  size_t transceiver_count = 0;
+  message_transceivers_[transceiver_count++] =
+      std::make_shared<net::WebSocketClient>();
+  message_transceivers_[transceiver_count++] =
+      std::make_shared<net::SocketServerClient>();
+#endif
+  for (size_t i = 0; i < kTransceiverCount; ++i) {
+    message_transceivers_[i]->Init();
+    message_transceivers_[i]->SetDelegate(this);
   }
   std::unique_ptr<processor::MessageHandler> handler =
       std::make_unique<MessageHandlerCore>();
@@ -219,9 +222,8 @@ void DebugRouterCore::Connect(const std::string &url, const std::string &room,
       "connect. retry times: " << retry_times_.load(std::memory_order_relaxed));
   Disconnect();
   connection_state_.store(CONNECTING, std::memory_order_relaxed);
-  for (auto it = message_transceivers_.begin();
-       it != message_transceivers_.end(); ++it) {
-    if ((*it)->Connect(url)) {
+  for (size_t i = 0; i < kTransceiverCount; ++i) {
+    if (message_transceivers_[i]->Connect(url)) {
       break;
     }
   }
