@@ -181,14 +181,19 @@ bool WebSocketTask::do_connect() {
   */
   int ret = getaddrinfo(host, str_port, &ai, &servinfo);
   if (ret != 0) {
+#ifdef _WIN32
+    LOGE("getaddrinfo Error: " << gai_strerror(ret));
+    onFailure("Websocket Task: getaddrinfo Error.", ret);
+#else
     // Other system error; errno is set to indicate the error.
     if (ret == EAI_SYSTEM) {
-      LOGE("getaddrinfo Error: " << strerror(errno));
-      onFailure("Websocket Task: getaddrinfo Error.", errno);
+      LOGE("getaddrinfo Error: " << strerror(GetErrorMessage()));
+      onFailure("Websocket Task: getaddrinfo Error.", GetErrorMessage());
     } else {
       LOGE("getaddrinfo Error: " << gai_strerror(ret));
       onFailure("Websocket Task: getaddrinfo Error.", ret);
     }
+#endif
     return false;
   }
 
@@ -206,7 +211,7 @@ bool WebSocketTask::do_connect() {
       LOGI("Connect socket success. sockfd: " << sockfd);
       break;
     } else {
-      LOGE("connect Error: " << strerror(errno));
+      LOGE("connect Error: " << GetErrorMessage());
     }
     CLOSESOCKET(sockfd);
   }
@@ -254,7 +259,7 @@ bool WebSocketTask::do_connect() {
            "Sec-WebSocket-Version: 13\r\n\r\n",
            path, host, port);
   if (send(socket_guard_->Get(), buf, strlen(buf), 0) == -1) {
-    LOGE("send http upgrade error: " << strerror(errno));
+    LOGE("send http upgrade error: " << GetErrorMessage());
     onFailure("Websocket Task: socket send failed.", GetErrorMessage());
     return false;
   }
