@@ -49,4 +49,9 @@ Pod::Spec.new do |s|
       ssp.private_header_files = 'third_party/jsoncpp/**/*.{h}', 'third_party/jsoncpp/**/*.{inl}'
     end
   end
+
+  s.subspec "MessageTransceiverEnable" do |sp|
+    sp.source_files = ''
+    sp.pod_target_xcconfig = { "GCC_PREPROCESSOR_DEFINITIONS" => "ENABLE_MESSAGE_IMPL=1 $(inherited)" }
+  end
 end

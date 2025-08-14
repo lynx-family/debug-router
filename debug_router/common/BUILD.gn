@@ -30,14 +30,14 @@ config("debug_router_private_config") {
   ]
 }
 
-config("debug_router_config") {
+config("debug_router_message_impl_config") {
   include_dirs = [ "." ]
 
-  defines = [ "JSON_USE_EXCEPTION=0" ]
+  defines = [ "ENABLE_MESSAGE_IMPL=1" ]
 }
 
 source_set("debug_router_source") {
-  public_configs = [ ":debug_router_config" ]
+  public_configs = [ ":debug_router_message_impl_config" ]
   configs += [ ":debug_router_private_config" ]
 
   sources = [
