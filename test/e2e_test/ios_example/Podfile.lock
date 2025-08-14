@@ -1,26 +1,26 @@
 PODS:
-  - DebugRouter (5.0.10):
-    - DebugRouter/Framework (= 5.0.10)
-    - DebugRouter/Native (= 5.0.10)
-    - DebugRouter/third_party (= 5.0.10)
-  - DebugRouter/Framework (5.0.10):
+  - DebugRouter/Framework (5.0.11):
     - DebugRouter/Native
-  - DebugRouter/Native (5.0.10):
+  - DebugRouter/MessageTransceiverEnable (5.0.11)
+  - DebugRouter/Native (5.0.11):
     - DebugRouter/third_party
-  - DebugRouter/third_party (5.0.10):
-    - DebugRouter/third_party/jsoncpp (= 5.0.10)
-  - DebugRouter/third_party/jsoncpp (5.0.10)
+  - DebugRouter/third_party (5.0.11):
+    - DebugRouter/third_party/jsoncpp (= 5.0.11)
+  - DebugRouter/third_party/jsoncpp (5.0.11)
 
 DEPENDENCIES:
-  - DebugRouter (from `../../../`)
+  - DebugRouter/Framework (from `../../../`)
+  - DebugRouter/MessageTransceiverEnable (from `../../../`)
+  - DebugRouter/Native (from `../../../`)
+  - DebugRouter/third_party (from `../../../`)
 
 EXTERNAL SOURCES:
   DebugRouter:
     :path: "../../../"
 
 SPEC CHECKSUMS:
-  DebugRouter: bd96ce2f2e3150f5c49cfbd29b80b684705fa325
+  DebugRouter: c27fcdfee7a0a0e54a8215b1c7f262d2e78f290c
 
-PODFILE CHECKSUM: 453f33108fffde859263ad6670787b0438d93813
+PODFILE CHECKSUM: 687a4d2578a15db938e619b1da87062723f6ab77
 
 COCOAPODS: 1.10.1
