@@ -5,7 +5,10 @@
 import("//build/config/harmony/config.gni")
 
 source_set("debug_router_core") {
-  defines = [ "JSON_USE_EXCEPTION=0" ]
+  defines = [
+    "JSON_USE_EXCEPTION=0",
+    "ENABLE_MESSAGE_IMPL=1",
+  ]
 
   include_dirs = [
     ".",

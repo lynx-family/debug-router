@@ -34,6 +34,7 @@ android {
                             '-DANDROID_TOOLCHAIN=clang',
                             '-DANDROID_STL=c++_static',
                             ("-DENABLE_16KB_ALIGN="+enable16KBAlign).toString(),
+                            '-DENABLE_MESSAGE_IMPL=true',
                             '-DCMAKE_BUILD_TYPE=Release',
                             '-DLOCAL_ARM_NEON=true',
                             '-LH'
@@ -54,6 +55,7 @@ android {
                             '-DBUILD_LEPUS_COMPILE=false',
                             '-DANDROID_TOOLCHAIN=clang',
                             ("-DENABLE_16KB_ALIGN="+enable16KBAlign).toString(),
+                            '-DENABLE_MESSAGE_IMPL=true',
                             '-DLOCAL_ARM_NEON=true',
                             '-LH'
 
