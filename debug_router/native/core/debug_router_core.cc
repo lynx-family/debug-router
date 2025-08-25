@@ -125,7 +125,9 @@ DebugRouterCore::DebugRouterCore()
       processor_(nullptr),
       retry_times_(0),
       handler_count_(1),
-      is_first_connect_(UNINIT) {
+      is_first_connect_(UNINIT),
+      current_batch_size_(0),
+      last_flush_time_(std::chrono::steady_clock::now()) {
 #if ENABLE_MESSAGE_IMPL
   size_t transceiver_count = 0;
   message_transceivers_[transceiver_count++] =
@@ -141,6 +143,7 @@ DebugRouterCore::DebugRouterCore()
       std::make_unique<MessageHandlerCore>();
   processor_ = std::make_unique<processor::Processor>(std::move(handler));
   thread::DebugRouterExecutor::GetInstance().Start();
+  StartFlushThread();
 }
 
 void DebugRouterCore::SetReportDelegate(
@@ -233,8 +236,86 @@ void DebugRouterCore::Connect(const std::string &url, const std::string &room,
 }
 
 void DebugRouterCore::Send(const std::string &message) {
+  {
+    std::lock_guard<std::mutex> lock(batch_mutex_);
+    batch_messages_.push_back(message);
+  }
+  current_batch_size_ += message.size();
+  auto now = std::chrono::steady_clock::now();
+  bool size_exceeded = current_batch_size_ >= kMaxBatchSize;
+  bool timeout_exceeded = (now - last_flush_time_) >= kFlushTimeout;
+  LOGI("size_exceeded: " + std::to_string(size_exceeded) + " timeout_exceeded: " + std::to_string(timeout_exceeded));
+  
+  if (size_exceeded || timeout_exceeded) {
+    flush_cv_.notify_one();
+    LOGI("size exceeded or timeot exceeded, do FlushBatchMessages.");
+    FlushBatchMessages();
+  }
+}
+
+void DebugRouterCore::StartFlushThread() {
+  stop_flush_thread_ = false;
+  flush_thread_ = std::thread(&DebugRouterCore::FlushThreadLoop, this);
+}
+
+void DebugRouterCore::StopFlushThread() {
+  stop_flush_thread_ = true;
+  flush_cv_.notify_all();
+  if (flush_thread_.joinable()) {
+    flush_thread_.join();
+  }
+}
+
+void DebugRouterCore::FlushBatchMessages() {
+  std::vector<std::string> clone_batch_messages;
+  {
+    std::lock_guard<std::mutex> lock(batch_mutex_);
+    if (batch_messages_.empty()) {
+      return;
+    }
+    clone_batch_messages = batch_messages_;
+    batch_messages_.clear();
+  }
+  
+  // generate batch message
+  std::string batch_message = "{\"type\":\"batch\",\"messages\":[";
+  for (size_t i = 0; i < clone_batch_messages.size(); ++i) {
+    if (i > 0) {
+      batch_message += ",";
+    }
+    batch_message += clone_batch_messages[i];
+  }
+  batch_message += "]}";
+  
+  // send batch message
+  LOGI("FlushBatchMessages send batch message.");
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
-    current_transceiver_->Send(message);
+    current_transceiver_->Send(batch_message);
+  }
+  
+  // clear data
+  clone_batch_messages.clear();
+  current_batch_size_ = 0;
+  last_flush_time_ = std::chrono::steady_clock::now();
+}
+
+void DebugRouterCore::FlushThreadLoop() {
+  while (!stop_flush_thread_) {
+    std::unique_lock<std::mutex> lock(batch_mutex_);
+    if (flush_cv_.wait_for(lock, kFlushTimeout, [this] { 
+      return stop_flush_thread_ || current_batch_size_ >= kMaxBatchSize; 
+    })) {
+      if (!stop_flush_thread_ && !batch_messages_.empty()) {
+        lock.unlock();
+        FlushBatchMessages();
+      }
+    } else {
+      if (!batch_messages_.empty()) {
+        LOGI("Timeout triggered flush");
+        lock.unlock();
+        FlushBatchMessages();
+      }
+    }
   }
 }
 
@@ -501,6 +582,7 @@ void DebugRouterCore::OnMessage(
 }
 
 DebugRouterCore::~DebugRouterCore() {
+  StopFlushThread();
   // TODO(zhoumingsong.smile): Stop websocketClient's thread
   // It's not a good way to do this
 }
