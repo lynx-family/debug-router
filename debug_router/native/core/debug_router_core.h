@@ -13,7 +13,9 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <thread>
 #include <vector>
+#include <chrono> 
 
 #include "debug_router/native/core/debug_router_global_handler.h"
 #include "debug_router/native/core/debug_router_message_handler.h"
@@ -48,6 +50,9 @@ static constexpr size_t kTransceiverCount = 2;
 #else
 static constexpr size_t kTransceiverCount = 0;
 #endif
+
+static constexpr size_t kMaxBatchSize = 64 * 1024;  // 64KB
+static constexpr std::chrono::milliseconds kFlushTimeout{500};  // 500ms超时
 
 class DebugRouterCore : public MessageTransceiverDelegate {
  public:
@@ -155,6 +160,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   void Reconnect();
   void Connect(const std::string &url, const std::string &room,
                bool is_reconnect);
+
   std::atomic<ConnectionState> connection_state_;
   std::shared_ptr<MessageTransceiver> current_transceiver_;
   std::array<std::shared_ptr<MessageTransceiver>, kTransceiverCount>
@@ -171,6 +177,22 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   std::atomic<int32_t> usb_port_;
   std::atomic<int> handler_count_;
   std::atomic<WebSocketConnectType> is_first_connect_;
+
+  // for batch send
+  std::vector<std::string> batch_messages_;
+  size_t current_batch_size_;
+  std::chrono::steady_clock::time_point last_flush_time_;
+  std::mutex batch_mutex_;
+  void FlushBatchMessages();
+
+  // timer for batch message send
+  std::condition_variable flush_cv_;
+  std::thread flush_thread_;
+  std::atomic<bool> stop_flush_thread_;
+  
+  void StartFlushThread();
+  void StopFlushThread();
+  void FlushThreadLoop();
 };
 
 }  // namespace core
