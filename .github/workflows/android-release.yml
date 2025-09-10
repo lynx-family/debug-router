@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   android-release:
-    runs-on: lynx-ubuntu-22.04-avd-large
+    runs-on: lynx-ubuntu-22.04-physical-medium
     steps:
       - name: Download Source
         uses: actions/checkout@v4.2.2

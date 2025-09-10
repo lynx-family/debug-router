@@ -51,7 +51,7 @@ Pod::Spec.new do |s|
   end
 
   s.subspec "MessageTransceiverEnable" do |sp|
-    sp.source_files = ''
+    sp.source_files = 'debug_router/common/debug_router_export.h'
     sp.pod_target_xcconfig = { "GCC_PREPROCESSOR_DEFINITIONS" => "ENABLE_MESSAGE_IMPL=1 $(inherited)" }
   end
 end
