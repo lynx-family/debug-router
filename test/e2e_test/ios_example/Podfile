@@ -3,8 +3,10 @@ platform :ios, '10.0'
 
 target 'DebugRouter_Example' do
   pod 'DebugRouter', :path => '../../../'
+  pod 'DebugRouter/MessageTransceiverEnable', :path => '../../../'
 end
 
 target 'DebugRouter_Tests' do
   pod 'DebugRouter', :path => '../../../'
+  pod 'DebugRouter/MessageTransceiverEnable', :path => '../../../'
 end

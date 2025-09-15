@@ -1,7 +1,6 @@
 PODS:
   - DebugRouter (5.0.10):
     - DebugRouter/Framework (= 5.0.10)
-    - DebugRouter/MessageTransceiverEnable (= 5.0.10)
     - DebugRouter/Native (= 5.0.10)
     - DebugRouter/third_party (= 5.0.10)
   - DebugRouter/Framework (5.0.10):
@@ -15,14 +14,15 @@ PODS:
 
 DEPENDENCIES:
   - DebugRouter (from `../../../`)
+  - DebugRouter/MessageTransceiverEnable (from `../../../`)
 
 EXTERNAL SOURCES:
   DebugRouter:
     :path: "../../../"
 
 SPEC CHECKSUMS:
-  DebugRouter: 1c1e62ad5232823985cf0578c2fcda517898c3dd
+  DebugRouter: 87b467f011414bea61bff7e8a93f0012bedee427
 
-PODFILE CHECKSUM: 453f33108fffde859263ad6670787b0438d93813
+PODFILE CHECKSUM: 95db8d786fa131f2ac73661e12bc6e3a4b4fe16b
 
 COCOAPODS: 1.10.1
