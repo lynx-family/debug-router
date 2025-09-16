@@ -4,7 +4,7 @@ add_compile_options(-fexceptions)
 add_definitions(-DOS_ANDROID=1)
 add_definitions(-DGNU_SUPPORT=1)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -fno-rtti -fno-short-enums -Wall -Werror -fno-stack-protector -fno-strict-aliasing")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -fno-rtti -fno-short-enums -Wall -Werror -fno-stack-protector -fno-strict-aliasing")
 
 #remove redundant sections
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-short-enums -Wall -Werror -fno-stack-protector -fno-strict-aliasing")
