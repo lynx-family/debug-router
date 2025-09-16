@@ -38,8 +38,7 @@ class MessageHandlerCore : public processor::MessageHandler {
 
   std::unordered_map<int, std::string> GetSessionList() override {
     std::unordered_map<int, std::string> session_list;
-    std::lock_guard<std::recursive_mutex> lock(
-        DebugRouterCore::GetInstance().slots_mutex_);
+    std::shared_lock lock(DebugRouterCore::GetInstance().slots_mutex_);
     const auto &slots = DebugRouterCore::GetInstance().slots_;
     if (!slots.empty()) {
       for (auto it = slots.begin(); it != slots.end(); ++it) {
@@ -83,8 +82,7 @@ class MessageHandlerCore : public processor::MessageHandler {
     }
 
     // reduce the holding time of slots_mutex_
-    std::lock_guard<std::recursive_mutex> lock(
-        DebugRouterCore::GetInstance().slots_mutex_);
+    std::shared_lock lock(DebugRouterCore::GetInstance().slots_mutex_);
     const auto &slots = DebugRouterCore::GetInstance().slots_;
     auto it = slots.find(session_id);
     if (it != slots.end()) {
@@ -266,7 +264,7 @@ void DebugRouterCore::SendDataAsync(const std::string &data,
 
 int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
   {
-    std::lock_guard<std::recursive_mutex> lock(slots_mutex_);
+    std::unique_lock lock(slots_mutex_);
     max_session_id_++;
     slots_[max_session_id_] = slot;
   }
@@ -288,7 +286,7 @@ int32_t DebugRouterCore::GetUSBPort() {
 void DebugRouterCore::Pull(int32_t session_id_) {
   LOGI("pull session: " << session_id_);
   {
-    std::lock_guard<std::recursive_mutex> lock(slots_mutex_);
+    std::unique_lock lock(slots_mutex_);
     slots_.erase(session_id_);
   }
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
@@ -362,7 +360,7 @@ void DebugRouterCore::OnOpen(
 
   std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
   {
-    std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
+    std::shared_lock lock(state_listeners_mutex_);
     listeners = state_listeners_;
   }
 
@@ -387,7 +385,7 @@ void DebugRouterCore::OnClosed(
        retry_times_.load(std::memory_order_relaxed) >= 3)) {
     std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
     {
-      std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
+      std::shared_lock lock(state_listeners_mutex_);
       listeners = state_listeners_;
     }
 
@@ -459,7 +457,7 @@ void DebugRouterCore::OnFailure(
        retry_times_.load(std::memory_order_relaxed) >= 3)) {
     std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
     {
-      std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
+      std::shared_lock lock(state_listeners_mutex_);
       listeners = state_listeners_;
     }
 
@@ -490,7 +488,7 @@ void DebugRouterCore::OnMessage(
 
   std::vector<std::shared_ptr<DebugRouterStateListener>> listeners;
   {
-    std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
+    std::shared_lock lock(state_listeners_mutex_);
     listeners = state_listeners_;
   }
 
@@ -657,7 +655,7 @@ void DebugRouterCore::AddStateListener(
   if (listener == nullptr) {
     return;
   }
-  std::lock_guard<std::recursive_mutex> lock(state_listeners_mutex_);
+  std::unique_lock lock(state_listeners_mutex_);
   state_listeners_.push_back(listener);
 }
 

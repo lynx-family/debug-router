@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -135,8 +136,8 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   virtual ~DebugRouterCore();
 
  protected:
-  std::recursive_mutex slots_mutex_;
-  std::recursive_mutex state_listeners_mutex_;
+  std::shared_mutex slots_mutex_;
+  std::shared_mutex state_listeners_mutex_;
   friend class MessageHandlerCore;
   std::unordered_map<int32_t, std::shared_ptr<core::NativeSlot> > slots_;
   std::string room_id_;

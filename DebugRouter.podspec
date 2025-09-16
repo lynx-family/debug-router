@@ -14,9 +14,9 @@ Pod::Spec.new do |s|
   s.license          = 'Apache'
   s.author           = 'Lynx'
   s.source           = { :git => 'https://github.com/lynx-family/debug-router.git', :tag => s.version.to_s + '-ios'  }
-  s.pod_target_xcconfig = { "GCC_PREPROCESSOR_DEFINITIONS" => "OS_IOS=1" }
+  s.pod_target_xcconfig = { "GCC_PREPROCESSOR_DEFINITIONS" => "OS_IOS=1", "CLANG_CXX_LANGUAGE_STANDARD" => "gnu++17", "OTHER_CPLUSPLUSFLAGS" => "-fno-aligned-allocation" }
 
-  s.ios.deployment_target = '9.0'
+  s.ios.deployment_target = '10.0'
 
   s.subspec 'Framework' do |ss|
     ss.source_files = 'debug_router/ios/public/*.{h,m,mm}', 'debug_router/ios/public/base/*.{h,m,mm}', 'debug_router/ios/*.{h,m,mm}', 'debug_router/ios/net/*.{h,m,mm}', 'debug_router/ios/report/*.{h,m,mm}', 'debug_router/ios/base/*.{h,m,mm}', 'debug_router/ios/base/report/*.{h,m,mm}', 'debug_router/ios/base/service/*.{h,m,mm}'
