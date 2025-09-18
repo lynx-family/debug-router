@@ -2,6 +2,11 @@
   "name": "@lynx-js/remote-debug-driver",
   "version": "0.0.1",
   "main": "dist/cjs/index.js",
+   "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lynx-family/debug-router.git",
+    "directory": "remote_debug_driver"
+  },
   "module": "dist/esm/index.js",
   "scripts": {
     "build": "sh ./scripts/build.sh",
