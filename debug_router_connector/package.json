@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "debuger router connector",
   "main": "dist/cjs/src/index.js",
+   "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lynx-family/debug-router.git",
+    "directory": "debug_router_connector"
+  },
   "scripts": {
     "start": "node bin/driver.js start",
     "build": "rm -rf dist && bash ./scripts/build.sh",
