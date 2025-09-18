@@ -3,14 +3,16 @@ name: npm release
 on:
   push:
     tags:
-      - '*-connector'
+      - "*-connector"
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   npm-release-test:
     runs-on: macos-latest
+    environment: npm
     steps:
       - name: Download Source
         uses: actions/checkout@v4.2.2
@@ -20,6 +22,12 @@ jobs:
       - uses: pnpm/action-setup@v4.0.0
         with:
           version: 7.33.6
+
+      # Update npm to the latest version to enable OIDC
+      - name: Update npm
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - name: Build debug-router-connector
         run: |-
@@ -36,7 +44,6 @@ jobs:
           npm install
           npm run build
           ls -al
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.REPO_DEBUG_ROUTER_NPM_TOKEN }}" > .npmrc
 
           if [[ $version == *"alpha"* ]]; then
               echo "Publishing alpha version..."
@@ -47,5 +54,3 @@ jobs:
           fi
 
           popd
-        env:
-          NPM_TOKEN: ${{ secrets.REPO_DEBUG_ROUTER_NPM_TOKEN }}
