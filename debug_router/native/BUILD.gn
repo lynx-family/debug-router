@@ -13,7 +13,7 @@ source_set("debug_router_core") {
   include_dirs = [
     ".",
     "../../",
-    "../../third_party/jsoncpp/include",
+    "//third_party/jsoncpp/include",
   ]
 
   cflags_cc = [

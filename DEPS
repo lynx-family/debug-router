@@ -37,9 +37,15 @@ deps = {
     'build': {
         "type": "git",
         "url": "https://github.com/lynx-family/buildroot.git",
-        "commit": "79446975604356f28b44c4e67851b3c9aafa372f",
+        "commit": "c415d367d23ca227418dc9a160f7d715e8c92bf3",
         "ignore_in_git": True,
         "condition": system in ['linux', 'darwin', 'windows']
+    },
+    'third_party/jsoncpp':{
+        "type": "git",
+        "url": "https://github.com/open-source-parsers/jsoncpp.git",
+        "commit": "42e892d96e47b1f6e29844cc705e148ec4856448",
+        "ignore_in_git": True,
     },
     'build/linux/debian_sid_amd64-sysroot': {
         "type": "http",
