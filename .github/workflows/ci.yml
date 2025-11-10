@@ -78,6 +78,7 @@ jobs:
         run: |
           set -e
           source tools/envsetup.sh
+          tools/hab sync . -f
           python3 test/unit_test/check_test_build.py
           python3 test/unit_test/check_test_run.py
 
@@ -101,6 +102,7 @@ jobs:
       - name: Build the AAR
         run: |-
           source tools/envsetup.sh
+          tools/hab sync . -f
           pushd test/e2e_test/android_example
           ./gradlew :DebugRouter:assemblerelease
           popd
@@ -196,6 +198,7 @@ jobs:
       - name: Build Example App
         run: |-
           set -e
+          tools/hab sync . -f
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           pushd test/e2e_test/ios_example
           root_dir=$(pwd) && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk bundle install
@@ -297,6 +300,7 @@ jobs:
         shell: bash
         run: |
           PROJECT_ROOT=$(pwd)
+          tools/hab sync . -f
           pushd test/e2e_test/harmony_example
           ohpm install
           ./script/build.py --build_hap --is_debug --modules debug_router --verbose

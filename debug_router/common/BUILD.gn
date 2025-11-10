@@ -9,7 +9,7 @@ config("debug_router_private_config") {
 
   include_dirs = [
     "../..",
-    "../../third_party/jsoncpp/include",
+    "//third_party/jsoncpp/include",
   ]
 
   cflags_cc = [
@@ -114,7 +114,7 @@ source_set("debug_router_source") {
 source_set("debug_router_cpp_interface") {
   include_dirs = [
     ".",
-    "../../third_party/jsoncpp/include",
+    "//third_party/jsoncpp/include",
   ]
   sources = [
     "debug_router.cc",
