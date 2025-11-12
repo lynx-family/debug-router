@@ -18,6 +18,7 @@
 #endif
 #include <cstddef> // size_t
 #include <algorithm> // min()
+#include <iostream>
 
 #define JSON_ASSERT_UNREACHABLE assert(false)
 
@@ -189,7 +190,7 @@ static inline void releaseStringValue(char* value, unsigned) {
 #endif // if !defined(JSON_IS_AMALGAMATION)
 
 namespace Json {
-
+#if JSON_USE_EXCEPTION
 Exception::Exception(JSONCPP_STRING const& msg)
   : msg_(msg)
 {}
@@ -207,16 +208,22 @@ LogicError::LogicError(JSONCPP_STRING const& msg)
 {}
 JSONCPP_NORETURN void throwRuntimeError(JSONCPP_STRING const& msg)
 {
-#if JSON_USE_EXCEPTION
   throw RuntimeError(msg);
-#endif
 }
 JSONCPP_NORETURN void throwLogicError(JSONCPP_STRING const& msg)
 {
-#if JSON_USE_EXCEPTION
   throw LogicError(msg);
-#endif
 }
+#else // !JSON_USE_EXCEPTION
+JSONCPP_NORETURN void throwRuntimeError(JSONCPP_STRING const& msg)
+{
+  std::cerr << msg <<std::endl;
+}
+JSONCPP_NORETURN void throwLogicError(JSONCPP_STRING const& msg)
+{
+  std::cerr << msg <<std::endl;
+}
+#endif
 
 // //////////////////////////////////////////////////////////////////
 // //////////////////////////////////////////////////////////////////
