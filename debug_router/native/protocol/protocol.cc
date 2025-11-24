@@ -9,6 +9,58 @@
 namespace debugrouter {
 namespace protocol {
 
+const char *kRemoteDebugServerEvent4Unknow = "unknown";
+const char *kRemoteDebugServerEvent4Init = "Initialize";
+const char *kRemoteDebugServerEvent4Registered = "Registered";
+const char *kRemoteDebugServerEvent4Register = "Register";
+const char *kRemoteDebugServerEvent4JoinRoom = "JoinRoom";
+const char *kRemoteDebugServerEvent4RoomJoined = "RoomJoined";
+const char *kRemoteDebugServerEvent4ChangeRoomServer = "ChangeRoomServer";
+const char *kRemoteDebugServerEvent4ChangeRoomServerAck = "ChangeRoomServerAck";
+const char *kRemoteDebugServerEvent4Custom = "Customized";
+
+const char *kRemoteDebugProtocolBodyData4CDP = "CDP";
+const char *kRemoteDebugProtocolBodyData4Custom4ListSession = "ListSession";
+const char *kRemoteDebugProtocolBodyData4Custom4MessageHandler = "App";
+const char *kRemoteDebugProtocolBodyData4Custom4SessionList = "SessionList";
+const char *kRemoteDebugProtocolBodyData4Custom4OpenSession = "OpenSession";
+const char *kRemoteDebugProtocolBodyData4Custom4CloseSession = "CloseSession";
+const char *kRemoteDebugProtocolBodyData4Custom4D2RStopAtEntry =
+    "D2RStopAtEntry";
+const char *kRemoteDebugProtocolBodyData4Custom4R2DStopAtEntry =
+    "R2DStopAtEntry";
+const char *kRemoteDebugProtocolBodyData4Custom4D2RStopLepusAtEntry =
+    "D2RStopLepusAtEntry";
+const char *kRemoteDebugProtocolBodyData4Custom4R2DStopLepusAtEntry =
+    "R2DStopLepusAtEntry";
+const char *kRemoteDebugProtocolBodyData4Custom4OpenCard = "OpenCard";
+const char *kRemoteDebugProtocolBodyData4Custom4OpenType4Url = "url";
+
+const char *kKeyId = "id";
+const char *kKeyRoom = "room";
+const char *kKeyType = "type";
+const char *kKeyInfo = "info";
+const char *kKeyClientId = "client_id";
+const char *kKeySessionId = "session_id";
+const char *kKeyUrl = "url";
+const char *kKeyCode = "code";
+const char *kKeyMessage = "message";
+const char *kKeyMethod = "method";
+const char *kKeyResult = "result";
+const char *kKeyParams = "params";
+const char *kKeyError = "error";
+const char *kKeySender = "sender";
+const char *kKeyData = "data";
+const char *kKeyEvent = "event";
+const char *kKeyStopAtEntry = "stop_at_entry";
+const char *kKeySignature = "signature";
+const char *kKeyMark = "mark";
+const char *kKeyReconnect = "reconnect";
+
+const char *kRuntimeType = "runtime";
+
+const char *kSignatureSalt = "OGJjNmMyYWFhOWE5ZjE3ZDlkZTllY2E1OTZkOTA3ZjI";
+
 bool RemoteDebugProtocolBody::IsProtocolBody4Init() {
   return event_.compare(kRemoteDebugServerEvent4Init) == 0;
 }

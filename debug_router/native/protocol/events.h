@@ -8,21 +8,16 @@
 namespace debugrouter {
 namespace protocol {
 
-constexpr const char *kDebugStateConnecting =
-    "{\"event\": \"debugState\", \"data\": \"connecting\"}";
-constexpr const char *kDebugStateConnected =
-    "{\"event\": \"debugState\", \"data\": \"connected\"}";
-constexpr const char *kDebugStateDisconnected =
-    "{\"event\": \"debugState\", \"data\": \"disconnected\"}";
+extern const char *kDebugStateConnecting;
+extern const char *kDebugStateConnected;
+extern const char *kDebugStateDisconnected;
 
-constexpr const char *kStopAtEntryEnable =
-    "{\"event\": \"stopAtEntry\", \"data\": true}";
-constexpr const char *kStopAtEntryDisable =
-    "{\"event\": \"stopAtEntry\", \"data\": false}";
+extern const char *kStopAtEntryEnable;
+extern const char *kStopAtEntryDisable;
 
-constexpr const char *kEventType4OpenCard = "openCard";
+extern const char *kEventType4OpenCard;
 
-constexpr const char *kInvalidTempalteUrl = "___UNKNOWN___";
+extern const char *kInvalidTempalteUrl;
 
 }  // namespace protocol
 }  // namespace debugrouter

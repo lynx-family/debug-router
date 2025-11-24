@@ -74,10 +74,7 @@
   if (self.delegate) {
     SEL sel = NSSelectorFromString(@"getTemplateView");
     if ([self.delegate respondsToSelector:sel]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
       id res = [self.delegate performSelector:sel];
-#pragma clang diagnostic pop
       UIView *view = (UIView *)res;
       return view;
     }

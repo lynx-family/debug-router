@@ -7,6 +7,9 @@
 namespace debugrouter {
 namespace core {
 
+const std::string kForbidReconnectWhenClose =
+    "debugrouter_forbid_reconnect_on_close";
+
 DebugRouterConfigs& DebugRouterConfigs::GetInstance() {
   static DebugRouterConfigs instance;
   return instance;

@@ -10,7 +10,6 @@
 #include <ws2tcpip.h>
 #define CLOSESOCKET closesocket
 typedef SOCKET SocketType;
-constexpr SocketType kInvalidSocket = INVALID_SOCKET;
 #else
 #include <netdb.h>
 #include <sys/socket.h>
@@ -18,11 +17,11 @@ constexpr SocketType kInvalidSocket = INVALID_SOCKET;
 #include <unistd.h>
 #define CLOSESOCKET close
 typedef int SocketType;
-constexpr SocketType kInvalidSocket = -1;
 #endif
 #include <mutex>
 
 #include "debug_router/native/log/logging.h"
+#include "debug_router/native/socket/socket_server_type.h"
 
 namespace debugrouter {
 namespace base {
@@ -37,10 +36,10 @@ class SocketGuard {
   void Reset() {
     LOGI("SocketGuard reset.");
     std::lock_guard<std::mutex> lock(mutex_);
-    if (sock_ != kInvalidSocket) {
+    if (sock_ != socket_server::kInvalidSocket) {
       CLOSESOCKET(sock_);
     }
-    sock_ = kInvalidSocket;
+    sock_ = socket_server::kInvalidSocket;
   }
 
   explicit SocketGuard(SocketType sock) : sock_(sock) {}

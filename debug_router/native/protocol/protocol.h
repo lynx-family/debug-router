@@ -16,65 +16,53 @@
 namespace debugrouter {
 namespace protocol {
 
-constexpr const char *kRemoteDebugServerEvent4Unknow = "unknown";
-constexpr const char *kRemoteDebugServerEvent4Init = "Initialize";
-constexpr const char *kRemoteDebugServerEvent4Registered = "Registered";
-constexpr const char *kRemoteDebugServerEvent4Register = "Register";
-constexpr const char *kRemoteDebugServerEvent4JoinRoom = "JoinRoom";
-constexpr const char *kRemoteDebugServerEvent4RoomJoined = "RoomJoined";
-constexpr const char *kRemoteDebugServerEvent4ChangeRoomServer =
-    "ChangeRoomServer";
-constexpr const char *kRemoteDebugServerEvent4ChangeRoomServerAck =
-    "ChangeRoomServerAck";
-constexpr const char *kRemoteDebugServerEvent4Custom = "Customized";
+extern const char *kRemoteDebugServerEvent4Unknow;
+extern const char *kRemoteDebugServerEvent4Init;
+extern const char *kRemoteDebugServerEvent4Registered;
+extern const char *kRemoteDebugServerEvent4Register;
+extern const char *kRemoteDebugServerEvent4JoinRoom;
+extern const char *kRemoteDebugServerEvent4RoomJoined;
+extern const char *kRemoteDebugServerEvent4ChangeRoomServer;
+extern const char *kRemoteDebugServerEvent4ChangeRoomServerAck;
+extern const char *kRemoteDebugServerEvent4Custom;
 
-constexpr const char *kRemoteDebugProtocolBodyData4CDP = "CDP";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4ListSession =
-    "ListSession";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4MessageHandler =
-    "App";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4SessionList =
-    "SessionList";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4OpenSession =
-    "OpenSession";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4CloseSession =
-    "CloseSession";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4D2RStopAtEntry =
-    "D2RStopAtEntry";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4R2DStopAtEntry =
-    "R2DStopAtEntry";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4D2RStopLepusAtEntry =
-    "D2RStopLepusAtEntry";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4R2DStopLepusAtEntry =
-    "R2DStopLepusAtEntry";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4OpenCard = "OpenCard";
-constexpr const char *kRemoteDebugProtocolBodyData4Custom4OpenType4Url = "url";
+extern const char *kRemoteDebugProtocolBodyData4CDP;
+extern const char *kRemoteDebugProtocolBodyData4Custom4ListSession;
+extern const char *kRemoteDebugProtocolBodyData4Custom4MessageHandler;
+extern const char *kRemoteDebugProtocolBodyData4Custom4SessionList;
+extern const char *kRemoteDebugProtocolBodyData4Custom4OpenSession;
+extern const char *kRemoteDebugProtocolBodyData4Custom4CloseSession;
+extern const char *kRemoteDebugProtocolBodyData4Custom4D2RStopAtEntry;
+extern const char *kRemoteDebugProtocolBodyData4Custom4R2DStopAtEntry;
+extern const char *kRemoteDebugProtocolBodyData4Custom4D2RStopLepusAtEntry;
+extern const char *kRemoteDebugProtocolBodyData4Custom4R2DStopLepusAtEntry;
+extern const char *kRemoteDebugProtocolBodyData4Custom4OpenCard;
+extern const char *kRemoteDebugProtocolBodyData4Custom4OpenType4Url;
 
-constexpr const char *kKeyId = "id";
-constexpr const char *kKeyRoom = "room";
-constexpr const char *kKeyType = "type";
-constexpr const char *kKeyInfo = "info";
-constexpr const char *kKeyClientId = "client_id";
-constexpr const char *kKeySessionId = "session_id";
-constexpr const char *kKeyUrl = "url";
-constexpr const char *kKeyCode = "code";
-constexpr const char *kKeyMessage = "message";
-constexpr const char *kKeyMethod = "method";
-constexpr const char *kKeyResult = "result";
-constexpr const char *kKeyParams = "params";
-constexpr const char *kKeyError = "error";
-constexpr const char *kKeySender = "sender";
-constexpr const char *kKeyData = "data";
-constexpr const char *kKeyEvent = "event";
-constexpr const char *kKeyStopAtEntry = "stop_at_entry";
-constexpr const char *kKeySignature = "signature";
-constexpr const char *kKeyMark = "mark";
-constexpr const char *kKeyReconnect = "reconnect";
+extern const char *kKeyId;
+extern const char *kKeyRoom;
+extern const char *kKeyType;
+extern const char *kKeyInfo;
+extern const char *kKeyClientId;
+extern const char *kKeySessionId;
+extern const char *kKeyUrl;
+extern const char *kKeyCode;
+extern const char *kKeyMessage;
+extern const char *kKeyMethod;
+extern const char *kKeyResult;
+extern const char *kKeyParams;
+extern const char *kKeyError;
+extern const char *kKeySender;
+extern const char *kKeyData;
+extern const char *kKeyEvent;
+extern const char *kKeyStopAtEntry;
+extern const char *kKeySignature;
+extern const char *kKeyMark;
+extern const char *kKeyReconnect;
 
-constexpr const char *kRuntimeType = "runtime";
+extern const char *kRuntimeType;
 
-constexpr const char *kSignatureSalt =
-    "OGJjNmMyYWFhOWE5ZjE3ZDlkZTllY2E1OTZkOTA3ZjI";
+extern const char *kSignatureSalt;
 
 using RemoteDebugPrococolClientId = uint32_t;
 using RemoteDebugProtocolRoomId = std::string;
