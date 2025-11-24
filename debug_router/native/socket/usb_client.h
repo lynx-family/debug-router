@@ -19,7 +19,7 @@ class WorkThreadExecutor;
 namespace socket_server {
 class UsbClientListener;
 
-static const char *kMessageQuit = "quit";
+extern const char *kMessageQuit;
 
 // Client of socket_server
 class UsbClient : public std::enable_shared_from_this<UsbClient> {

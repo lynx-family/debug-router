@@ -79,11 +79,11 @@
     return;
   }
 
-  if ([error rangeOfString:@"Network is down"].location != NSNotFound) {
+  if ([error containsString:@"Network is down"]) {
     // No Network
     NSString *errorMess = @"The internet is disconnected.";
     [DebugRouterToast showToast:errorMess withTime:2];
-  } else if ([error rangeOfString:@"Timed out connecting to server."].location != NSNotFound) {
+  } else if ([error containsString:@"Timed out connecting to server."]) {
     // Connect timeout
     NSString *errorMess = @"The network connection timed out. Please check if desktop and phone "
                           @"are on the same network.";

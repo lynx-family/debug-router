@@ -13,8 +13,8 @@
 namespace debugrouter {
 namespace processor {
 
-constexpr const char *kDebugRouterErrorMessage = "DebugRouterError";
-constexpr int kDebugRouterErrorCode = -3;
+extern const char *kDebugRouterErrorMessage;
+extern const int kDebugRouterErrorCode;
 
 class Processor {
  public:

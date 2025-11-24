@@ -6,14 +6,14 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-extern const NSString *NOT_IMPLETEMTED_MESSAGE;
+extern NSString *const NOT_IMPLETEMTED_MESSAGE;
 extern const int CODE_NOT_IMPLEMENTED;
 extern const int CODE_HANDLE_FAILED;
 extern const int CODE_HANDLE_SUCCESSFULLY;
 
 @interface DebugRouterMessageHandleResult : NSObject {
   int code;
-  const NSString *message;
+  NSString *message;
 }
 
 @property(getter=data, strong) NSMutableDictionary<NSString *, id> *data;

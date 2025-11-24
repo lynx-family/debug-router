@@ -5,6 +5,7 @@
 #import "LocalNetworkPermissionChecker.h"
 #import <Network/Network.h>
 #import <stdatomic.h>
+#import "DebugRouterLog.h"
 
 @interface LocalNetworkPermissionChecker () <NSNetServiceDelegate>
 @property(nonatomic, strong) NSNetService *netService;
@@ -105,7 +106,7 @@ static LocalNetworkPermissionChecker *currentChecker = nil;
     }
 
   } else {
-    NSLog(@"System before iOS 14, local network permissions were always on");
+    LLogInfo(@"System before iOS 14, local network permissions were always on");
   }
 
   return YES;

@@ -6,8 +6,10 @@
 #import "DebugRouterLog.h"
 #import "DebugRouterReportServiceProtocol.h"
 
+#import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 
+NSUInteger const kDebugRouterServiceReport = 1;
 static NSArray<NSString *> *debugrouter_services = nil;
 static NSString *const DEBUG_ROUTER_AUTO_REGISTER_SERVICE_PREFIX =
     @"__debug_router_auto_register_serivce__";
@@ -23,6 +25,7 @@ static NSString *const DEBUG_ROUTER_AUTO_REGISTER_SERVICE_PREFIX =
 
 @implementation DebugRouterServices
 
+#if ENABLE_MESSAGE_IMPL
 + (void)load {
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
@@ -49,6 +52,7 @@ static NSString *const DEBUG_ROUTER_AUTO_REGISTER_SERVICE_PREFIX =
     debugrouter_services = [autoRegisteredService copy];
   });
 }
+#endif
 
 + (instancetype)sharedInstance {
   static dispatch_once_t onceToken;

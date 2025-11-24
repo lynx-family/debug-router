@@ -15,10 +15,10 @@ namespace socket_server {
 
 #ifdef _WIN32
 typedef SOCKET SocketType;
-constexpr SocketType kInvalidSocket = INVALID_SOCKET;
+extern const SocketType kInvalidSocket;
 #else
 typedef int SocketType;
-constexpr SocketType kInvalidSocket = -1;
+extern const SocketType kInvalidSocket;
 #endif
 
 // list of connect status
@@ -31,33 +31,33 @@ enum USBConnectStatus {
 typedef uint16_t PORT_TYPE;
 
 // SocketServer listen start with kStartPort
-constexpr int32_t kInvalidPort = -1;
-constexpr PORT_TYPE kStartPort = 8901;
-constexpr int32_t kTryPortCount = 20;
+extern const int32_t kInvalidPort;
+extern const PORT_TYPE kStartPort;
+extern const int32_t kTryPortCount;
 
 // max pending connections
-constexpr int32_t kConnectionQueueMaxLength = 512;
+extern const int32_t kConnectionQueueMaxLength;
 
 // SocketServer Connection status
 enum ConnectionStatus { kError = -2, kDisconnected = -1, kConnected = 0 };
 
-constexpr int kFrameHeaderLen = 16;
-constexpr int kPayloadSizeLen = 4;
+extern const int kFrameHeaderLen;
+extern const int kPayloadSizeLen;
 
 // There will be three threads: reader, writer and message dispatcher.
-constexpr int kThreadCount = 3;
+extern const int kThreadCount;
 
 // message size limit
-constexpr uint64_t kMaxMessageLength = ((uint64_t)1) << 32;
+extern const uint64_t kMaxMessageLength;
 
 // message_type
-constexpr int32_t kPTFrameTypeTextMessage = 101;
+extern const int32_t kPTFrameTypeTextMessage;
 
 // flag
-constexpr int32_t kFrameDefaultTag = 0;
+extern const int32_t kFrameDefaultTag;
 
 // protocol version
-constexpr int32_t kFrameProtocolVersion = 1;
+extern const int32_t kFrameProtocolVersion;
 
 }  // namespace socket_server
 }  // namespace debugrouter

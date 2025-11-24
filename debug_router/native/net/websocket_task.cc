@@ -23,6 +23,13 @@
 namespace debugrouter {
 namespace net {
 
+// custom error for websocket
+const int kParseUrlErrorCode = -102;
+const int kNullSocketGuard = -103;
+const int kUnexpectedOpcode = -104;
+const int kUnexpectedMaskPayloadLen = -105;
+const int kDeflatedMessageUnimplemented = -106;
+
 int GetErrorMessage() {
 #ifdef _WIN32
   return WSAGetLastError();
@@ -52,7 +59,8 @@ WebSocketTask::WebSocketTask(
     const std::string &url)
     : transceiver_(transceiver),
       url_(url),
-      socket_guard_(std::make_unique<base::SocketGuard>(kInvalidSocket)) {}
+      socket_guard_(
+          std::make_unique<base::SocketGuard>(socket_server::kInvalidSocket)) {}
 
 WebSocketTask::~WebSocketTask() { shutdown(); }
 

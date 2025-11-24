@@ -11,6 +11,9 @@
 namespace debugrouter {
 namespace processor {
 
+const char *kDebugRouterErrorMessage = "DebugRouterError";
+const int kDebugRouterErrorCode = -3;
+
 Processor::Processor(std::unique_ptr<MessageHandler> message_handler)
     : message_handler_(std::move(message_handler)), is_reconnect_(false) {}
 

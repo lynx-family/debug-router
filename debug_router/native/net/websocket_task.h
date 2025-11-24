@@ -13,11 +13,11 @@ namespace debugrouter {
 namespace net {
 
 // custom error for websocket
-static const int kParseUrlErrorCode = -102;
-static const int kNullSocketGuard = -103;
-static const int kUnexpectedOpcode = -104;
-static const int kUnexpectedMaskPayloadLen = -105;
-static const int kDeflatedMessageUnimplemented = -106;
+extern const int kParseUrlErrorCode;
+extern const int kNullSocketGuard;
+extern const int kUnexpectedOpcode;
+extern const int kUnexpectedMaskPayloadLen;
+extern const int kDeflatedMessageUnimplemented;
 
 class WebSocketTask : public base::WorkThreadExecutor {
  public:

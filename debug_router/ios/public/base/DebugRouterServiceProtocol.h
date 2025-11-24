@@ -6,7 +6,7 @@
 
 #define DEFAULT_DEBUGROUTER_SERVICE @"debug_router_default_service"
 
-static NSUInteger const kDebugRouterServiceReport = 1;
+extern NSUInteger const kDebugRouterServiceReport;
 
 typedef NS_OPTIONS(NSUInteger, DebugRouterServiceScope) {
   DebugRouterServiceScopeDefault = 1 << 0,
@@ -23,9 +23,9 @@ typedef NS_OPTIONS(NSUInteger, DebugRouterServiceScope) {
 + (NSUInteger)serviceType;
 
 /// The biz tag of current service.
-+ (NSString *)serviceBizID;
++ (NSString *_Nonnull)serviceBizID;
 
 @optional
-+ (instancetype)sharedInstance;
++ (instancetype _Nonnull)sharedInstance;
 
 @end

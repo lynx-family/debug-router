@@ -6,14 +6,14 @@
 #import "DebugRouterLog.h"
 #import "DebugRouterUtil.h"
 
-const NSString *NOT_IMPLETEMTED_MESSAGE = @"not implemented";
+NSString *const NOT_IMPLETEMTED_MESSAGE = @"not implemented";
 const int CODE_NOT_IMPLEMENTED = -2;
 const int CODE_HANDLE_FAILED = -1;
 const int CODE_HANDLE_SUCCESSFULLY = 0;
 
 @implementation DebugRouterMessageHandleResult
 
-- (id)initWithCode:(int)code message:(const NSString *)message {
+- (id)initWithCode:(int)code message:(NSString *)message {
   self = [super init];
   if (self != nil) {
     self.data = [[NSMutableDictionary alloc] init];

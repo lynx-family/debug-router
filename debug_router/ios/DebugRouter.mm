@@ -3,14 +3,14 @@
 // LICENSE file in the root directory of this source tree.
 
 #import "DebugRouter.h"
-#import <DebugRouterReportServiceUtil.h>
-#import <DebugRouterToast.h>
 #include <memory>
 #import "DebugRouterGlobalHandler.h"
 #import "DebugRouterInternalStateListener.h"
 #import "DebugRouterLog.h"
 #import "DebugRouterReport.h"
+#import "DebugRouterReportServiceUtil.h"
 #import "DebugRouterSlot.h"
+#import "DebugRouterToast.h"
 #import "DebugRouterUtil.h"
 #import "DebugRouterVersion.h"
 #import "LocalNetworkPermissionChecker.h"
@@ -59,7 +59,7 @@ class DebugRouterReportiOS : public debugrouter::report::DebugRouterNativeReport
                                                                  options:kNilOptions
                                                                    error:&error];
     if (error) {
-      NSLog(@"parse category JSON failed: %@", error.localizedDescription);
+      LLogError(@"parse category JSON failed: %@", error.localizedDescription);
       categoryDict = nil;
     }
     NSData *metricData = [metricStr dataUsingEncoding:NSUTF8StringEncoding];
@@ -67,7 +67,7 @@ class DebugRouterReportiOS : public debugrouter::report::DebugRouterNativeReport
                                                                options:kNilOptions
                                                                  error:&error];
     if (error) {
-      NSLog(@"parse metric JSON failed: %@", error.localizedDescription);
+      LLogError(@"parse metric JSON failed: %@", error.localizedDescription);
       metricDict = nil;
     }
 
@@ -95,12 +95,9 @@ class StateListenerDeleagte : public debugrouter::core::DebugRouterStateListener
   virtual void OnClose(int32_t code, const std::string &reason) override {
     [listener_ios_ onClose:code withReason:[NSString stringWithUTF8String:reason.c_str()]];
   }
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   virtual void OnMessage(const std::string &message) override {
     [listener_ios_ onMessage:[NSString stringWithUTF8String:message.c_str()]];
   }
-#pragma clang diagnostic pop
   virtual void OnError(const std::string &error) override {
     [listener_ios_ onError:[NSString stringWithUTF8String:error.c_str()]];
   }
@@ -113,12 +110,9 @@ class GlobalHandlerDelegate : public debugrouter::core::DebugRouterGlobalHandler
  public:
   GlobalHandlerDelegate(id<DebugRouterGlobalHandler> handler) : handler_(handler) {}
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   virtual void OpenCard(const std::string &url) override {
     [handler_ openCard:[NSString stringWithUTF8String:url.c_str()]];
   }
-#pragma clang diagnostic pop
   virtual void OnMessage(const std::string &message, const std::string &type) override {
     [handler_ onMessage:[NSString stringWithUTF8String:message.c_str()]
                withType:[NSString stringWithUTF8String:type.c_str()]];

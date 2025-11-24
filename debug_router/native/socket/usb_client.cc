@@ -19,6 +19,8 @@
 namespace debugrouter {
 namespace socket_server {
 
+const char *kMessageQuit = "quit";
+
 int GetErrorMessage() {
 #ifdef _WIN32
   return WSAGetLastError();
