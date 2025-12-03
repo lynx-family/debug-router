@@ -16,13 +16,13 @@ import {
 } from "../utils/type";
 import { Connection } from "./Connection";
 
-export class UsbClient implements Client {
-  private messageIdCounter = 1;
-
+export class UsbClient extends Client {
   constructor(
     readonly info: ClientDescription,
     readonly connection: Connection,
-  ) {}
+  ) {
+    super();
+  }
 
   clientId(): number {
     return this.info.id;
@@ -66,7 +66,7 @@ export class UsbClient implements Client {
     sessionId: number = -1,
     type: string = "CDP",
   ): Promise<string> {
-    const id = this.messageIdCounter++;
+    const id = Client.messageIdCounter++;
     const msg: RequireMessageType = {
       event: SocketEvent.Customized,
       data: {
