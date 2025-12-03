@@ -6,6 +6,14 @@ import { WebSocket } from "ws";
 import { WebSocketController } from "./WebSocketServer";
 import { defaultLogger } from "../utils/logger";
 import { Client } from "../connector/Client";
+import {
+  CustomizedEventType,
+  CustomizeResponseType,
+  isCustomizedEventType,
+  RequireMessageType,
+  ResponseMessageType,
+  SocketEvent,
+} from "../utils/type";
 
 export type WebSocketClientInfo = {
   id: number;
@@ -19,12 +27,17 @@ export type WebSocketClientInfo = {
   raw_info: any;
 };
 
-export class WebSocketClient implements Client {
+export class WebSocketClient extends Client {
+  private pendingRequests: Map<
+    string,
+    { resolve: (message: string) => void; reject: (err: Error) => void }
+  > = new Map();
   constructor(
     private readonly server: WebSocketController,
     readonly info: WebSocketClientInfo,
     private readonly socket: WebSocket,
   ) {
+    super();
     socket.on("message", this.handleMessage.bind(this));
     socket.on("close", this.handleClose.bind(this));
   }
@@ -127,6 +140,30 @@ export class WebSocketClient implements Client {
       this.handlePing();
     } else if (message.event === "Customized") {
       this.handleCustomizedMessage(message, dataString);
+      try {
+        const payload = message?.data?.data?.message;
+        if (typeof payload === "string") {
+          const cdpMessage = JSON.parse(payload);
+          if (cdpMessage?.id) {
+            const key = cdpMessage.id.toString();
+            const pending = this.pendingRequests.get(key);
+            if (pending) {
+              this.pendingRequests.delete(key);
+              pending.resolve(payload);
+            }
+          }
+        } else {
+          defaultLogger.debug(
+            "webSocketClient handleCustomizedMessage invalid message:" +
+              JSON.stringify(message),
+          );
+        }
+      } catch (error: any) {
+        defaultLogger.debug(
+          "webSocketClient handleCustomizedMessage parse error:" +
+            error?.message,
+        );
+      }
     }
   }
 
@@ -156,5 +193,55 @@ export class WebSocketClient implements Client {
       event: "Pong",
     };
     this.socket.send(JSON.stringify(response));
+  }
+  // send sendCustomizedMessage and wait result
+  sendCustomizedMessage(
+    method: string,
+    params: Object = "",
+    sessionId: number = -1,
+    type: string = "CDP",
+  ): Promise<string> {
+    const id = Client.messageIdCounter++;
+    const msg: RequireMessageType = {
+      event: SocketEvent.Customized,
+      data: {
+        type: type,
+        data: {
+          client_id: -1,
+          session_id: sessionId,
+          message: {
+            id: id,
+            method: method,
+            params: params,
+          },
+        },
+        sender: 0,
+      },
+    };
+
+    return new Promise((resolve, reject) => {
+      const key = id.toString();
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(key);
+        reject(
+          new Error(
+            `Timeout: 5s no response for message-id ${JSON.stringify(msg)}`,
+          ),
+        );
+      }, 5000);
+
+      this.pendingRequests.set(key, {
+        resolve: (message: string) => {
+          clearTimeout(timer);
+          resolve(message);
+        },
+        reject: (err: Error) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
+
+      this.socket.send(JSON.stringify(msg));
+    });
   }
 }
