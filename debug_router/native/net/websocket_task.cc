@@ -30,6 +30,19 @@ const int kUnexpectedOpcode = -104;
 const int kUnexpectedMaskPayloadLen = -105;
 const int kDeflatedMessageUnimplemented = -106;
 
+// Helper function to convert Windows wide string to narrow string for logging
+#ifdef _WIN32
+std::string WideToNarrow(const WCHAR *wide_str) {
+  if (!wide_str) return "";
+  int size_needed = WideCharToMultiByte(CP_UTF8, 0, wide_str, -1, nullptr, 0,
+                                        nullptr, nullptr);
+  std::string narrow_str(size_needed - 1, 0);
+  WideCharToMultiByte(CP_UTF8, 0, wide_str, -1, &narrow_str[0], size_needed,
+                      nullptr, nullptr);
+  return narrow_str;
+}
+#endif
+
 int GetErrorMessage() {
 #ifdef _WIN32
   return WSAGetLastError();
@@ -190,7 +203,7 @@ bool WebSocketTask::do_connect() {
   int ret = getaddrinfo(host, str_port, &ai, &servinfo);
   if (ret != 0) {
 #ifdef _WIN32
-    LOGE("getaddrinfo Error: " << gai_strerror(ret));
+    LOGE("getaddrinfo Error: " << WideToNarrow(gai_strerror(ret)));
     onFailure("Websocket Task: getaddrinfo Error.", ret);
 #else
     // Other system error; errno is set to indicate the error.
