@@ -337,34 +337,67 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
       ForSession:(int)session
         WithMark:(int)mark
         isObject:(BOOL)isObject {
-  debugrouter::core::DebugRouterCore::GetInstance().SendData([data UTF8String], [type UTF8String],
-                                                             session, mark, isObject);
+  if (data == nil || type == nil || ![data isKindOfClass:[NSString class]] ||
+      ![type isKindOfClass:[NSString class]]) {
+    LLogError(@"nil data or type or not NSString");
+    return;
+  }
+  const char *dataUtf8 = [data UTF8String];
+  const char *typeUtf8 = [type UTF8String];
+  if (dataUtf8 == nullptr || typeUtf8 == nullptr) {
+    LLogError(@"invaild data or type");
+    return;
+  }
+  debugrouter::core::DebugRouterCore::GetInstance().SendData(dataUtf8, typeUtf8, session, mark,
+                                                             isObject);
 }
 
 - (void)sendAsync:(NSString *)message {
-  if (message == nil) {
+  if (message == nil || ![message isKindOfClass:[NSString class]]) {
+    LLogError(@"nil message or not NSString");
     return;
   }
-  debugrouter::core::DebugRouterCore::GetInstance().SendAsync([message UTF8String]);
+  const char *messageUtf8 = [message UTF8String];
+  if (messageUtf8 == nullptr) {
+    LLogError(@"invaild message");
+    return;
+  }
+  debugrouter::core::DebugRouterCore::GetInstance().SendAsync(messageUtf8);
 }
 
 - (void)sendDataAsync:(NSString *)data WithType:(NSString *)type ForSession:(int)session {
-  if (data == nil || type == nil) {
+  if (data == nil || type == nil || ![data isKindOfClass:[NSString class]] ||
+      ![type isKindOfClass:[NSString class]]) {
+    LLogError(@"nil data or type or not NSString");
     return;
   }
-  debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(
-      [data UTF8String], [type UTF8String], session, -1, false);
+  const char *dataUtf8 = [data UTF8String];
+  const char *typeUtf8 = [type UTF8String];
+  if (dataUtf8 == nullptr || typeUtf8 == nullptr) {
+    LLogError(@"invaild data or type");
+    return;
+  }
+  debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(dataUtf8, typeUtf8, session, -1,
+                                                                  false);
 }
 
 - (void)sendDataAsync:(NSString *)data
              WithType:(NSString *)type
            ForSession:(int)session
              WithMark:(int)mark {
-  if (data == nil || type == nil) {
+  if (data == nil || type == nil || ![data isKindOfClass:[NSString class]] ||
+      ![type isKindOfClass:[NSString class]]) {
+    LLogError(@"nil data or type or not NSString");
     return;
   }
-  debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(
-      [data UTF8String], [type UTF8String], session, mark, false);
+  const char *dataUtf8 = [data UTF8String];
+  const char *typeUtf8 = [type UTF8String];
+  if (dataUtf8 == nullptr || typeUtf8 == nullptr) {
+    LLogError(@"invaild data or type");
+    return;
+  }
+  debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(dataUtf8, typeUtf8, session, mark,
+                                                                  false);
 }
 
 - (void)sendObjectAsync:(NSDictionary *)data WithType:(NSString *)type ForSession:(int)session {
