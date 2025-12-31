@@ -48,6 +48,10 @@ export async function getAdbInstance(adbOption: any) {
   return adbClient;
 }
 
+export function getAdbToolPath() {
+  return adbPath;
+}
+
 async function exeCmd(cmd: string) {
   return new Promise<string>((resolve, reject) => {
     child_process.exec(

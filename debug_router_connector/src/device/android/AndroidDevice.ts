@@ -16,6 +16,7 @@ import detectPort from "detect-port";
 import child_process, { ExecException } from "child_process";
 import { getDriverReportService } from "../../report/interface/DriverReportService";
 import { DeviceOS } from "../../utils/type";
+import { getAdbToolPath } from "../../utils/adb.validator";
 
 export default class AndroidDevice extends BaseDevice {
   private adb: ADBClient;
@@ -131,7 +132,8 @@ export default class AndroidDevice extends BaseDevice {
         const remote = forwards[i].remote;
         const remotePort = parseInt(remote.replace(/^tcp:/, ""), 10);
         if (this.remotePorts.includes(remotePort)) {
-          const shellCmd = `adb -H ${this.adb.options.host} -P ${this.adb.options.port} forward --remove ${local}`;
+          const adbToolPath = getAdbToolPath();
+          const shellCmd = `${adbToolPath} -H ${this.adb.options.host} -P ${this.adb.options.port} forward --remove ${local}`;
           defaultLogger.debug(shellCmd);
           const result = await this.exeCmd(shellCmd);
           defaultLogger.debug(result);
