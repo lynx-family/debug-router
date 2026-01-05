@@ -127,7 +127,22 @@ export default class ClientAdapter {
           this.offset + this.usbmuxdPacketHeaderLength,
           this.offset + this.usbmuxdPacketHeaderLength + size,
         );
-        this.handleMessage(receivedBuffer);
+        try {
+          const parsedMessage = JSON.parse(receivedBuffer);
+          if (Array.isArray(parsedMessage)) {
+            for (const message of parsedMessage) {
+              this.handleMessage(JSON.stringify(message));
+            }
+          } else if (parsedMessage?.type == 'batch') {
+            parsedMessage.messages.forEach((message: any) => {
+              this.handleMessage(JSON.stringify(message, null, 2));
+            })
+          } else {
+            this.handleMessage(receivedBuffer);
+          }
+        } catch (error) {
+          defaultLogger.debug("parse message error:" + error);
+        }
         this.offset += this.usbmuxdPacketHeaderLength + size;
         if (this.offset == this.end) {
           this.offset = 0;
