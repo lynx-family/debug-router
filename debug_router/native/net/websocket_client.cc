@@ -48,6 +48,14 @@ bool WebSocketClient::Connect(const std::string &url) {
   return true;
 }
 
+void WebSocketClient::StartServer() {
+  // for only use usb now, keep null
+}
+
+void WebSocketClient::StopServer() {
+  // for only use usb now, keep null
+}
+
 void WebSocketClient::ConnectInternal(const std::string &url) {
   LOGI("WebSocketClient::ConnectInternal: use " << url << " to connect.");
   current_task_ = std::make_unique<WebSocketTask>(shared_from_this(), url);

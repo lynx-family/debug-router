@@ -195,5 +195,13 @@ std::string DebugRouter::GetAppInfoByKey(const std::string &key) {
   return core::DebugRouterCore::GetInstance().GetAppInfoByKey(key);
 }
 
+void DebugRouter::EnableAllSessions() {
+  core::DebugRouterCore::GetInstance().EnableAllSessions();
+}
+
+void DebugRouter::EnableSingleSession(int32_t session_id) {
+  core::DebugRouterCore::GetInstance().EnableSingleSession(session_id);
+}
+
 }  // namespace common
 }  // namespace debugrouter

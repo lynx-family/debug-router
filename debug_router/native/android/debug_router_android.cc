@@ -181,6 +181,15 @@ jstring GetServerUrl(JNIEnv *env, jobject jcaller) {
       env, debugrouter::core::DebugRouterCore::GetInstance().GetServerUrl());
 }
 
+void EnableAllSessions(JNIEnv *env, jobject jcaller) {
+  debugrouter::core::DebugRouterCore::GetInstance().EnableAllSessions();
+}
+
+void EnableSingleSession(JNIEnv *env, jobject jcaller, jint session_id) {
+  debugrouter::core::DebugRouterCore::GetInstance().EnableSingleSession(
+      session_id);
+}
+
 namespace debugrouter {
 namespace android {
 

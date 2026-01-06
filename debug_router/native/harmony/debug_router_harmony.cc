@@ -64,7 +64,11 @@ napi_value DebugRouterHarmony::Init(napi_env env, napi_value exports) {
       {"setAppInfo", 0, DebugRouterHarmony::SetAppInfo, 0, 0, 0, napi_static,
        0},
       {"getAppInfoByKey", 0, DebugRouterHarmony::GetAppInfoByKey, 0, 0, 0,
-       napi_static, 0}};
+       napi_static, 0},
+      {"enableAllSessions", 0, DebugRouterHarmony::EnableAllSessions, 0, 0, 0,
+       napi_static, 0},
+      {"enableSingleSession", 0, DebugRouterHarmony::EnableSingleSession, 0, 0,
+       0, napi_static, 0}};
   constexpr size_t size = std::size(properties);
 
   napi_value cons;
@@ -373,6 +377,24 @@ napi_value DebugRouterHarmony::GetAppInfoByKey(napi_env env,
   napi_value result;
   napi_create_string_utf8(env, value.c_str(), value.size(), &result);
   return result;
+}
+
+napi_value DebugRouterHarmony::EnableAllSessions(napi_env env,
+                                                 napi_callback_info info) {
+  core::DebugRouterCore::GetInstance().EnableAllSessions();
+  return nullptr;
+}
+
+napi_value DebugRouterHarmony::EnableSingleSession(napi_env env,
+                                                   napi_callback_info info) {
+  napi_value js_this;
+  size_t argc = 1;
+  napi_value argv[1];
+  napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
+  int32_t session_id;
+  napi_get_value_int32(env, argv[0], &session_id);
+  core::DebugRouterCore::GetInstance().EnableSingleSession(session_id);
+  return nullptr;
 }
 
 }  // namespace harmony

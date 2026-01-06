@@ -54,5 +54,8 @@ export declare class DebugRouterHarmony {
 
   static setAppInfo: (arg1: Map<string, string> | string, arg2?: string) => void;
   static getAppInfoByKey: (key:string) => string;
+  
+  static enableAllSessions: () => void;
+  static enableSingleSession: (sessionId: number) => void;
 }
  

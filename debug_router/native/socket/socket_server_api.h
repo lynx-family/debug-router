@@ -50,6 +50,9 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   static std::shared_ptr<SocketServer> CreateSocketServer(
       const std::shared_ptr<SocketServerConnectionListener> &listener);
 
+  void StartServer();
+  void StopServer();
+
  protected:
   static void ThreadFunc(std::shared_ptr<SocketServer> socket_server);
 
@@ -58,6 +61,8 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   virtual void CloseSocket(int socket_fd) = 0;
   void Close();
   void NotifyInit(int32_t code, const std::string &info);
+
+  void setEnableServer(bool enable);
 
   std::weak_ptr<SocketServerConnectionListener> listener_;
   std::queue<std::string> writer_message_queue_;
@@ -68,6 +73,11 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   std::shared_ptr<UsbClient> temp_usb_client_;
 
   volatile SocketType socket_fd_ = kInvalidSocket;
+
+ private:
+  std::atomic<bool> is_running_{false};
+  std::condition_variable running_condition_;
+  std::mutex running_mutex_;
 };
 
 // ClientListener

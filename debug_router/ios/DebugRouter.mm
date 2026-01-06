@@ -637,4 +637,12 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   return [NSString stringWithUTF8String:infoString.c_str()];
 }
 
+- (void)enableAllSessions {
+  debugrouter::core::DebugRouterCore::GetInstance().EnableAllSessions();
+}
+
+- (void)enableSingleSession:(int)sessionId {
+  debugrouter::core::DebugRouterCore::GetInstance().EnableSingleSession(sessionId);
+}
+
 @end
