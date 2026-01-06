@@ -112,9 +112,9 @@ void WebSocketTask::SendInternal(const std::string &data) {
     return;
   }
   if (data.find("Page.screencastFrame") != std::string::npos) {
-    LOGI("WebSocketTask: [TX]: Page.screencastFrame Received.");
+    LOGI("WebSocketTask: [TX]: Page.screencastFrame Sent.");
   } else if (data.find("Lynx.screenshotCapture") != std::string::npos) {
-    LOGI("WebSocketTask: [TX]: Lynx.screenshotCapture Received.");
+    LOGI("WebSocketTask: [TX]: Lynx.screenshotCapture Sent.");
   } else {
     LOGI("WebSocketTask: [TX]: " << buf);
   }

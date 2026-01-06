@@ -447,4 +447,16 @@ public class DebugRouter {
     LLog.w(TAG, "getConfig: value is illegal");
     return false;
   }
+
+  private native void nativeEnableAllSessions();
+
+  private native void nativeEnableSingleSession(int session_id);
+
+  public void enableAllSessions() {
+    nativeEnableAllSessions();
+  }
+
+  public void enableSingleSession(int session_id) {
+    nativeEnableSingleSession(session_id);
+  }
 }

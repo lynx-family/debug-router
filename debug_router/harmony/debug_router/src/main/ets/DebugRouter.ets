@@ -108,4 +108,12 @@ export class DebugRouter {
   public static getAppInfoBykey(key: string): string {
     return DebugRouterHarmony.getAppInfoByKey(key);
   }
+
+  public static enableAllSessions(): void {
+    DebugRouterHarmony.enableAllSessions();
+  }
+
+  public static enableSingleSession(sessionId: number): void {
+    DebugRouterHarmony.enableSingleSession(sessionId);
+  }
 }

@@ -21,6 +21,9 @@ class SocketServerClient : public core::MessageTransceiver {
   core::ConnectionType GetType() override;
   void HandleReceivedMessage(const std::string &message) override;
 
+  void StartServer() override;
+  void StopServer() override;
+
  private:
   std::shared_ptr<debugrouter::socket_server::SocketServer> socket_server_;
   std::shared_ptr<debugrouter::socket_server::SocketServerConnectionListener>

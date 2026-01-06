@@ -28,7 +28,7 @@ public class MainActivity extends AppCompatActivity implements StateListener {
     setContentView(R.layout.activity_main);
     StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
     StrictMode.setThreadPolicy(policy);
-    DebugRouter.getInstance();
+    DebugRouter.getInstance().enableAllSessions();
 
     testAddSessionHandlerJNI();
 
@@ -70,7 +70,7 @@ public class MainActivity extends AppCompatActivity implements StateListener {
       }
     });
 
-    DebugRouter.getInstance().plug(new DebugRouterSlot(new DebugRouterSlotDelegate() {
+    DebugRouterSlot slot = new DebugRouterSlot(new DebugRouterSlotDelegate() {
       @Override
       public String getTemplateUrl() {
         return "templateUrl";
@@ -79,7 +79,28 @@ public class MainActivity extends AppCompatActivity implements StateListener {
       public void onMessage(String type, String message) {
         LLog.i(TAG, "onMessage:" + type + message);
       }
-    }));
+    });
+
+    int sessionId = DebugRouter.getInstance().plug(slot);
+    // // 2. enable single session test
+    // DebugRouter.getInstance().enableSingleSession(sessionId);
+    // // sleep 10s
+    // try {
+    //   Thread.sleep(10000);
+    // } catch (InterruptedException e) {
+    //   e.printStackTrace();
+    // }
+    // // test plug -> pull
+    // DebugRouter.getInstance().pull(sessionId);
+    // // sleep 10s
+    // try {
+    //   Thread.sleep(10000);
+    // } catch (InterruptedException e) {
+    //   e.printStackTrace();
+    // }
+    // // test plug -> pull -> plug
+    // sessionId = DebugRouter.getInstance().plug(slot);
+    // DebugRouter.getInstance().enableSingleSession(sessionId);
   }
 
   private void handleUsb(Intent intent) {

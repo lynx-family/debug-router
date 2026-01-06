@@ -285,6 +285,16 @@ int32_t DebugRouterCore::GetUSBPort() {
 
 void DebugRouterCore::Pull(int32_t session_id_) {
   LOGI("pull session: " << session_id_);
+  if (!enable_all_sessions_.load(std::memory_order_relaxed)) {
+    std::unique_lock lock(enabled_sessions_mutex_);
+    if (enabled_session_ids_.erase(session_id_) > 0) {
+      if (enabled_session_ids_.empty()) {
+        for (size_t i = 0; i < kTransceiverCount; ++i) {
+          message_transceivers_[i]->StopServer();
+        }
+      }
+    }
+  }
   {
     std::unique_lock lock(slots_mutex_);
     slots_.erase(session_id_);
@@ -724,6 +734,45 @@ std::string DebugRouterCore::GetConnectionStateMsg(ConnectionState state) {
   } else {
     return "";
   }
+}
+
+void DebugRouterCore::EnableAllSessions() {
+  LOGI("enableAllSessions");
+  enable_all_sessions_.store(true);
+  for (size_t i = 0; i < kTransceiverCount; ++i) {
+    message_transceivers_[i]->StartServer();
+  }
+}
+
+void DebugRouterCore::EnableSingleSession(int32_t session_id) {
+  // if enable all sessions, then no need to enable single session.
+  if (enable_all_sessions_.load(std::memory_order_relaxed)) {
+    return;
+  }
+  LOGI("enableSingleSession: " << session_id);
+  {
+    std::unique_lock lock(enabled_sessions_mutex_);
+    enabled_session_ids_.insert(session_id);
+  }
+  for (size_t i = 0; i < kTransceiverCount; ++i) {
+    message_transceivers_[i]->StartServer();
+  }
+}
+
+bool DebugRouterCore::isActiveSession(int32_t session_id) {
+  if (enable_all_sessions_.load(std::memory_order_relaxed)) {
+    return true;
+  }
+  bool is_active = false;
+  {
+    std::shared_lock lock(enabled_sessions_mutex_);
+    is_active = enabled_session_ids_.count(session_id) > 0;
+  }
+  return is_active;
+}
+
+bool DebugRouterCore::isEnableAllSessions() {
+  return enable_all_sessions_.load(std::memory_order_relaxed);
 }
 
 }  // namespace core

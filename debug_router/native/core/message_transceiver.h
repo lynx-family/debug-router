@@ -44,6 +44,9 @@ class MessageTransceiver
   virtual void SetDelegate(MessageTransceiverDelegate *delegate);
   virtual MessageTransceiverDelegate *delegate();
 
+  virtual void StartServer() = 0;
+  virtual void StopServer() = 0;
+
  private:
   MessageTransceiverDelegate *delegate_ = nullptr;
 };

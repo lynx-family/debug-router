@@ -115,9 +115,38 @@ void SocketServer::NotifyInit(int32_t code, const std::string &info) {
   });
 }
 
+void SocketServer::setEnableServer(bool enable) {
+  LOGI("SocketServer::setEnableServer:" << enable);
+  // notify only when transition from false to true
+  if (!is_running_.exchange(enable, std::memory_order_relaxed) && enable) {
+    running_condition_.notify_one();
+  }
+}
+
+void SocketServer::StartServer() { setEnableServer(true); }
+
+void SocketServer::StopServer() {
+  setEnableServer(false);
+  shutdown(socket_fd_, SHUT_RDWR);
+  Close();
+  if (usb_client_) {
+    usb_client_->Stop();
+  }
+  if (temp_usb_client_) {
+    temp_usb_client_->Stop();
+  }
+}
+
 void SocketServer::ThreadFunc(std::shared_ptr<SocketServer> socket_server) {
   int count = 0;
   while (true) {
+    {
+      std::unique_lock lock(socket_server->running_mutex_);
+      socket_server->running_condition_.wait(lock, [=]() {
+        return socket_server->is_running_.load(std::memory_order_relaxed) ==
+               true;
+      });
+    }
     LOGI("Init start:" << count);
     socket_server->Start();
     count++;
@@ -131,7 +160,7 @@ void SocketServer::Init() {
 
 // close server socket
 void SocketServer::Close() {
-  LOGI("SocketServer::Close");
+  LOGI("SocketServer::Close server socket_fd_:" << socket_fd_);
   CloseSocket(socket_fd_);
   socket_fd_ = kInvalidSocket;
 }

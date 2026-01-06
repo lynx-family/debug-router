@@ -89,5 +89,17 @@ void SocketServerClient::HandleReceivedMessage(const std::string &message) {
   // empty
 }
 
+void SocketServerClient::StartServer() {
+  if (socket_server_) {
+    socket_server_->StartServer();
+  }
+}
+
+void SocketServerClient::StopServer() {
+  if (socket_server_) {
+    socket_server_->StopServer();
+  }
+}
+
 }  // namespace net
 }  // namespace debugrouter
