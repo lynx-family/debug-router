@@ -39,8 +39,7 @@ const int CODE_HANDLE_SUCCESSFULLY = 0;
 }
 
 - (NSString *)toJsonString {
-  NSMutableDictionary<NSString *, id> *dict =
-      (NSMutableDictionary<NSString *, id> *)[self toStringDict];
+  NSMutableDictionary<NSString *, id> *dict = (NSMutableDictionary<NSString *, id> *)[self toDict];
   NSData *jsonData = [DebugRouterUtil dictToJson:dict];
 
   NSString *result = @"{}";
