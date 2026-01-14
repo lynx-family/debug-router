@@ -73,6 +73,9 @@ void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
           "SocketServerApi OnClose: curr client is null or not match, stop "
           "error client.");
       client->Stop();
+      if (auto listener = listener_.lock()) {
+        listener->OnStatusChanged(status, code, reason);
+      }
       return;
     }
     LOGI("SocketServerApi HandleOnCloseStatus: close curr client for OnClose.");
@@ -145,10 +148,10 @@ void SocketServer::Disconnect() {
 
 SocketServer::~SocketServer() {
   LOGI("SocketServer::~SocketServer");
-  if (!usb_client_) {
+  if (usb_client_) {
     usb_client_->Stop();
   }
-  if (!temp_usb_client_) {
+  if (temp_usb_client_) {
     temp_usb_client_->Stop();
   }
   Close();

@@ -111,7 +111,13 @@ void WebSocketTask::SendInternal(const std::string &data) {
     onFailure("Socket_guard_ is nullptr.", kNullSocketGuard);
     return;
   }
-  LOGI("[TX] SendInternal: " << buf);
+  if (data.find("Page.screencastFrame") != std::string::npos) {
+    LOGI("WebSocketTask: [TX]: Page.screencastFrame Received.");
+  } else if (data.find("Lynx.screenshotCapture") != std::string::npos) {
+    LOGI("WebSocketTask: [TX]: Lynx.screenshotCapture Received.");
+  } else {
+    LOGI("WebSocketTask: [TX]: " << buf);
+  }
   if (send(socket_guard_->Get(), (char *)prefix, prefix_len, 0) == -1) {
     LOGI("send prefix_len error.");
     onFailure("Send prefix_len error.", GetErrorMessage());
@@ -142,11 +148,18 @@ void WebSocketTask::StartInternal() {
     LOGI("[RX]:" << msg);
     onMessage(msg);
   }
+
+  if (is_connected_.load(std::memory_order_relaxed)) {
+    onClose();
+  }
 }
 
 void WebSocketTask::Stop() {
   LOGI("WebSocketTask::Stop");
   socket_guard_->Reset();
+  if (is_connected_.load(std::memory_order_relaxed)) {
+    onClose();
+  }
   shutdown();
 }
 
@@ -386,6 +399,7 @@ bool WebSocketTask::do_read(std::string &msg) {
 
 void WebSocketTask::onOpen() {
   LOGI("WebSocketTask::onOpen");
+  is_connected_.store(true, std::memory_order_relaxed);
   auto transceiver = transceiver_.lock();
   if (transceiver) {
     transceiver->delegate()->OnOpen(transceiver);
@@ -398,6 +412,19 @@ void WebSocketTask::onFailure(const std::string &error_message,
   auto transceiver = transceiver_.lock();
   if (transceiver) {
     transceiver->delegate()->OnFailure(transceiver, error_message, error_code);
+  }
+}
+
+void WebSocketTask::onClose() {
+  LOGI("WebSocketTask::onClose with error_message.");
+  bool expected = true;
+  if (!is_connected_.compare_exchange_strong(expected, false,
+                                             std::memory_order_relaxed)) {
+    return;
+  }
+  auto transceiver = transceiver_.lock();
+  if (transceiver) {
+    transceiver->delegate()->OnClosed(transceiver);
   }
 }
 
