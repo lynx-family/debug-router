@@ -144,6 +144,7 @@ void UsbClient::ReadMessage() {
     if (isFirst) {
       LOGI("UsbClient: handle first frame.");
       if (listener_) {
+        is_connected_.store(true, std::memory_order_relaxed);
         listener_->OnOpen(shared_from_this(), ConnectionStatus::kConnected,
                           "Init Success!");
       }
@@ -187,7 +188,7 @@ void UsbClient::ReadMessage() {
   }
   // end read loop.
   LOGI("UsbClient: ReadMessage finished.");
-  if (listener_) {
+  if (listener_ && is_connected_.exchange(false, std::memory_order_relaxed)) {
     listener_->OnClose(shared_from_this(), GetErrorMessage(),
                        "ReadMessage finished");
   }
@@ -275,8 +276,14 @@ void UsbClient::WriteMessage() {
       break;
     }
     if (message.length() > 0) {
-      LOGI("UsbClient: [TX]:");
-      LOGI(message);
+      if (message.find("Page.screencastFrame") != std::string::npos) {
+        LOGI("UsbClient: [TX]: Page.screencastFrame Received.");
+      } else if (message.find("Lynx.screenshotCapture") != std::string::npos) {
+        LOGI("UsbClient: [TX]: Lynx.screenshotCapture Received.");
+      } else {
+        LOGI("UsbClient: [TX]:");
+        LOGI(message);
+      }
       std::string result_message;
       WrapHeader(message, result_message);
       if (send(socket_guard_.Get(), result_message.c_str(),
@@ -293,7 +300,7 @@ void UsbClient::WriteMessage() {
     }
   }
   LOGI("UsbClient: WriteMessage finished.");
-  if (listener_) {
+  if (listener_ && is_connected_.exchange(false, std::memory_order_relaxed)) {
     listener_->OnClose(shared_from_this(), GetErrorMessage(),
                        "writer thread finished");
   }
