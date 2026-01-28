@@ -15,7 +15,7 @@ config("debug_router_private_config") {
   cflags_cc = [
     "-Wno-extra-semi",
     "-Wno-unused-private-field",
-    "-Wno-reorder-ctor",
+    "-Wno-reorder",
     "-Wno-implicit-fallthrough",
     "-Wno-invalid-noreturn",
     "-Wno-potentially-evaluated-expression",
