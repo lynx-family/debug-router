@@ -49,7 +49,10 @@ export async function getAdbInstance(adbOption: any) {
 }
 
 export function getAdbToolPath() {
-  return adbPath;
+  if (process.platform === "darwin") {
+    return join(process.env["HOME"]!, ".DebugRouterConnector/adb-tool");
+  }
+  return null;
 }
 
 async function exeCmd(cmd: string) {
