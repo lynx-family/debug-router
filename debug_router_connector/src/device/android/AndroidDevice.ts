@@ -133,7 +133,12 @@ export default class AndroidDevice extends BaseDevice {
         const remotePort = parseInt(remote.replace(/^tcp:/, ""), 10);
         if (this.remotePorts.includes(remotePort)) {
           const adbToolPath = getAdbToolPath();
-          const shellCmd = `${adbToolPath} -H ${this.adb.options.host} -P ${this.adb.options.port} forward --remove ${local}`;
+          let adbPath =
+            adbToolPath + (process.platform !== "win32" ? "/adb" : "/adb.exe");
+          if (adbToolPath === null) {
+            adbPath = process.platform !== "win32" ? "adb" : "adb.exe";
+          }
+          const shellCmd = `${adbPath} -H ${this.adb.options.host} -P ${this.adb.options.port} forward --remove ${local}`;
           defaultLogger.debug(shellCmd);
           const result = await this.exeCmd(shellCmd);
           defaultLogger.debug(result);

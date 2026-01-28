@@ -46,5 +46,22 @@ function android_env_setup() {
   fi
 }
 
+HARMONY_SDK_VERSION='6.0.0.868'
+function harmony_home_setup_for_ci() {
+    if [ -z "${COMMANDLINE_TOOL_BASE_DIR}" ]; then
+        echo "NOTICE: COMMANDLINE_TOOL_BASE_DIR is not set. If you are not doing a local build or not a harmony build, please ignore this warning."
+        return
+    fi
+
+    COMMANDLINE_TOOL_DIR="${COMMANDLINE_TOOL_BASE_DIR}/${HARMONY_SDK_VERSION}/command-line-tools"
+    export COMMANDLINE_TOOL_DIR
+
+    export HARMONY_HOME="${COMMANDLINE_TOOL_DIR}/sdk"
+    export PATH="${COMMANDLINE_TOOL_DIR}/bin:${PATH}"
+
+    echo "harmony_home_setup_for_ci done"
+}
+
 lynx_envsetup "${BASH_SOURCE:-$0}"
 android_env_setup "${BASH_SOURCE:-$0}"
+harmony_home_setup_for_ci
