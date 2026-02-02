@@ -4,9 +4,22 @@
 
 import fs from "fs";
 import os from "os";
-import { onExit } from "signal-exit";
 import { getDriverReportService } from "../report/interface/DriverReportService";
 import { defaultLogger } from "./logger";
+
+// try to import signal-exit, if failed, use native implementation
+let onExit: any = null;
+try {
+  const signalExitModule = require("signal-exit");
+  // different versions of signal-exit export different ways
+  onExit =
+    typeof signalExitModule === "function"
+      ? signalExitModule
+      : signalExitModule.onExit || signalExitModule.default || null;
+} catch (e) {
+  defaultLogger.debug("signal-exit import failed, using native implementation");
+  onExit = null;
+}
 
 export const driver_dir = os.homedir() + "/.DebugRouterConnector";
 export const lockDir = driver_dir + "/lockfile";
@@ -91,10 +104,31 @@ export function clearLockFile() {
 }
 
 export function clearLockFileWhenProcessExit() {
-  onExit((code, signal) => {
+  // clear the lock file when process exit
+  const cleanup = (code?: any, signal?: any) => {
     defaultLogger.debug("process exit:" + code + " " + signal);
     if (hasLock) {
       clearLockFile();
     }
-  });
+  };
+
+  // if signal-exit is available and is a function, use it
+  if (onExit && typeof onExit === "function") {
+    try {
+      onExit(cleanup);
+      return;
+    } catch (e) {
+      defaultLogger.debug(
+        "signal-exit usage failed, falling back to native implementation",
+      );
+    }
+  }
+
+  // backup the native implementation
+  process.on("exit", cleanup);
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
+  process.on("SIGQUIT", cleanup);
+  process.on("uncaughtException", cleanup);
+  process.on("unhandledRejection", cleanup);
 }
