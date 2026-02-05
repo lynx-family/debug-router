@@ -127,7 +127,15 @@ void SocketServer::StartServer() { setEnableServer(true); }
 
 void SocketServer::StopServer() {
   setEnableServer(false);
-  shutdown(socket_fd_, SHUT_RDWR);
+  // Close socket if it's valid
+  if (socket_fd_ != kInvalidSocket) {
+#ifdef _WIN32
+    shutdown(socket_fd_, SD_BOTH);
+#else
+    shutdown(socket_fd_, SHUT_RDWR);
+#endif
+  }
+
   Close();
   if (usb_client_) {
     usb_client_->Stop();
