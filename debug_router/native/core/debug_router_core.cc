@@ -503,7 +503,6 @@ void DebugRouterCore::OnMessage(
   }
 
   for (const auto &listener : listeners) {
-    LOGI("do state_listeners_ onmessage.");
     listener->OnMessage(message);
   }
 }
@@ -737,8 +736,10 @@ std::string DebugRouterCore::GetConnectionStateMsg(ConnectionState state) {
 }
 
 void DebugRouterCore::EnableAllSessions() {
+  if (enable_all_sessions_.exchange(true, std::memory_order_relaxed)) {
+    return;
+  }
   LOGI("enableAllSessions");
-  enable_all_sessions_.store(true);
   for (size_t i = 0; i < kTransceiverCount; ++i) {
     message_transceivers_[i]->StartServer();
   }

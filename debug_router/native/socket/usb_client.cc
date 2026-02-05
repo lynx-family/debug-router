@@ -103,12 +103,10 @@ bool UsbClient::ReadAndCheckMessageHeader(char *header) {
  */
 
 bool UsbClient::Read(char *buffer, uint32_t read_size) {
-  LOGI("To Read:" << read_size);
   int64_t start = 0;
   while (start < read_size) {
     int64_t read_data_len =
         recv(socket_guard_.Get(), buffer + start, read_size - start, 0);
-    LOGI("read_data_len:" << read_data_len);
     if (read_data_len <= 0) {
       LOGE("Read: read_data_len <= 0 :"
            << "read target count:" << (read_size - start)
@@ -165,7 +163,6 @@ void UsbClient::ReadMessage() {
 
     uint32_t payload_size_int =
         util::DecodePayloadSize(payload_size, kPayloadSizeLen);
-    LOGI("payload_size_int:" << payload_size_int);
 
     if (!util::CheckHeaderFourthByte(header, payload_size_int)) {
       LOGE("CheckHeader failed: Drop This Frame!");
@@ -214,8 +211,6 @@ void UsbClient::ReadMessage() {
         LOGW("Drop message for inactive session_id: " << session_id);
         continue;
       }
-    } else {
-      LOGI("All sessions are enabled, skipping session check");
     }
 
     incoming_message_queue_.put(std::move(payload_str));
@@ -336,8 +331,6 @@ void UsbClient::WriteMessage() {
         LOGW("Drop message for inactive session_id: " << session_id);
         continue;
       }
-    } else {
-      LOGI("All sessions are enabled, skipping session check");
     }
     if (message.length() > 0) {
       if (message.find("Page.screencastFrame") != std::string::npos) {
