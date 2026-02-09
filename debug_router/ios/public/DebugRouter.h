@@ -16,7 +16,6 @@ typedef enum : NSUInteger { ConnectionTypeWebSocket, ConnectionTypeUSB, Unknown 
 @required
 - (void)onOpen:(ConnectionType)type;
 - (void)onClose:(NSInteger)code withReason:(nonnull NSString *)reason;
-- (void)onMessage:(nonnull NSString *)message __attribute__((deprecated("will remove")));
 - (void)onError:(nonnull NSString *)error;
 
 @end

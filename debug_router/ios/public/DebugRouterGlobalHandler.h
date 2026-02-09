@@ -7,7 +7,7 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol DebugRouterGlobalHandler <NSObject>
 
 @required
-- (void)openCard:(NSString *)url __attribute__((deprecated("will remove")));
+- (void)openCard:(NSString *)url;
 
 - (void)onMessage:(NSString *)message withType:(NSString *)type;
 
