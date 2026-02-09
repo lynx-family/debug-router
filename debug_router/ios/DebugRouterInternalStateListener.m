@@ -27,13 +27,12 @@
   }];
   // TODO(zhoumingsong.smile) report
 }
+
 - (void)onClose:(NSInteger)code withReason:(nonnull NSString *)reason {
   // TODO(zhoumingsong.smile) report
   // TODO(zhoumingsong.smile) Toast
 }
-- (void)onMessage:(nonnull NSString *)message {
-  // do nothing
-}
+
 - (void)onError:(nonnull NSString *)error {
   // TODO(zhoumingsong.smile) report
   // TODO(zhoumingsong.smile) Toast

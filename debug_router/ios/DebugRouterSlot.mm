@@ -72,11 +72,20 @@
 
 - (UIView *)getTemplateView {
   if (self.delegate) {
-    SEL sel = NSSelectorFromString(@"getTemplateView");
-    if ([self.delegate respondsToSelector:sel]) {
-      id res = [self.delegate performSelector:sel];
-      UIView *view = (UIView *)res;
-      return view;
+    SEL sel = @selector(getTemplateView);
+    id delegate = (id)self.delegate;
+    if ([delegate respondsToSelector:sel]) {
+      NSMethodSignature *signature = [delegate methodSignatureForSelector:sel];
+      if (signature && signature.methodReturnLength == sizeof(UIView *)) {
+        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+        [invocation setTarget:delegate];
+        [invocation setSelector:sel];
+        [invocation invoke];
+
+        UIView *view = nil;
+        [invocation getReturnValue:&view];
+        return view;
+      }
     }
   }
   return nil;

@@ -96,7 +96,7 @@ class StateListenerDeleagte : public debugrouter::core::DebugRouterStateListener
     [listener_ios_ onClose:code withReason:[NSString stringWithUTF8String:reason.c_str()]];
   }
   virtual void OnMessage(const std::string &message) override {
-    [listener_ios_ onMessage:[NSString stringWithUTF8String:message.c_str()]];
+    // do nothing
   }
   virtual void OnError(const std::string &error) override {
     [listener_ios_ onError:[NSString stringWithUTF8String:error.c_str()]];
