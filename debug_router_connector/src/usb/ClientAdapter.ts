@@ -147,6 +147,7 @@ export default class ClientAdapter {
     try {
       if (this.tcpClient.writable && !this.tcpClient.destroyed) {
         defaultLogger.debug("send Initialize:" + this.port);
+        defaultLogger.debug("[Send]: " + JSON.stringify(initialize));
         this.tcpClient.write(packMessage(initialize));
       }
     } catch (err) {
