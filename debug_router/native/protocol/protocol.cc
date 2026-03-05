@@ -366,7 +366,7 @@ std::shared_ptr<RemoteDebugProtocolBody> Parse(const Json::Value &value) {
             if (payload.isObject()) {
               const Json::Value &open_type = payload[kKeyType];
               const Json::Value &open_url = payload[kKeyUrl];
-              if (open_url.isString() && open_url.isString()) {
+              if (open_type.isString() && open_url.isString()) {
                 return CreateProtocolBody4Custom(
                     kRemoteDebugProtocolBodyData4Custom4OpenCard,
                     open_type.asString(), open_url.asString());
