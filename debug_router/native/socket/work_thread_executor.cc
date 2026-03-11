@@ -51,13 +51,8 @@ void WorkThreadExecutor::shutdown() {
 #if __cpp_exceptions >= 199711L
     try {
 #endif
-      if (worker_ptr->get_id() != std::this_thread::get_id()) {
-        worker_ptr->join();
-        LOGI("WorkThreadExecutor::shutdown worker->join() success.");
-      } else {
-        worker_ptr->detach();
-        LOGI("WorkThreadExecutor::shutdown worker->detach() success.");
-      }
+      worker_ptr->detach();
+      LOGI("WorkThreadExecutor::shutdown worker->detach() success.");
 #if __cpp_exceptions >= 199711L
     } catch (const std::exception& e) {
       LOGE("WorkThreadExecutor::shutdown worker->detach() failed, "
