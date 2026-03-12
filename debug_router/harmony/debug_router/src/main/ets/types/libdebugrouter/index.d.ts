@@ -52,7 +52,7 @@ export declare class DebugRouterHarmony {
   static isValidSchema: (schema: string) => boolean;
   static handleSchema: (schema: string) => boolean;
 
-  static setAppInfo: (arg1: Map<string, string> | string, arg2?: string) => void;
+  static setAppInfo: (arg1: Record<string, string> | string, arg2?: string) => void;
   static getAppInfoByKey: (key:string) => string;
   
   static enableAllSessions: () => void;
