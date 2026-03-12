@@ -102,7 +102,15 @@ export class DebugRouter {
   }
 
   public static setAppInfo(arg1: Map<string, string> | string, arg2?: string): void {
-    DebugRouterHarmony.setAppInfo(arg1, arg2);
+    if (arg1 instanceof Map) {
+      const obj: Record<string, string> = {};
+      arg1.forEach((value, key) => {
+        obj[key] = value;
+      });
+      DebugRouterHarmony.setAppInfo(obj);
+    } else {
+      DebugRouterHarmony.setAppInfo(arg1, arg2);
+    }
   }
 
   public static getAppInfoBykey(key: string): string {
