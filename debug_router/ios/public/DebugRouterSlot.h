@@ -18,6 +18,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSString *)getTemplateUrl;
 - (void)onMessage:(NSString *)message WithType:(NSString *)type;
 
+@optional
+- (UIView *)getTemplateView;
+
 @end
 
 @interface DebugRouterSlot : NSObject

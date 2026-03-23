@@ -71,22 +71,8 @@
 }
 
 - (UIView *)getTemplateView {
-  if (self.delegate) {
-    SEL sel = @selector(getTemplateView);
-    id delegate = (id)self.delegate;
-    if ([delegate respondsToSelector:sel]) {
-      NSMethodSignature *signature = [delegate methodSignatureForSelector:sel];
-      if (signature && signature.methodReturnLength == sizeof(UIView *)) {
-        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-        [invocation setTarget:delegate];
-        [invocation setSelector:sel];
-        [invocation invoke];
-
-        UIView *view = nil;
-        [invocation getReturnValue:&view];
-        return view;
-      }
-    }
+  if (self.delegate && [self.delegate respondsToSelector:@selector(getTemplateView)]) {
+    return [self.delegate getTemplateView];
   }
   return nil;
 }
