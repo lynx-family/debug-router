@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONObject;
 
 public class DebugRouter {
@@ -33,8 +34,9 @@ public class DebugRouter {
 
   private static final WeakHashMap<View, Integer> viewMap = new WeakHashMap<>();
   // TODO(txl): We need throw add and remove operations to the DebugRouter thread for execution
-  private final Map<DebugRouterSessionHandler, Integer> mSessionHandlers = new HashMap<>();
-  private final Map<DebugRouterGlobalHandler, Integer> mGlobalHandlers = new HashMap<>();
+  private final Map<DebugRouterSessionHandler, Integer> mSessionHandlers =
+      new ConcurrentHashMap<>();
+  private final Map<DebugRouterGlobalHandler, Integer> mGlobalHandlers = new ConcurrentHashMap<>();
 
   private DebugRouter() {
     loadNativeLibrary();

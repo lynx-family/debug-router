@@ -5,18 +5,72 @@
 import("//tools/testing/test.gni")
 unittest_set("example_testset") {
   public_configs = []
+  defines = [
+    "ENABLE_MESSAGE_IMPL=1",
+    "TESTING=1",
+  ]
+  include_dirs = [ "//third_party/jsoncpp/include" ]
   sources = [
+    "../base/no_destructor.h",
+    "../base/socket_guard.h",
+    "../core/debug_router_config.cc",
+    "../core/debug_router_config.h",
+    "../core/debug_router_core.cc",
+    "../core/debug_router_core.h",
+    "../core/debug_router_global_handler.h",
+    "../core/debug_router_session_handler.h",
+    "../core/debug_router_state_listener.cc",
+    "../core/debug_router_state_listener.h",
+    "../core/message_transceiver.cc",
+    "../core/message_transceiver.h",
+    "../core/native_slot.cc",
+    "../core/native_slot.h",
     "../core/util.cc",
     "../core/util.h",
+    "../log/logging.cc",
+    "../log/logging.h",
+    "../net/socket_server_client.cc",
+    "../net/socket_server_client.h",
+    "../net/websocket_client.cc",
+    "../net/websocket_client.h",
+    "../net/websocket_task.cc",
+    "../net/websocket_task.h",
+    "../processor/message_assembler.cc",
+    "../processor/message_assembler.h",
+    "../processor/processor.cc",
+    "../processor/processor.h",
+    "../protocol/events.cc",
+    "../protocol/events.h",
+    "../protocol/md5.cc",
+    "../protocol/md5.h",
+    "../protocol/protocol.cc",
+    "../protocol/protocol.h",
+    "../socket/blocking_queue.h",
     "../socket/count_down_latch.cc",
+    "../socket/count_down_latch.h",
+    "../socket/posix/socket_server_posix.cc",
+    "../socket/posix/socket_server_posix.h",
+    "../socket/socket_server_api.cc",
+    "../socket/socket_server_api.h",
+    "../socket/socket_server_type.cc",
+    "../socket/socket_server_type.h",
+    "../socket/usb_client.cc",
+    "../socket/usb_client.h",
+    "../socket/usb_client_listener.h",
+    "../socket/work_thread_executor.cc",
+    "../socket/work_thread_executor.h",
+    "../thread/debug_router_executor.cc",
+    "../thread/debug_router_executor.h",
     "example_source.cc",
   ]
-  public_deps = []
+  public_deps = [ "//third_party/jsoncpp:jsoncpp" ]
 }
 
 unit_test("example_unittest") {
+  defines = [ "TESTING=1" ]
   sources = [
     "count_down_latch_unittest.cc",
+    "debug_router_core_concurrency_unittest.cc",
     "example_source_unittest.cc",
     "socket_util_unittest.cc",
   ]

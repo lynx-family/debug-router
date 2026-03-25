@@ -28,6 +28,7 @@ def CheckUnitTestsBuild():
 
   gn_common_build_args = """
     enable_unittests = true
+    use_flutter_cxx = false
   """
 
   gn_gen_cmd = "buildtools/gn/gn gen out/Default --args=\"" + gn_common_build_args + "\""

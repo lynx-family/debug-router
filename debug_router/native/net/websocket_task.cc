@@ -53,7 +53,7 @@ int GetErrorMessage() {
 
 static int readline(SOCKET sock, char *buf, size_t size) {
   char *out = buf;
-  while (out - buf < size) {
+  while (static_cast<size_t>(out - buf) < size) {
     int res = static_cast<int>(recv(sock, out, 1, 0));
     if (res == 1) {
       if (*out++ == '\n') {
@@ -386,8 +386,9 @@ bool WebSocketTask::do_read(std::string &msg) {
 
   msg.resize(payloadLen);
 
-  if (recv(socket_guard_->Get(), const_cast<char *>(msg.data()), payloadLen,
-           0) != payloadLen) {
+  if (static_cast<size_t>(recv(socket_guard_->Get(),
+                               const_cast<char *>(msg.data()), payloadLen,
+                               0)) != payloadLen) {
     LOGE("failed to read websocket message");
     onFailure("Failed to read websocket message, recv failed.",
               GetErrorMessage());
