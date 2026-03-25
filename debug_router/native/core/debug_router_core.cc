@@ -67,18 +67,38 @@ class MessageHandlerCore : public processor::MessageHandler {
   void OnMessage(const std::string &type, int session_id,
                  const std::string &message) override {
     if (session_id < 0) {
-      const auto &global_handler_map =
-          DebugRouterCore::GetInstance().global_handler_map_;
-      for (auto it : global_handler_map) {
-        it.second->OnMessage(message, type);
+      std::vector<DebugRouterGlobalHandler *> handlers;
+      {
+        std::shared_lock lock(
+            DebugRouterCore::GetInstance().global_handler_mutex_);
+        const auto &global_handler_map =
+            DebugRouterCore::GetInstance().global_handler_map_;
+        handlers.reserve(global_handler_map.size());
+        for (auto it : global_handler_map) {
+          handlers.push_back(it.second);
+        }
+      }
+      for (auto *handler : handlers) {
+        handler->OnMessage(message, type);
       }
       return;
     }
 
-    const auto &session_handler_map =
-        DebugRouterCore::GetInstance().session_handler_map_;
-    for (auto it : session_handler_map) {
-      it.second->OnMessage(message, type, session_id);
+    {
+      std::vector<DebugRouterSessionHandler *> handlers;
+      {
+        std::shared_lock lock(
+            DebugRouterCore::GetInstance().session_handler_mutex_);
+        const auto &session_handler_map =
+            DebugRouterCore::GetInstance().session_handler_map_;
+        handlers.reserve(session_handler_map.size());
+        for (auto it : session_handler_map) {
+          handlers.push_back(it.second);
+        }
+      }
+      for (auto *handler : handlers) {
+        handler->OnMessage(message, type, session_id);
+      }
     }
 
     // Never hold slots_mutex_ while invoking app callbacks.
@@ -103,10 +123,19 @@ class MessageHandlerCore : public processor::MessageHandler {
   }
 
   void OpenCard(const std::string &url) override {
-    const auto &global_handler_map_ =
-        DebugRouterCore::GetInstance().global_handler_map_;
-    for (auto it : global_handler_map_) {
-      it.second->OpenCard(url);
+    std::vector<DebugRouterGlobalHandler *> handlers;
+    {
+      std::shared_lock lock(
+          DebugRouterCore::GetInstance().global_handler_mutex_);
+      const auto &global_handler_map_ =
+          DebugRouterCore::GetInstance().global_handler_map_;
+      handlers.reserve(global_handler_map_.size());
+      for (auto it : global_handler_map_) {
+        handlers.push_back(it.second);
+      }
+    }
+    for (auto *handler : handlers) {
+      handler->OpenCard(url);
     }
   }
 
@@ -281,8 +310,18 @@ int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
     processor_->FlushSessionList();
   }
   NotifyConnectStateByMessage(GetConnectionState());
-  for (auto it : session_handler_map_) {
-    it.second->OnSessionCreate(max_session_id_, slot->GetUrl());
+  {
+    std::vector<DebugRouterSessionHandler *> handlers;
+    {
+      std::shared_lock lock(session_handler_mutex_);
+      handlers.reserve(session_handler_map_.size());
+      for (auto it : session_handler_map_) {
+        handlers.push_back(it.second);
+      }
+    }
+    for (auto *handler : handlers) {
+      handler->OnSessionCreate(max_session_id_, slot->GetUrl());
+    }
   }
   return max_session_id_;
 }
@@ -310,8 +349,18 @@ void DebugRouterCore::Pull(int32_t session_id_) {
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     processor_->FlushSessionList();
   }
-  for (auto it : session_handler_map_) {
-    it.second->OnSessionDestroy(session_id_);
+  {
+    std::vector<DebugRouterSessionHandler *> handlers;
+    {
+      std::shared_lock lock(session_handler_mutex_);
+      handlers.reserve(session_handler_map_.size());
+      for (auto it : session_handler_map_) {
+        handlers.push_back(it.second);
+      }
+    }
+    for (auto *handler : handlers) {
+      handler->OnSessionDestroy(session_id_);
+    }
   }
 }
 
@@ -521,6 +570,7 @@ DebugRouterCore::~DebugRouterCore() {
 }
 
 int DebugRouterCore::AddGlobalHandler(DebugRouterGlobalHandler *handler) {
+  std::unique_lock lock(global_handler_mutex_);
   for (auto key : global_handler_map_) {
     if (key.second == handler) {
       return key.first;
@@ -532,9 +582,10 @@ int DebugRouterCore::AddGlobalHandler(DebugRouterGlobalHandler *handler) {
 }
 
 bool DebugRouterCore::RemoveGlobalHandler(int handler_id) {
-  DebugRouterGlobalHandler *handler = global_handler_map_[handler_id];
-  if (handler) {
-    global_handler_map_.erase(handler_id);
+  std::unique_lock lock(global_handler_mutex_);
+  auto it = global_handler_map_.find(handler_id);
+  if (it != global_handler_map_.end()) {
+    global_handler_map_.erase(it);
     return true;
   }
   return false;
@@ -559,6 +610,7 @@ bool DebugRouterCore::RemoveMessageHandler(const std::string &handler_name) {
 }
 
 int DebugRouterCore::AddSessionHandler(DebugRouterSessionHandler *handler) {
+  std::unique_lock lock(session_handler_mutex_);
   for (auto key : session_handler_map_) {
     if (key.second == handler) {
       return key.first;
@@ -570,9 +622,10 @@ int DebugRouterCore::AddSessionHandler(DebugRouterSessionHandler *handler) {
 }
 
 bool DebugRouterCore::RemoveSessionHandler(int handler_id) {
-  DebugRouterSessionHandler *handler = session_handler_map_[handler_id];
-  if (handler) {
-    session_handler_map_.erase(handler_id);
+  std::unique_lock lock(session_handler_mutex_);
+  auto it = session_handler_map_.find(handler_id);
+  if (it != session_handler_map_.end()) {
+    session_handler_map_.erase(it);
     return true;
   }
   return false;
@@ -593,7 +646,7 @@ bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
   catagaryJson["schema"] = schema;
   std::string catagary = catagaryJson.toStyledString();
   Report("HandleSchema", catagary, "", "");
-  int32_t query_index = static_cast<int32_t>(schema.find('?'));
+  size_t query_index = schema.find('?');
   if (query_index == std::string::npos) {
     catagaryJson["attribution"] = "User Incorrect Useage";
     catagary = catagaryJson.toStyledString();
@@ -602,7 +655,7 @@ bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
     return false;
   }
   std::string path = schema.substr(0, query_index);
-  int32_t cmd_index = static_cast<int32_t>(path.find_last_of('/'));
+  size_t cmd_index = path.find_last_of('/');
   if (cmd_index == std::string::npos) {
     catagaryJson["attribution"] = "User Incorrect Useage";
     catagary = catagaryJson.toStyledString();
@@ -616,11 +669,11 @@ bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
         schema.substr(query_index + 1, schema.size() - query_index - 1);
     bool break_flag = true;
     while (break_flag) {
-      int32_t param_index = static_cast<int32_t>(query.find('&'));
+      size_t param_index = query.find('&');
       if (param_index == std::string::npos) {
-        param_index = static_cast<int32_t>(query.find('#'));
+        param_index = query.find('#');
         if (param_index == std::string::npos) {
-          param_index = static_cast<int32_t>(query.size());
+          param_index = query.size();
         } else {
           param_index = 0;
         }
@@ -628,7 +681,7 @@ bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
       }
 
       std::string param = query.substr(0, param_index);
-      int32_t key_index = static_cast<int32_t>(param.find('='));
+      size_t key_index = param.find('=');
       if (key_index != std::string::npos) {
         std::string key = param.substr(0, key_index);
         std::string value =

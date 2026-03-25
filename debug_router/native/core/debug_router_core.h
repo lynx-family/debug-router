@@ -34,6 +34,10 @@ class Processor;
 
 namespace core {
 
+#ifdef TESTING
+class DebugRouterCoreConcurrencyTest;
+#endif
+
 typedef enum { DISCONNECTED = -1, CONNECTING, CONNECTED } ConnectionState;
 // whether the connection is the first connection
 typedef enum {
@@ -53,6 +57,9 @@ static constexpr size_t kTransceiverCount = 0;
 class DebugRouterCore : public MessageTransceiverDelegate {
  public:
   friend class MessageHandlerCore;
+#ifdef TESTING
+  friend class DebugRouterCoreConcurrencyTest;
+#endif
 
   static DebugRouterCore &GetInstance();
   DebugRouterCore();
@@ -147,6 +154,8 @@ class DebugRouterCore : public MessageTransceiverDelegate {
  protected:
   std::shared_mutex slots_mutex_;
   std::shared_mutex state_listeners_mutex_;
+  std::shared_mutex global_handler_mutex_;
+  std::shared_mutex session_handler_mutex_;
   friend class MessageHandlerCore;
   std::unordered_map<int32_t, std::shared_ptr<core::NativeSlot> > slots_;
   std::string room_id_;
