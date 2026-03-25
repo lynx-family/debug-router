@@ -2,6 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
+import util from '@ohos.util';
 import type { DebugRouterGlobalHandlerHarmony, DebugRouterSessionHandlerHarmony, DebugRouterMessageHandlerHarmony, DebugRouterStateListenerHarmony } from 'libdebugrouter.so';
 import { DebugRouterHarmony } from 'libdebugrouter.so';
 import { DebugRouterSlot } from './DebugRouterSlot';
@@ -11,7 +12,9 @@ export class DebugRouter {
   private static viewMap: Map<LynxView, number> = new Map<LynxView, number>();
 
   public static createInstance(): void {
+    let uuid: string = util.generateRandomUUID(true);
     DebugRouterHarmony.createInstance();
+    DebugRouter.setAppInfo("debugRouterId", uuid);
   }
 
   public static getSessionIdByView(view: LynxView): number {
