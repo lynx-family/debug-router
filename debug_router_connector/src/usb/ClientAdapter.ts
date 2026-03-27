@@ -73,6 +73,14 @@ export default class ClientAdapter {
   protected handleOff(client: net.Socket) {
     this.isConnected = false;
     client.destroy();
+    this.driver.traceRecorder?.recordSocketDisconnected(
+      this.device_id,
+      this.port,
+      {
+        device: this.device,
+        os: this.type,
+      },
+    );
     if (this.listener === null) {
       defaultLogger.debug("handleOff: this.listener == null");
       return;
@@ -144,6 +152,14 @@ export default class ClientAdapter {
       event: "Initialize",
       data: -1,
     };
+    this.driver.traceRecorder?.recordSocketConnected(
+      this.device_id,
+      this.port,
+      {
+        device: this.device,
+        os: this.type,
+      },
+    );
     try {
       if (this.tcpClient.writable && !this.tcpClient.destroyed) {
         defaultLogger.debug("send Initialize:" + this.port);
@@ -222,6 +238,13 @@ export default class ClientAdapter {
         sdk_version,
         raw_info: result,
       };
+      this.driver.traceRecorder?.recordRegister(this.device_id, this.port, {
+        app,
+        os: this.type,
+        device: this.device,
+        deviceModel,
+        sdkVersion: sdk_version,
+      });
       if (this.listener === null) {
         defaultLogger.debug(
           "handleConnection: this.listener = null:" +
@@ -229,7 +252,11 @@ export default class ClientAdapter {
         );
         return;
       }
-      this.connection = new USBConnection(this.tcpClient);
+      this.connection = new USBConnection(this.tcpClient, {
+        recorder: this.driver.traceRecorder,
+        deviceId: this.device_id,
+        port: this.port,
+      });
       this.id = this.listener.onConnectionCreated(
         this.connection,
         this.port,

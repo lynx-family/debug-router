@@ -106,12 +106,22 @@ export default class IOSDeviceManager extends DeviceManager {
       usbmuxListener.on("attached", (udid: string) => {
         statusSocket.currentWatchStatus = WatchStatus.Watching;
         defaultLogger.debug("watchIOSDevices attached:" + JSON.stringify(udid));
+        if (!this.driver.devices.has(udid)) {
+          this.driver.traceRecorder?.recordDevicePlug(udid, {
+            os: "iOS",
+            event: "attached",
+          });
+        }
         this.handleDeviceConnect(udid, statusSocket);
       });
 
       usbmuxListener.on("detached", (udid: string) => {
         statusSocket.currentWatchStatus = WatchStatus.Watching;
         defaultLogger.debug("watchIOSDevices detached:" + JSON.stringify(udid));
+        this.driver.traceRecorder?.recordDeviceUnplug(udid, {
+          os: "iOS",
+          event: "detached",
+        });
         this.driver.unregisterDevice(udid);
       });
       this.listener = statusSocket;
