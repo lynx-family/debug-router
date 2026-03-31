@@ -51,13 +51,8 @@ void WorkThreadExecutor::shutdown() {
 #if __cpp_exceptions >= 199711L
     try {
 #endif
-      if (worker_ptr->get_id() != std::this_thread::get_id()) {
-        worker_ptr->join();
-        LOGI("WorkThreadExecutor::shutdown worker->join() success.");
-      } else {
-        worker_ptr->detach();
-        LOGI("WorkThreadExecutor::shutdown worker->detach() success.");
-      }
+      worker_ptr->detach();
+      LOGI("WorkThreadExecutor::shutdown worker->detach() success.");
 #if __cpp_exceptions >= 199711L
     } catch (const std::exception& e) {
       LOGE("WorkThreadExecutor::shutdown worker->detach() failed, "
@@ -78,16 +73,46 @@ void WorkThreadExecutor::run() {
     if (is_shut_down) {
       break;
     }
-    std::unique_lock<std::mutex> lock(task_mtx);
-    cond.wait(lock, [this] { return !tasks.empty() || is_shut_down; });
-    if (is_shut_down) {
-      break;
-    }
-    if (!tasks.empty()) {
-      auto task = tasks.front();
-      tasks.pop();
-      lock.unlock();
-      if (is_shut_down) {
+
+    std::function<void()> task;
+    bool has_task = false;
+
+    {
+      std::unique_lock<std::mutex> lock(task_mtx);
+
+      flag = weak_flag.lock();
+      if (!flag) {
+        break;
+      }
+
+      // avoid capture this in predicate
+      while (true) {
+        flag = weak_flag.lock();
+        if (!flag) {
+          break;
+        }
+        if (!tasks.empty() || is_shut_down) {
+          break;
+        }
+        cond.wait(lock);
+      }
+
+      flag = weak_flag.lock();
+      if (!flag || is_shut_down) {
+        break;
+      }
+
+      if (!tasks.empty()) {
+        task = std::move(tasks.front());
+        tasks.pop();
+        has_task = true;
+      }
+    }  // release lock here
+
+    if (has_task) {
+      // check alive_flag again to ensure it's not destroyed
+      flag = weak_flag.lock();
+      if (!flag || is_shut_down) {
         break;
       }
       task();
