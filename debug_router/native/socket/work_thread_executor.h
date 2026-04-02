@@ -15,6 +15,24 @@
 
 namespace debugrouter {
 namespace base {
+// WorkThreadExecutor is a single-worker serial executor.
+//
+// NOTE: The worker thread is detached. `shutdown()` signals the worker to exit
+// and drops pending tasks, but it does NOT wait for the currently running task
+// to finish.
+//
+// Usage contract:
+// - Call `init()` before `submit()`.
+// - After `shutdown()`, the executor cannot be restarted; further `init()` or
+//   `submit()` calls are no-ops.
+// - Tasks MUST NOT capture a bare `this`, raw pointers, or references that may
+//   become invalid before execution. Prefer capturing `std::shared_ptr` to keep
+//   the target alive, or capture a `std::weak_ptr` and lock it inside the task.
+// - Avoid capturing references to stack variables (including references/Views
+//   like `std::string_view` or `span` pointing to stack memory).
+// - Keep tasks short and non-blocking. Avoid long-running CPU loops or blocking
+//   I/O unless you can guarantee timely cancellation/timeout handling.
+
 class WorkThreadExecutor {
  public:
   WorkThreadExecutor();

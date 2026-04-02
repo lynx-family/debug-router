@@ -52,7 +52,9 @@ class WebSocketClient : public core::MessageTransceiver {
   void ConnectInternal(const std::string &url);
 
   base::WorkThreadExecutor work_thread_;
-  std::unique_ptr<WebSocketTask> current_task_;
+  // use shared_ptr to ensure WebSocketTask is not destroyed before
+  // WebSocketClient
+  std::shared_ptr<WebSocketTask> current_task_;
 };
 }  // namespace net
 }  // namespace debugrouter
