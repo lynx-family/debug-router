@@ -58,7 +58,7 @@ void WebSocketClient::StopServer() {
 
 void WebSocketClient::ConnectInternal(const std::string &url) {
   LOGI("WebSocketClient::ConnectInternal: use " << url << " to connect.");
-  current_task_ = std::make_unique<WebSocketTask>(shared_from_this(), url);
+  current_task_ = std::make_shared<WebSocketTask>(shared_from_this(), url);
   current_task_->init();
   current_task_->Start();
 }
@@ -72,11 +72,12 @@ void WebSocketClient::Disconnect() {
 
 void WebSocketClient::DisconnectInternal() {
   LOGI("WebSocketClient::DisconnectInternal");
-  if (current_task_) {
-    current_task_->Stop();
-    LOGI("WebSocketClient::DisconnectInternal: current_task_->Stop() success.");
+  auto task_ptr = current_task_;
+  current_task_.reset();
+  if (task_ptr) {
+    task_ptr->Stop();
+    LOGI("WebSocketClient::DisconnectInternal: task_ptr->Stop() success.");
   }
-  current_task_.reset(nullptr);
 }
 
 core::ConnectionType WebSocketClient::GetType() {
@@ -87,8 +88,9 @@ void WebSocketClient::Send(const std::string &data) {
   LOGI("WebSocketClient::Send.");
   auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
   work_thread_.submit([client_ptr = self, data]() {
-    if (client_ptr->current_task_) {
-      client_ptr->current_task_->SendInternal(data);
+    auto task_ptr = client_ptr->current_task_;
+    if (task_ptr) {
+      task_ptr->SendInternal(data);
     }
   });
 }

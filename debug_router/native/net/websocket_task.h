@@ -19,7 +19,8 @@ extern const int kUnexpectedOpcode;
 extern const int kUnexpectedMaskPayloadLen;
 extern const int kDeflatedMessageUnimplemented;
 
-class WebSocketTask : public base::WorkThreadExecutor {
+class WebSocketTask : public base::WorkThreadExecutor,
+                      public std::enable_shared_from_this<WebSocketTask> {
  public:
   WebSocketTask(std::shared_ptr<core::MessageTransceiver> transceiver,
                 const std::string &url);

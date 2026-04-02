@@ -132,7 +132,8 @@ void WebSocketTask::SendInternal(const std::string &data) {
 }
 
 void WebSocketTask::Start() {
-  submit([this]() { StartInternal(); });
+  auto self = shared_from_this();
+  submit([task_ptr = self]() { task_ptr->StartInternal(); });
 }
 
 void WebSocketTask::StartInternal() {
