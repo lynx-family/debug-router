@@ -10,44 +10,56 @@ namespace debugrouter {
 namespace base {
 
 WorkThreadExecutor::WorkThreadExecutor()
-    : is_shut_down(false), alive_flag(std::make_shared<bool>(true)) {}
+    : state_(std::make_shared<SharedState>()) {}
 
 void WorkThreadExecutor::init() {
-  std::lock_guard<std::mutex> lock(task_mtx);
+  if (state_->is_shut_down) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(state_->task_mtx);
+  if (state_->is_shut_down) {
+    return;
+  }
   if (!worker) {
-    worker = std::make_unique<std::thread>([this]() { run(); });
+    worker = std::make_unique<std::thread>(
+        [state = state_]() { WorkThreadExecutor::run(state); });
   }
 }
 
 WorkThreadExecutor::~WorkThreadExecutor() { shutdown(); }
 
 void WorkThreadExecutor::submit(std::function<void()> task) {
-  if (is_shut_down) {
+  if (state_->is_shut_down) {
     return;
   }
-  std::lock_guard<std::mutex> lock(task_mtx);
-  if (is_shut_down) {
+  std::lock_guard<std::mutex> lock(state_->task_mtx);
+  if (state_->is_shut_down) {
     return;
   }
-  tasks.push(task);
-  cond.notify_one();
+  state_->tasks.push(task);
+  state_->cond.notify_one();
 }
 
 void WorkThreadExecutor::shutdown() {
   std::shared_ptr<std::thread> worker_ptr;
   {
-    std::lock_guard<std::mutex> lock(task_mtx);
-    if (is_shut_down) {
+    std::lock_guard<std::mutex> lock(state_->task_mtx);
+    if (state_->is_shut_down) {
       return;
     }
-    is_shut_down = true;
+    state_->is_shut_down = true;
     std::queue<std::function<void()>> empty;
-    tasks.swap(empty);
-    worker_ptr = std::move(worker);  // take ownership of worker
+    state_->tasks.swap(empty);
+    worker_ptr = std::move(worker);
   }
-  cond.notify_all();
+  state_->cond.notify_all();
 
   if (worker_ptr && worker_ptr->joinable()) {
+    // Use detach() instead of join() to avoid deadlock:
+    // 1. If shutdown() is called from within the worker thread, join() would
+    // deadlock
+    // 2. SharedState ensures resources remain valid even after
+    // WorkThreadExecutor destruction
 #if __cpp_exceptions >= 199711L
     try {
 #endif
@@ -63,14 +75,9 @@ void WorkThreadExecutor::shutdown() {
   LOGI("WorkThreadExecutor::shutdown success.");
 }
 
-void WorkThreadExecutor::run() {
-  std::weak_ptr<bool> weak_flag = alive_flag;
+void WorkThreadExecutor::run(std::shared_ptr<SharedState> state) {
   while (true) {
-    auto flag = weak_flag.lock();
-    if (!flag) {
-      break;
-    }
-    if (is_shut_down) {
+    if (state->is_shut_down) {
       break;
     }
 
@@ -78,45 +85,45 @@ void WorkThreadExecutor::run() {
     bool has_task = false;
 
     {
-      std::unique_lock<std::mutex> lock(task_mtx);
+      std::unique_lock<std::mutex> lock(state->task_mtx);
 
-      flag = weak_flag.lock();
-      if (!flag) {
-        break;
-      }
-
-      // avoid capture this in predicate
       while (true) {
-        flag = weak_flag.lock();
-        if (!flag) {
+        if (state->is_shut_down) {
           break;
         }
-        if (!tasks.empty() || is_shut_down) {
+        if (!state->tasks.empty()) {
           break;
         }
-        cond.wait(lock);
+        state->cond.wait(lock);
       }
 
-      flag = weak_flag.lock();
-      if (!flag || is_shut_down) {
+      if (state->is_shut_down) {
         break;
       }
 
-      if (!tasks.empty()) {
-        task = std::move(tasks.front());
-        tasks.pop();
+      if (!state->tasks.empty()) {
+        task = std::move(state->tasks.front());
+        state->tasks.pop();
         has_task = true;
       }
-    }  // release lock here
+    }
 
     if (has_task) {
-      // check alive_flag again to ensure it's not destroyed
-      flag = weak_flag.lock();
-      if (!flag || is_shut_down) {
+      if (state->is_shut_down) {
         break;
       }
-      task();
-      LOGI("WorkThreadExecutor::run task() success.");
+#if __cpp_exceptions >= 199711L
+      try {
+#endif
+        task();
+        LOGI("WorkThreadExecutor::run task() success.");
+#if __cpp_exceptions >= 199711L
+      } catch (const std::exception& e) {
+        LOGE("WorkThreadExecutor::run task() failed, " << e.what());
+      } catch (...) {
+        LOGE("WorkThreadExecutor::run task() failed with unknown exception");
+      }
+#endif
     }
   }
 }

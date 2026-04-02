@@ -85,9 +85,10 @@ core::ConnectionType WebSocketClient::GetType() {
 
 void WebSocketClient::Send(const std::string &data) {
   LOGI("WebSocketClient::Send.");
-  work_thread_.submit([this, data]() {
-    if (current_task_) {
-      current_task_->SendInternal(data);
+  auto self = std::static_pointer_cast<WebSocketClient>(shared_from_this());
+  work_thread_.submit([client_ptr = self, data]() {
+    if (client_ptr->current_task_) {
+      client_ptr->current_task_->SendInternal(data);
     }
   });
 }
