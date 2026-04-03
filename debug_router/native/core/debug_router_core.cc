@@ -81,12 +81,20 @@ class MessageHandlerCore : public processor::MessageHandler {
       it.second->OnMessage(message, type, session_id);
     }
 
-    // reduce the holding time of slots_mutex_
-    std::shared_lock lock(DebugRouterCore::GetInstance().slots_mutex_);
-    const auto &slots = DebugRouterCore::GetInstance().slots_;
-    auto it = slots.find(session_id);
-    if (it != slots.end()) {
-      it->second->OnMessage(message, type);
+    // Never hold slots_mutex_ while invoking app callbacks.
+    // Otherwise Pull(session) may block on UI thread and trigger ANR if the
+    // callback is slow / re-enters DebugRouter.
+    std::shared_ptr<core::NativeSlot> slot;
+    {
+      std::shared_lock lock(DebugRouterCore::GetInstance().slots_mutex_);
+      const auto &slots = DebugRouterCore::GetInstance().slots_;
+      auto it = slots.find(session_id);
+      if (it != slots.end()) {
+        slot = it->second;
+      }
+    }
+    if (slot) {
+      slot->OnMessage(message, type);
     }
   }
 
