@@ -24,6 +24,10 @@ export default class NetworkDeviceManager extends DeviceManager {
       this.networkDeviceOpt!.ip,
       this.networkDeviceOpt!.port,
     );
+    this.driver.traceRecorder?.recordDevicePlug(device.serial, {
+      os: device.info.os,
+      event: "register",
+    });
     this.driver.registerDevice(device);
   }
 }
