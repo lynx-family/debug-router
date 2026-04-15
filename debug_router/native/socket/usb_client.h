@@ -98,6 +98,7 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   // mutex for close socket_fd_
   std::mutex mutex_;
   std::atomic<bool> is_connected_ = {false};
+  std::atomic<bool> stopping_ = {false};
 };
 
 }  // namespace socket_server

@@ -4,6 +4,8 @@
 
 #include "debug_router/native/socket/usb_client.h"
 
+#include <chrono>
+
 #include "debug_router/native/core/debug_router_core.h"
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
@@ -16,6 +18,7 @@
 #else
 #include <errno.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 #endif
 
@@ -23,6 +26,12 @@ namespace debugrouter {
 namespace socket_server {
 
 const char *kMessageQuit = "quit";
+
+// SO_RCVTIMEO timeout for recv() in UsbClient::Read()
+// Chosen as a balance between:
+//   - Low latency for Stop() to complete (max wait 0.5s)
+//   - Low CPU overhead (not waking up too frequently)
+const int kUsbClientRecvTimeoutMs = 500;
 
 int GetErrorMessage() {
 #ifdef _WIN32
@@ -34,6 +43,26 @@ int GetErrorMessage() {
 
 UsbClient::UsbClient(SocketType socket_fd) : socket_guard_(socket_fd) {
   LOGI("UsbClient: Constructor.");
+
+  // Set SO_RCVTIMEO to avoid permanent blocking
+  SocketType sock = socket_guard_.Get();
+  if (sock != kInvalidSocket) {
+#ifdef _WIN32
+    DWORD timeout = kUsbClientRecvTimeoutMs;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout,
+                   sizeof(timeout)) == SOCKET_ERROR) {
+      LOGE("UsbClient: Failed to set SO_RCVTIMEO: " << WSAGetLastError());
+    }
+#else
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = kUsbClientRecvTimeoutMs * 1000;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) ==
+        -1) {
+      LOGE("UsbClient: Failed to set SO_RCVTIMEO: " << errno);
+    }
+#endif
+  }
 }
 
 void UsbClient::SetConnectStatus(USBConnectStatus status) {
@@ -59,6 +88,7 @@ void UsbClient::StartUp(const std::shared_ptr<UsbClientListener> &listener) {
 void UsbClient::StartInternal(
     const std::shared_ptr<UsbClientListener> &listener) {
   LOGI("UsbClient: StartInternal.");
+  stopping_.store(false, std::memory_order_relaxed);
   connect_status_ = USBConnectStatus::CONNECTING;
   LOGI("StartInternal, listener is:" << listener.get());
   listener_ = listener;
@@ -108,9 +138,33 @@ bool UsbClient::Read(char *buffer, uint32_t read_size) {
     int64_t read_data_len =
         recv(socket_guard_.Get(), buffer + start, read_size - start, 0);
     if (read_data_len <= 0) {
+      // Check if it's a timeout error
+#ifdef _WIN32
+      int error = WSAGetLastError();
+      if (error == WSAEWOULDBLOCK || error == WSAETIMEDOUT) {
+        // Timeout, check if we're stopping
+        if (stopping_.load(std::memory_order_relaxed)) {
+          LOGE("Read: stopping, exit read loop");
+          return false;
+        }
+        // Continue to next iteration to check again
+        continue;
+      }
+#else
+      int error = errno;
+      if (error == EAGAIN || error == EWOULDBLOCK || error == ETIMEDOUT) {
+        // Timeout, check if we're stopping
+        if (stopping_.load(std::memory_order_relaxed)) {
+          LOGE("Read: stopping, exit read loop");
+          return false;
+        }
+        // Continue to next iteration to check again
+        continue;
+      }
+#endif
       LOGE("Read: read_data_len <= 0 :"
-           << "read target count:" << (read_size - start)
-           << " read_data_len:" << read_data_len);
+           << "read target count:" << (read_size - start) << " read_data_len:"
+           << read_data_len << " error:" << GetErrorMessage());
       return false;
     }
     start = start + read_data_len;
@@ -126,6 +180,12 @@ void UsbClient::ReadMessage() {
   LOGI("UsbClient: ReadMessage:" << socket_guard_.Get());
   bool isFirst = true;
   while (true) {
+    // Check if we're stopping
+    if (stopping_.load(std::memory_order_relaxed)) {
+      LOGI("UsbClient: ReadMessage: stopping, exit loop");
+      break;
+    }
+
     char header[kFrameHeaderLen];
     memset(header, 0, kFrameHeaderLen);
     LOGI("UsbClient: start check message header.");
@@ -372,6 +432,8 @@ void UsbClient::StartWriter() {
 
 void UsbClient::DisconnectInternal() {
   LOGI("UsbClient: DisconnectInternal.");
+  // Set stopping flag to true
+  stopping_.store(true, std::memory_order_relaxed);
   incoming_message_queue_.put(std::move(kMessageQuit));
   outgoing_message_queue_.put(std::move(kMessageQuit));
   socket_guard_.Reset();
@@ -392,14 +454,32 @@ bool UsbClient::Send(const std::string &message) {
 
 void UsbClient::Stop() {
   LOGI("UsbClient: Stop.");
+  auto start_time = std::chrono::steady_clock::now();
+
+  LOGI("UsbClient: Stop - begin DisconnectInternal");
   DisconnectInternal();
+
+  LOGI("UsbClient: Stop - begin dispatch_thread shutdown");
   dispatch_thread_.shutdown();
+
+  LOGI("UsbClient: Stop - begin write_thread shutdown");
   write_thread_.shutdown();
+
+  LOGI("UsbClient: Stop - begin read_thread shutdown");
   read_thread_.shutdown();
+
+  LOGI("UsbClient: Stop - begin work_thread shutdown");
   work_thread_.shutdown();
+
   incoming_message_queue_.clear();
   outgoing_message_queue_.clear();
   connect_status_ = USBConnectStatus::DISCONNECTED;
+
+  auto end_time = std::chrono::steady_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      end_time - start_time)
+                      .count();
+  LOGI("UsbClient: Stop finished in " << duration << "ms");
 }
 
 void UsbClient::SendInternal(const std::string &message) {

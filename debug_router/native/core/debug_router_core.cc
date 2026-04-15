@@ -332,14 +332,30 @@ int32_t DebugRouterCore::GetUSBPort() {
 
 void DebugRouterCore::Pull(int32_t session_id_) {
   LOGI("pull session: " << session_id_);
+  bool stop_server = false;
   if (!enable_all_sessions_.load(std::memory_order_relaxed)) {
-    std::unique_lock lock(enabled_sessions_mutex_);
-    if (enabled_session_ids_.erase(session_id_) > 0) {
-      if (enabled_session_ids_.empty()) {
-        for (size_t i = 0; i < kTransceiverCount; ++i) {
-          message_transceivers_[i]->StopServer();
+    {
+      std::unique_lock lock(enabled_sessions_mutex_);
+      if (enabled_session_ids_.erase(session_id_) > 0) {
+        if (enabled_session_ids_.empty()) {
+          stop_server = true;
         }
       }
+    }
+    if (stop_server) {
+      thread::DebugRouterExecutor::GetInstance().Post([this]() {
+        bool should_stop = false;
+        if (!enable_all_sessions_.load(std::memory_order_relaxed)) {
+          std::unique_lock lock(enabled_sessions_mutex_);
+          should_stop = enabled_session_ids_.empty();
+        }
+        if (should_stop &&
+            !enable_all_sessions_.load(std::memory_order_relaxed)) {
+          for (size_t i = 0; i < kTransceiverCount; ++i) {
+            message_transceivers_[i]->StopServer();
+          }
+        }
+      });
     }
   }
   {
@@ -801,9 +817,13 @@ void DebugRouterCore::EnableAllSessions() {
     return;
   }
   LOGI("enableAllSessions");
-  for (size_t i = 0; i < kTransceiverCount; ++i) {
-    message_transceivers_[i]->StartServer();
-  }
+  thread::DebugRouterExecutor::GetInstance().Post([this]() {
+    if (enable_all_sessions_.load(std::memory_order_relaxed)) {
+      for (size_t i = 0; i < kTransceiverCount; ++i) {
+        message_transceivers_[i]->StartServer();
+      }
+    }
+  });
 }
 
 void DebugRouterCore::EnableSingleSession(int32_t session_id) {
@@ -816,9 +836,18 @@ void DebugRouterCore::EnableSingleSession(int32_t session_id) {
     std::unique_lock lock(enabled_sessions_mutex_);
     enabled_session_ids_.insert(session_id);
   }
-  for (size_t i = 0; i < kTransceiverCount; ++i) {
-    message_transceivers_[i]->StartServer();
-  }
+  thread::DebugRouterExecutor::GetInstance().Post([this, session_id]() {
+    bool should_start = false;
+    if (!enable_all_sessions_.load(std::memory_order_relaxed)) {
+      std::shared_lock lock(enabled_sessions_mutex_);
+      should_start = (enabled_session_ids_.count(session_id) > 0);
+    }
+    if (should_start) {
+      for (size_t i = 0; i < kTransceiverCount; ++i) {
+        message_transceivers_[i]->StartServer();
+      }
+    }
+  });
 }
 
 bool DebugRouterCore::isActiveSession(int32_t session_id) {
