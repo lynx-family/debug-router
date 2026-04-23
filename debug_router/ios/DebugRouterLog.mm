@@ -29,6 +29,7 @@
 static NSInteger DefaultObserverId = -1;
 static NSInteger CurrentId = 0;
 static NSMutableDictionary *ObserverDic = [[NSMutableDictionary alloc] init];
+static BOOL hasSetDelegate = NO;
 const char *DebugRouterLogLevels[] = {
     "I", "W", "E", "F",
     "I",  // log
@@ -41,30 +42,35 @@ class FunctionLogginDelegate : public LoggingDelegate {
  public:
   ~FunctionLogginDelegate() override {}
   void Log(LogMessage *msg) override {
-    NSArray<DebugRouterLogObserver *> *observers = DebugRouterGetLogObservers();
-    for (DebugRouterLogObserver *observer in observers) {
-      DebugRouterLogFunction logFunction = observer.logFunction;
-      DebugRouterLogLevel level = (DebugRouterLogLevel)msg->severity();
-      BOOL log = logFunction != nil;
-      if (!log || level < observer.minLogLevel ||
-          (observer.acceptRuntimeId >= 0 && observer.acceptRuntimeId != msg->runtimeId())) {
-        continue;
-      }
-      NSString *message = observer.shouldFormatMessage
-                              ? [NSString stringWithUTF8String:msg->stream().str().c_str()]
-                              : [[NSString stringWithUTF8String:msg->stream().str().c_str()]
-                                    substringFromIndex:msg->messageStart()];
-      if (message == nil) {
-        return;
-      }
-      switch (msg->source()) {
-        case LOG_SOURCE_NATIVE:
-          if (observer.acceptSource & DebugRouterLogSourceNaitve) {
-            logFunction(level, message);
-          }
-          break;
-        default:
-          break;
+    @autoreleasepool {
+      std::string s = msg->stream().str();
+      NSArray<DebugRouterLogObserver *> *observers = DebugRouterGetLogObservers();
+      for (DebugRouterLogObserver *observer in observers) {
+        DebugRouterLogFunction logFunction = observer.logFunction;
+        DebugRouterLogLevel level = (DebugRouterLogLevel)msg->severity();
+        BOOL log = logFunction != nil;
+        if (!log || level < observer.minLogLevel ||
+            (observer.acceptRuntimeId >= 0 && observer.acceptRuntimeId != msg->runtimeId())) {
+          continue;
+        }
+        NSString *message = nil;
+        if (observer.shouldFormatMessage) {
+          message = [NSString stringWithUTF8String:s.c_str()];
+        } else {
+          message = [NSString stringWithUTF8String:s.c_str() + msg->messageStart()];
+        }
+        if (message == nil) {
+          continue;
+        }
+        switch (msg->source()) {
+          case LOG_SOURCE_NATIVE:
+            if (observer.acceptSource & DebugRouterLogSourceNaitve) {
+              logFunction(level, message);
+            }
+            break;
+          default:
+            break;
+        }
       }
     }
   }
@@ -82,8 +88,11 @@ NSInteger DebugRouterAddLogObserver(DebugRouterLogFunction logFunction,
 NSInteger DebugRouterAddLogObserverByModel(DebugRouterLogObserver *observer) {
   NSInteger observerId = ++CurrentId;
   LOCKED([ObserverDic setObject:observer forKey:@(observerId)]);
-  debugrouter::logging::SetLoggingDelegate(
-      std::make_unique<debugrouter::logging::FunctionLogginDelegate>());
+  if (!hasSetDelegate) {
+    hasSetDelegate = YES;
+    debugrouter::logging::SetLoggingDelegate(
+        std::make_unique<debugrouter::logging::FunctionLogginDelegate>());
+  }
   return observerId;
 }
 
