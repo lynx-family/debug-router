@@ -51,6 +51,7 @@ export default class AndroidDevice extends BaseDevice {
   private async forward(remotePorts: number[]) {
     const device = this.adb.getDevice(this.serial);
     if (!device) {
+      defaultLogger.debug("device not found by serial:" + this.serial);
       getDriverReportService()?.report("android_device_forward_error", null, {
         msg: "device not found",
       });
@@ -125,6 +126,7 @@ export default class AndroidDevice extends BaseDevice {
   }
 
   async adbForwardRemove(device: DeviceClient) {
+    defaultLogger.debug("adbForwardRemove");
     return new Promise<void>(async (resolve, reject) => {
       const forwards: Forward[] = await device.listForwards();
       for (let i = 0; i < forwards.length; i++) {

@@ -31,6 +31,7 @@ export class AndroidDeviceManager extends DeviceManager {
         const deviceClient = adbClient.getDevice(device.id);
         const props = await deviceClient.getProperties();
         const name = props["ro.product.model"];
+        defaultLogger.debug("createDevice: device name is " + name);
         const androidLikeDevice = new AndroidDevice(
           this.driver,
           device.id,
@@ -197,6 +198,7 @@ export class AndroidDeviceManager extends DeviceManager {
     );
     const androidDevice = await this.createDevice(adbClient, deviceData);
     if (!androidDevice) {
+      defaultLogger.debug("androidDevice create failed");
       getDriverReportService()?.report("android_register_device_error", null, {
         msg: "androidDevice does not exist",
       });
