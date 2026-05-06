@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   npm-release-test:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     environment: npm
     steps:
       - name: Download Source
@@ -26,7 +26,6 @@ jobs:
       # Update npm to the latest version to enable OIDC
       - name: Update npm
         run: |
-          npm install -g npm@latest
           npm --version
 
       - name: Build debug-router-connector
