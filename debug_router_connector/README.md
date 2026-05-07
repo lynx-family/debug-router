@@ -32,11 +32,18 @@ const connector = new DebugRouterConnector({
   enableDesktop: true,
   enableNetworkDevice: true,
   networkDeviceOpt: {
-    ip: xx;
-    port:[port];
-  };
+    ip: xx,
+    port: [port],
+  },
+  connectionTrace: {
+    enabled: true,
+    output: "/tmp/debug-router-connection-trace.jsonl",
+  },
 });
 ```
+
+#### Connection trace (optional)
+Use `connectionTrace` to enable flat JSON-line connection logging, or set `DriverConnectionTracePath` to a file path. Each record includes a monotonically increasing `sequence`; socket-backed records also include `connectionAttemptId` for later trace analysis.
 
 #### Get Connected Clients
 You have two ways to get the connected clients.

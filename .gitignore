@@ -55,4 +55,4 @@ tools/android_tools/
 **/oh-package-lock.json5
 **/.idea
 **/.cxx
-
+**/.jsonl

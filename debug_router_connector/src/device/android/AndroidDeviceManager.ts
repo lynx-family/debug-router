@@ -131,6 +131,13 @@ export class AndroidDeviceManager extends DeviceManager {
               serial: device.id,
             });
             if (device.type === "device") {
+              if (!this.driver.devices.has(device.id)) {
+                this.driver.traceRecorder?.recordDevicePlug(device.id, {
+                  os: "Android",
+                  event: "add",
+                  deviceType: device.type,
+                });
+              }
               this.registerDevice(this.adbClient as ADBClient, device);
             }
           });
@@ -144,9 +151,21 @@ export class AndroidDeviceManager extends DeviceManager {
               serial: device.id,
             });
             if (device.type === "device") {
+              if (!this.driver.devices.has(device.id)) {
+                this.driver.traceRecorder?.recordDevicePlug(device.id, {
+                  os: "Android",
+                  event: "change",
+                  deviceType: device.type,
+                });
+              }
               this.registerDevice(this.adbClient as ADBClient, device);
             } else {
               if (this.driver.devices.has(device.id)) {
+                this.driver.traceRecorder?.recordDeviceUnplug(device.id, {
+                  os: "Android",
+                  event: "change",
+                  deviceType: device.type,
+                });
                 this.driver.unregisterDevice(device.id);
               }
             }
@@ -161,6 +180,11 @@ export class AndroidDeviceManager extends DeviceManager {
               serial: device.id,
             });
             if (this.driver.devices.has(device.id)) {
+              this.driver.traceRecorder?.recordDeviceUnplug(device.id, {
+                os: "Android",
+                event: "remove",
+                deviceType: device.type,
+              });
               this.driver.unregisterDevice(device.id);
             }
           });

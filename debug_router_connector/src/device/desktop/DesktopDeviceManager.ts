@@ -23,6 +23,13 @@ export default class DesktopDeviceManager extends DeviceManager {
     } else {
       return;
     }
-    this.driver.registerDevice(device);
+    if (!this.driver.devices.has(device.serial)) {
+      this.driver.traceRecorder?.recordDevicePlug(device.serial, {
+        os: device.info.os,
+        event: "register",
+        synthetic: true,
+      });
+      this.driver.registerDevice(device);
+    }
   }
 }
