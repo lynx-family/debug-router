@@ -7,6 +7,7 @@ import { BaseDevice } from "../device/BaseDevice";
 import { ClientDescription, ClientQuery } from "../utils/type";
 import ClientAdapter, { ClientEventsListener } from "./ClientAdapter";
 import { Connection } from "./Connection";
+import { USBConnection } from "./USBConnection";
 import { DebugRouterConnector } from "../connector";
 import { defaultLogger } from "../utils/logger";
 
@@ -70,11 +71,15 @@ export class ClientController implements ClientEventsListener {
     }
 
     const client = new UsbClient(info, connection);
+    if (connection instanceof USBConnection) {
+      connection.setTraceClientId(id);
+    }
 
     this.connections.set(id, client);
     // port has connected
     this.ports.set(port, true);
     this.clientInfos.set(id, port);
+    this.driver.traceRecorder?.recordUsbClientConnected(client);
     this.driver.regiserUsbClient(client);
     return id;
   }
@@ -82,6 +87,7 @@ export class ClientController implements ClientEventsListener {
   private removeConnection(id: number) {
     const client = this.connections.get(id);
     if (client) {
+      this.driver.traceRecorder?.recordUsbClientDisconnected(client);
       this.connections.delete(id);
     }
     const port = this.clientInfos.get(id);

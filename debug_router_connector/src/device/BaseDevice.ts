@@ -51,6 +51,10 @@ export abstract class BaseDevice {
 
   startWatchClient() {
     defaultLogger.debug("connectUsbClients: startWatchClient");
+    this.driver.traceRecorder?.recordWatchClientStart(this.info.serial, {
+      os: this.info.os,
+      title: this.info.title,
+    });
     this.clientController?.stopWatchClient();
     this.clientController = new ClientController(this.driver, this);
     this.clientController.startWatchClient();
@@ -58,6 +62,10 @@ export abstract class BaseDevice {
 
   async stopWatchClient() {
     defaultLogger.debug("connectUsbClients: stopWatchClient");
+    this.driver.traceRecorder?.recordWatchClientStop(this.info.serial, {
+      os: this.info.os,
+      title: this.info.title,
+    });
     if (this.clientController) {
       await this.clientController.stopWatchClient();
     }

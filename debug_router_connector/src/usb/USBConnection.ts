@@ -7,14 +7,39 @@ import { RequireMessageType, ResponseMessageType } from "../utils/type";
 import { Connection } from "./Connection";
 import { packMessage } from "./utils";
 import { defaultLogger } from "../utils/logger";
+import type { ConnectionTraceRecorder } from "../trace/ConnectionTraceRecorder";
+
+type UsbConnectionTraceContext = {
+  recorder?: ConnectionTraceRecorder | null;
+  deviceId?: string;
+  port?: number;
+  clientId?: number;
+  connectionAttemptId?: string;
+};
 
 export class USBConnection extends Connection {
-  constructor(protected socket: net.Socket) {
+  private traceContext: UsbConnectionTraceContext;
+
+  constructor(
+    protected socket: net.Socket,
+    traceContext: UsbConnectionTraceContext = {},
+  ) {
     super();
+    this.traceContext = traceContext;
+  }
+
+  setTraceClientId(clientId: number) {
+    this.traceContext = { ...this.traceContext, clientId };
   }
 
   close(): void {
     defaultLogger.debug("USBConnection: close");
+    this.traceContext.recorder?.recordUsbConnectionClosed({
+      deviceId: this.traceContext.deviceId,
+      port: this.traceContext.port,
+      clientId: this.traceContext.clientId,
+      connectionAttemptId: this.traceContext.connectionAttemptId,
+    });
     this.socket.end();
   }
 

@@ -12,6 +12,10 @@ export { WatchStatus } from "./device/WatchStatus";
 export { MultiOpenCallback } from "./connector/MultiOpenCallBack";
 export { DriverReportService } from "./report/interface/DriverReportService";
 export { Client } from "./connector/Client";
+export {
+  ConnectionTraceNode,
+  ConnectionTraceOptions,
+} from "./trace/ConnectionTraceRecorder";
 
 // class
 export { UsbClient } from "./usb/Client";

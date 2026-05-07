@@ -108,6 +108,13 @@ export default class HarmonyDeviceManager extends DeviceManager {
             this.retryCount = 0;
             defaultLogger.debug("tracker add:" + JSON.stringify(target));
             if (target.connStatus === "Connected") {
+              const serial = target.connectKey || target.connType;
+              if (!this.driver.devices.has(serial)) {
+                this.driver.traceRecorder?.recordDevicePlug(serial, {
+                  os: "Harmony",
+                  event: "add",
+                });
+              }
               this.registerDevice(this.hdcClient as Client, target);
             }
           });
@@ -122,9 +129,23 @@ export default class HarmonyDeviceManager extends DeviceManager {
               "tracker change to:" + JSON.stringify(newTarget),
             );
             if (newTarget.connStatus === "Connected") {
+              const serial = newTarget.connectKey;
+              if (!this.driver.devices.has(serial)) {
+                this.driver.traceRecorder?.recordDevicePlug(serial, {
+                  os: "Harmony",
+                  event: "change",
+                });
+              }
               this.registerDevice(this.hdcClient as Client, newTarget);
             } else {
               if (this.driver.devices.has(newTarget.connectKey)) {
+                this.driver.traceRecorder?.recordDeviceUnplug(
+                  newTarget.connectKey,
+                  {
+                    os: "Harmony",
+                    event: "change",
+                  },
+                );
                 this.driver.unregisterDevice(newTarget.connectKey);
               }
             }
@@ -134,8 +155,12 @@ export default class HarmonyDeviceManager extends DeviceManager {
             this.currentWatchStatus = WatchStatus.Watching;
             this.retryCount = 0;
             defaultLogger.debug("tracker remove:" + JSON.stringify(target));
-            if (this.driver.devices.has(target.connType)) {
-              this.driver.unregisterDevice(target.connType);
+            if (this.driver.devices.has(target.connectKey)) {
+              this.driver.traceRecorder?.recordDeviceUnplug(target.connectKey, {
+                os: "Harmony",
+                event: "remove",
+              });
+              this.driver.unregisterDevice(target.connectKey);
             }
           });
         })
