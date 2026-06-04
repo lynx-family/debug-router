@@ -5,18 +5,24 @@
 #ifndef DEBUGROUTER_NATIVE_BASE_SOCKET_UTIL_H_
 #define DEBUGROUTER_NATIVE_BASE_SOCKET_UTIL_H_
 
+#include <cstddef>
+
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #define CLOSESOCKET closesocket
 typedef SOCKET SocketType;
+typedef int SocketSendResult;
 #else
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <cerrno>
 #define CLOSESOCKET close
 typedef int SocketType;
+typedef ssize_t SocketSendResult;
 #endif
 #include <mutex>
 
@@ -25,6 +31,29 @@ typedef int SocketType;
 
 namespace debugrouter {
 namespace base {
+
+inline void SetNoSigPipe(SocketType sock) {
+#if !defined(_WIN32) && defined(SO_NOSIGPIPE)
+  int value = 1;
+  if (setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &value, sizeof(value)) == -1) {
+    LOGE("Set SO_NOSIGPIPE failed: " << errno);
+  }
+#else
+  (void)sock;
+#endif
+}
+
+inline SocketSendResult SendNoSigPipe(SocketType sock, const void* buffer,
+                                      size_t length) {
+#if defined(_WIN32)
+  return send(sock, static_cast<const char*>(buffer), static_cast<int>(length),
+              0);
+#elif defined(MSG_NOSIGNAL)
+  return send(sock, buffer, length, MSG_NOSIGNAL);
+#else
+  return send(sock, buffer, length, 0);
+#endif
+}
 
 class SocketGuard {
  public:
@@ -42,7 +71,11 @@ class SocketGuard {
     sock_ = socket_server::kInvalidSocket;
   }
 
-  explicit SocketGuard(SocketType sock) : sock_(sock) {}
+  explicit SocketGuard(SocketType sock) : sock_(sock) {
+    if (sock_ != socket_server::kInvalidSocket) {
+      SetNoSigPipe(sock_);
+    }
+  }
 
   ~SocketGuard() {
     LOGI("SocketGuard destruct.");

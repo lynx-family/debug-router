@@ -4,8 +4,16 @@
 
 #include <cstdlib>
 
+#include "debug_router/native/base/socket_guard.h"
 #include "debug_router/native/core/util.h"
 #include "gtest/gtest.h"
+
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <cerrno>
+#endif
 
 TEST(SocketUtilTestSuite, TestCharToUInt32) {
   EXPECT_EQ(debugrouter::util::CharToUInt32(0xF0), (uint32_t)240);
@@ -60,3 +68,21 @@ TEST(SocketUtilTestSuite, TestCheckHeader) {
   EXPECT_EQ(true, debugrouter::util::CheckHeaderThreeBytes(header));
   EXPECT_EQ(true, debugrouter::util::CheckHeaderFourthByte(header, 27));
 }
+
+#ifndef _WIN32
+TEST(SocketUtilTestSuite, SendNoSigPipeFailsWithoutTerminatingOnClosedPeer) {
+  int sockets[2] = {-1, -1};
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+
+  debugrouter::base::SocketGuard writer(sockets[0]);
+  ASSERT_EQ(close(sockets[1]), 0);
+
+  const char message[] = "x";
+  errno = 0;
+  auto result =
+      debugrouter::base::SendNoSigPipe(writer.Get(), message, sizeof(message));
+
+  EXPECT_EQ(result, -1);
+  EXPECT_EQ(errno, EPIPE);
+}
+#endif

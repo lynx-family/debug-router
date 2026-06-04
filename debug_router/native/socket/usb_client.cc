@@ -403,8 +403,8 @@ void UsbClient::WriteMessage() {
       }
       std::string result_message;
       WrapHeader(message, result_message);
-      if (send(socket_guard_.Get(), result_message.c_str(),
-               result_message.size(), 0) == -1) {
+      if (base::SendNoSigPipe(socket_guard_.Get(), result_message.c_str(),
+                              result_message.size()) == -1) {
         LOGE("send error: " << GetErrorMessage() << " message:" << message);
         if (listener_) {
           listener_->OnError(shared_from_this(), GetErrorMessage(),

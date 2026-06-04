@@ -118,12 +118,12 @@ void WebSocketTask::SendInternal(const std::string &data) {
   } else {
     LOGI("WebSocketTask: [TX]: " << buf);
   }
-  if (send(socket_guard_->Get(), (char *)prefix, prefix_len, 0) == -1) {
+  if (base::SendNoSigPipe(socket_guard_->Get(), prefix, prefix_len) == -1) {
     LOGI("send prefix_len error.");
     onFailure("Send prefix_len error.", GetErrorMessage());
     return;
   }
-  if (send(socket_guard_->Get(), buf, payloadLen, 0) == -1) {
+  if (base::SendNoSigPipe(socket_guard_->Get(), buf, payloadLen) == -1) {
     LOGI("send buf error.");
     onFailure("Send buf error.", GetErrorMessage());
     return;
@@ -292,7 +292,7 @@ bool WebSocketTask::do_connect() {
            "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\n"
            "Sec-WebSocket-Version: 13\r\n\r\n",
            path, host, port);
-  if (send(socket_guard_->Get(), buf, strlen(buf), 0) == -1) {
+  if (base::SendNoSigPipe(socket_guard_->Get(), buf, strlen(buf)) == -1) {
     LOGE("send http upgrade error: " << GetErrorMessage());
     onFailure("Websocket Task: socket send failed.", GetErrorMessage());
     return false;
