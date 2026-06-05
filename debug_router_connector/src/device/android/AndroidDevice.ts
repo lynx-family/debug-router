@@ -10,7 +10,7 @@ import {
   Forward,
 } from "@devicefarmer/adbkit";
 import { BaseDevice } from "../BaseDevice";
-import { DebugRouterConnector } from "../../connector";
+import { PhysicalConnector } from "../../physical";
 import { defaultLogger } from "../../utils/logger";
 import detectPort from "detect-port";
 import child_process, { ExecException } from "child_process";
@@ -27,7 +27,7 @@ export default class AndroidDevice extends BaseDevice {
   }
 
   constructor(
-    driver: DebugRouterConnector,
+    driver: PhysicalConnector,
     serial: string,
     title: string,
     adb: ADBClient,

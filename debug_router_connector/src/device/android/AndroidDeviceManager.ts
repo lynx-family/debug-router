@@ -4,7 +4,7 @@
 
 // @ts-ignore
 import { Client as ADBClient, Device } from "@devicefarmer/adbkit";
-import { DebugRouterConnector } from "../../connector";
+import { PhysicalConnector } from "../../physical";
 import { DeviceManager } from "../DeviceManager";
 import AndroidDevice from "./AndroidDevice";
 import { defaultLogger } from "../../utils/logger";
@@ -17,7 +17,7 @@ export class AndroidDeviceManager extends DeviceManager {
   private retryCount: number = 0;
   private readonly adbOptions: any;
   private adbClient: ADBClient | null = null;
-  constructor(driver: DebugRouterConnector, options: any) {
+  constructor(driver: PhysicalConnector, options: any) {
     super(driver);
     this.adbOptions = options;
   }

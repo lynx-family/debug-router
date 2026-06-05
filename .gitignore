@@ -56,3 +56,6 @@ tools/android_tools/
 **/.idea
 **/.cxx
 **/.jsonl
+
+## my own docs
+dev_docs/

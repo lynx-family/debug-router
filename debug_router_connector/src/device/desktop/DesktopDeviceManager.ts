@@ -2,14 +2,14 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { DebugRouterConnector } from "../../connector";
+import { PhysicalConnector } from "../../physical";
 import MacDevice from "./MacDevice";
 import WindowsDevice from "./WindowsDevice";
 import LinuxDevice from "./LinuxDevice";
 import { DeviceManager } from "../DeviceManager";
 
 export default class DesktopDeviceManager extends DeviceManager {
-  constructor(driver: DebugRouterConnector) {
+  constructor(driver: PhysicalConnector) {
     super(driver);
   }
   async watchDevices() {

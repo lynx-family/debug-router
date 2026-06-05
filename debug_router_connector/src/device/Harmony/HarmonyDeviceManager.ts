@@ -3,7 +3,7 @@ import Client from "../../utils/hdc/client";
 import HarmonyDevice from "./HarmonyDevice";
 import { getHdcInstance } from "../../utils/hdc.validator";
 import { WatchStatus } from "../../device/WatchStatus";
-import { DebugRouterConnector } from "../../connector";
+import { PhysicalConnector } from "../../physical";
 import { DeviceManager } from "../DeviceManager";
 import { defaultLogger } from "../../utils/logger";
 import { getDriverReportService } from "../../report/interface/DriverReportService";
@@ -14,7 +14,7 @@ export default class HarmonyDeviceManager extends DeviceManager {
   private readonly hdcOptions: any;
   private hdcClient: Client | null = null;
 
-  constructor(driver: DebugRouterConnector, options: any) {
+  constructor(driver: PhysicalConnector, options: any) {
     super(driver);
     this.hdcOptions = options;
   }

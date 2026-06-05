@@ -25,7 +25,7 @@ async function main() {
   // 4. chose the first client, and then print the client's raw_info
   const client = clients[0];
   console.log(client.info.query.raw_info);
-  process.exit(0);
+  // process.exit(0);
 }
 
 main();

@@ -2,7 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { DebugRouterConnector } from "../../connector";
+import { PhysicalConnector } from "../../physical";
 import NetworkDevice from "./NetworkDevice";
 import { DeviceManager } from "../DeviceManager";
 
@@ -13,7 +13,7 @@ export default class NetworkDeviceManager extends DeviceManager {
         port: number[];
       }
     | undefined;
-  constructor(driver: DebugRouterConnector, options: any) {
+  constructor(driver: PhysicalConnector, options: any) {
     super(driver);
     this.networkDeviceOpt = options;
   }

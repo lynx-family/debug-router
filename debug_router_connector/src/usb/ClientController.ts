@@ -8,7 +8,7 @@ import { ClientDescription, ClientQuery } from "../utils/type";
 import ClientAdapter, { ClientEventsListener } from "./ClientAdapter";
 import { Connection } from "./Connection";
 import { USBConnection } from "./USBConnection";
-import { DebugRouterConnector } from "../connector";
+import { PhysicalConnector } from "../physical";
 import { defaultLogger } from "../utils/logger";
 
 export class ClientController implements ClientEventsListener {
@@ -17,10 +17,10 @@ export class ClientController implements ClientEventsListener {
   private ports: Map<number, boolean> = new Map();
   private clientInfos: Map<number, number> = new Map();
   connections: Map<number, UsbClient> = new Map();
-  driver: DebugRouterConnector;
+  driver: PhysicalConnector;
   device: BaseDevice;
 
-  constructor(driver: DebugRouterConnector, serverDevice: BaseDevice) {
+  constructor(driver: PhysicalConnector, serverDevice: BaseDevice) {
     this.driver = driver;
     this.device = serverDevice;
 

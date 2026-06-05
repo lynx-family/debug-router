@@ -19,7 +19,7 @@ import {
 } from "../utils/type";
 import { USBConnection } from "./USBConnection";
 import { Connection } from "./Connection";
-import { DebugRouterConnector } from "../connector";
+import { PhysicalConnector } from "../physical";
 import { defaultLogger } from "../utils/logger";
 import { getDriverReportService } from "../report/interface/DriverReportService";
 
@@ -47,7 +47,7 @@ export default class ClientAdapter {
   protected id: number = 0;
   private connectionAttemptId?: string;
   constructor(
-    protected driver: DebugRouterConnector,
+    protected driver: PhysicalConnector,
     protected listener: ClientEventsListener | null,
     protected readonly port: number,
     protected readonly device: string,
