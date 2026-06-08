@@ -12,10 +12,7 @@ import NetworkDeviceManager from "../device/network/NetworkDeviceManager";
 import DesktopDeviceManager from "../device/desktop/DesktopDeviceManager";
 import iOSDeviceManager from "../device/ios/iOSDeviceManager";
 import HarmonyDeviceManager from "../device/Harmony/HarmonyDeviceManager";
-import {
-  RequireMessageType,
-  ResponseMessageType,
-} from "../utils/type";
+import { RequireMessageType, ResponseMessageType } from "../utils/type";
 import { defaultLogger } from "../utils/logger";
 import {
   getDriverReportService,
@@ -28,7 +25,7 @@ import {
   monitorUnregisterDevice,
   setClientTimeMap,
   setDeviceTimeMap,
-} from "../connector/MonitorUtils";
+} from "./MonitorUtils";
 import type {
   ConnectionTraceOptions,
   ConnectionTraceRecorder,
@@ -38,7 +35,7 @@ export type PhysicalConnectorEvent = {
   "device-connected": BaseDevice;
   "device-disconnected": BaseDevice;
   "client-connected": UsbClient;
-  "client-disconnected": number; 
+  "client-disconnected": number;
   // usb-app
   "usb-client-message": {
     id: number;
@@ -170,7 +167,7 @@ export class PhysicalConnector {
       this.devicesManager.add(new DesktopDeviceManager(this));
     }
     if (this.enableNetworkDevice && this.networkDeviceOpt) {
-      if (this.networkDeviceOpt) { 
+      if (this.networkDeviceOpt) {
         // NetWorkDevices use ip as their serial.
         this.devicesManager.add(
           new NetworkDeviceManager(this, this.networkDeviceOpt),
@@ -182,9 +179,6 @@ export class PhysicalConnector {
         });
         defaultLogger.error("networkDeviceOpt == undefined");
       }
-    }
-    if (!this.manualConnect) {
-      this.connectDevices();
     }
   }
 
@@ -368,7 +362,7 @@ export class PhysicalConnector {
     // register new client
     this.usbClients.set(client.clientId(), client);
     this.emit("client-connected", client);
-    this.handleUsbClienChange();
+    this.emit("app-client-connected", client);
     setClientTimeMap(client);
   }
 
@@ -386,7 +380,6 @@ export class PhysicalConnector {
     this.usbClients.delete(id);
     this.emit("client-disconnected", id);
     this.emit("app-client-disconnected", id);
-    this.handleUsbClienChange();
     monitorUnregisterClient(existing, this.usbConnectOpt.retryTime);
   }
 
@@ -553,17 +546,9 @@ export class PhysicalConnector {
     });
   }
 
-  // unfinished methods
-
   handleUsbMessage(id: number, message: string) {
     this.emit("usb-client-message", { id, message });
   }
-
-  handleUsbClienChange() {}
-
-  handleUsbDeviceChange() {}
-
-  // unfinished methods end
 
   // unused methods, for future use:DaemonHost
 
@@ -592,7 +577,7 @@ export class PhysicalConnector {
     }
   }
 
-// unused methods end
+  // unused methods end
 
   getAllAppClients() {
     return this.getAllUsbClients();

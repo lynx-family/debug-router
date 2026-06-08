@@ -18,11 +18,7 @@ import {
 } from "../report/interface/DriverReportService";
 import { Client } from "./Client";
 import { WebSocketClient } from "../websocket/WebSocketConnection";
-import {
-  MultiOpenCallback,
-  MultiOpenStatus,
-} from "./MultiOpenCallBack";
-import fs from "fs";
+import { MultiOpenCallback, MultiOpenStatus } from "./MultiOpenCallBack";
 import * as fslock from "../utils/file_lock";
 import { DriverClient } from "./DriverClient";
 import { createConnectionTraceRecorder } from "../trace/ConnectionTraceRecorder";
@@ -33,9 +29,8 @@ import type {
 import { LegacyMultiOpenGuard } from "./LegacyMultiOpenGuard";
 import {
   PhysicalConnectorOption,
-   PhysicalConnector,
+  PhysicalConnector,
 } from "../physical/PhysicalConnector";
-
 
 export type devOption = PhysicalConnectorOption & {
   enableMultiplexer?: boolean;
@@ -94,7 +89,8 @@ export class DebugRouterConnector {
     },
   ) {
     this.enableMultiplexer = option.enableMultiplexer ?? false;
-    this.multiplexerDaemonIdleTimeout = option.multiplexerDaemonIdleTimeout ?? 3000000;
+    this.multiplexerDaemonIdleTimeout =
+      option.multiplexerDaemonIdleTimeout ?? 3000000;
     setDriverReportService(option.reportService ?? null);
     getDriverReportService()?.init(option.manualConnect);
 
@@ -103,7 +99,9 @@ export class DebugRouterConnector {
       return ;
     } */
 
-    this.legacyMultiOpenGuard = new LegacyMultiOpenGuard(() => this.disableAllClients());
+    this.legacyMultiOpenGuard = new LegacyMultiOpenGuard(() =>
+      this.disableAllClients(),
+    );
     this.legacyMultiOpenGuard.prepareDriverDataDir();
     this.legacyMultiOpenGuard.startMonitorMultiOpen();
     this.traceRecorder = createConnectionTraceRecorder(
@@ -122,10 +120,41 @@ export class DebugRouterConnector {
     this.adbOption = this.physicalConnector.adbOption;
     this.hdcOption = this.physicalConnector.hdcOption;
     this.usbConnectOpt = this.physicalConnector.usbConnectOpt;
+    this.bindPhysicalConnectorEvents();
 
     this.enableWebSocket = option.enableWebSocket;
     this.roomId = option.websocketOption?.roomId;
     this.driverClient = new DriverClient(this.createClientId());
+    if (!option.manualConnect) {
+      this.connectDevices();
+    }
+  }
+
+  private bindPhysicalConnectorEvents() {
+    this.physicalConnector.on("device-connected", (device) => {
+      this.emit("device-connected", device);
+    });
+    this.physicalConnector.on("device-disconnected", (device) => {
+      this.emit("device-disconnected", device);
+    });
+    this.physicalConnector.on("client-connected", (client) => {
+      this.emit("client-connected", client);
+    });
+    this.physicalConnector.on("client-disconnected", (id) => {
+      this.emit("client-disconnected", id);
+    });
+    this.physicalConnector.on("app-client-connected", (client) => {
+      this.emit("app-client-connected", client);
+      this.handleUsbClienChange();
+    });
+    this.physicalConnector.on("app-client-disconnected", (id) => {
+      this.emit("app-client-disconnected", id);
+      this.handleUsbClienChange();
+    });
+    this.physicalConnector.on("usb-client-message", ({ id, message }) => {
+      this.emit("usb-client-message", { id, message });
+      this.handleUsbMessage(id, message);
+    });
   }
 
   setMultiOpenCallback(callback: MultiOpenCallback) {
@@ -147,7 +176,10 @@ export class DebugRouterConnector {
       return;
     } */
 
-    if (!force && this.legacyMultiOpenGuard.currentStatus === MultiOpenStatus.attached) {
+    if (
+      !force &&
+      this.legacyMultiOpenGuard.currentStatus === MultiOpenStatus.attached
+    ) {
       defaultLogger.debug("startWatchAllClients: has already attached");
       return;
     }
@@ -155,7 +187,7 @@ export class DebugRouterConnector {
     fslock.clearLockFile();
     this.legacyMultiOpenGuard.monitorLatestDriverProcessFile();
     this.physicalConnector.startWatchAllClients();
-   }
+  }
 
   createClientId(): number {
     return this.physicalConnector.createClientId();
@@ -166,7 +198,11 @@ export class DebugRouterConnector {
     serial: string | null = null,
     isAutoListenClients: boolean = true,
   ): Promise<BaseDevice[]> {
-    return await this.physicalConnector.connectDevices(timeout, serial, isAutoListenClients);
+    return await this.physicalConnector.connectDevices(
+      timeout,
+      serial,
+      isAutoListenClients,
+    );
   }
 
   // clientName:
@@ -178,7 +214,12 @@ export class DebugRouterConnector {
     waitTimeout: boolean = true,
     clientName: string | null = null,
   ): Promise<UsbClient[]> {
-    return await this.physicalConnector.connectUsbClients(deviceId, timeout, waitTimeout, clientName);
+    return await this.physicalConnector.connectUsbClients(
+      deviceId,
+      timeout,
+      waitTimeout,
+      clientName,
+    );
   }
 
   selecteUsbClient(id: number) {
@@ -266,8 +307,10 @@ export class DebugRouterConnector {
   }
 
   registerDevice(device: BaseDevice) {
-    this.physicalConnector.registerDevice(device,
-      this.legacyMultiOpenGuard.currentStatus === MultiOpenStatus.attached);
+    this.physicalConnector.registerDevice(
+      device,
+      this.legacyMultiOpenGuard.currentStatus === MultiOpenStatus.attached,
+    );
   }
 
   unregisterDevice(serial: string) {
@@ -298,7 +341,11 @@ export class DebugRouterConnector {
     timeout: number = -1,
     clientName: string | null = null,
   ): Promise<UsbClient[]> {
-    return this.physicalConnector.getDeviceUsbClients(deviceId, timeout, clientName);
+    return this.physicalConnector.getDeviceUsbClients(
+      deviceId,
+      timeout,
+      clientName,
+    );
   }
 
   handleUsbMessage(id: number, message: string) {
