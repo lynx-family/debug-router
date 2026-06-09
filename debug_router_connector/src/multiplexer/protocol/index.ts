@@ -2,4 +2,8 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-export * from "./protocol";
+export * from "./control";
+export * from "./discovery";
+export * from "./event";
+export * from "./snapshot";
+export * from "./validation";

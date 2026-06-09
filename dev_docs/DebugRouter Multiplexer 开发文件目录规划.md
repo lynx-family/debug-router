@@ -109,32 +109,41 @@ test/e2e_test/connector_test/
 
 ### 2.1 推荐开发顺序
 
-开发顺序遵循“先稳定协议和基础设施，再拆分现有职责，最后接入新 connector”的原则。后续阶段可以依赖前序阶段，除明确说明外不建议跨阶段并行开发。
+开发顺序遵循“先做可独立验证的底座，再做跨进程最小闭环，最后接入公开 facade”的原则。每个阶段都要能形成明确的验收边界，避免在 daemon、client、Host 和 connector facade 之间来回补依赖。
+
+原先把 `MultiplexerControlServer`、`MultiplexerHost`、`MultiplexerRemoteClient` 和 connector 镜像放在相邻但互相依赖不清的阶段，容易出现两个问题：
+
+- control server 需要 Host 提供 RPC handler，但 Host 又依赖 control server 管理连接，二者不能在同一阶段里直接做成完整业务闭环。
+- `MultiplexerDiscovery` 和 `MultiplexerDaemonManager` 是 daemon 拉起闭环的一部分，不能等到 connector 镜像阶段才实现。
+
+调整后按下面顺序开发：
 
 | 阶段 | 开发目标 | 主要文件 | 完成标准 |
 | --- | --- | --- | --- |
-| 1. 协议与基础设施 | 稳定跨进程契约、数据目录、原子写入和进程锁能力。 | `src/multiplexer/protocol/*`、`src/multiplexer/utils/*` | DTO 可序列化且具备运行时校验；`spawn.lock`、`daemon.lock` 和 discovery 文件能力具备单元测试。 |
-| 2. 现有职责拆分 | 从旧 connector 中提取 legacy 多开逻辑和真实物理连接逻辑，但暂不改变原有行为。 | `src/connector/LegacyMultiOpenGuard.ts`、`src/physical/PhysicalConnector.ts`、`src/physical/PhysicalMonitorUtils.ts`、`src/connector/DebugRouterConnector.ts` | legacy 模式行为保持兼容；真实设备和 `UsbClient` 仅由 `PhysicalConnector` 持有，并可被 daemon/legacy fallback 共同组合。 |
-| 3. Daemon 生命周期与控制入口 | 建立 detached daemon、discovery heartbeat、health endpoint 和 control WebSocket。 | `src/multiplexer/daemon/entry.ts`、`src/multiplexer/daemon/MultiplexerDaemon.ts`、`src/multiplexer/daemon/MultiplexerControlServer.ts`、`src/multiplexer/daemon/MultiplexerControlConnection.ts` | daemon 可独立启动并正确维护 discovery/heartbeat；测试客户端可通过 token 校验建立 control 连接。 |
-| 4. Host 路由与 WebSocket 接入 | 实现 RPC 分发、snapshot/event 广播、message id 重写和定向回包。 | `src/multiplexer/daemon/MultiplexerHost.ts`、`src/multiplexer/daemon/PendingRouteTable.ts`、`src/websocket/WebSocketServer.ts`、`src/websocket/WebSocketConnection.ts` | 多个 control/WebSocket client 的消息和响应可以准确隔离并路由。 |
-| 5. Connector 侧代理与镜像 | 实现 daemon 管理、control RPC 代理以及本地设备/client 镜像。 | `src/multiplexer/client/MultiplexerDiscovery.ts`、`src/multiplexer/client/MultiplexerDaemonManager.ts`、`src/multiplexer/client/MultiplexerRemoteClient.ts`、`src/multiplexer/client/MultiplexerDevice.ts`、`src/multiplexer/client/MultiplexerUsbClient.ts` | connector 侧不持有真实连接，可发现或拉起 daemon，并通过 snapshot 和增量事件维护兼容镜像。 |
-| 6. DebugRouterConnector 接入 | 将新链路接入公开 facade，并保留 mux disabled 的 fallback。 | `src/connector/DebugRouterConnector.ts`、`src/connector/index.ts`、`src/multiplexer/index.ts`、`src/index.ts` | 对外 API 和事件名保持兼容；mux enabled/disabled 两条路径均可运行。 |
-| 7. 构建与完整验证 | 固化 daemon entry 构建产物，并完成单元、集成和真实设备验证。 | `scripts/build.sh`、`package.json`、`tsconfig.test.json`、`debug_router_connector/test/*`、`test/e2e_test/connector_test/multiplexer/*` | 构建产物可稳定定位；并发拉起、重连、路由隔离、fallback 和真实设备链路通过测试。 |
+| 1. 协议、路径与锁基础 | 先固定跨进程 DTO、运行时校验、数据目录、原子写入和进程锁。 | `src/multiplexer/protocol/*`、`src/multiplexer/utils/FileLock.ts`、`src/multiplexer/utils/atomic_file.ts`、`src/multiplexer/utils/paths.ts` | DTO 可序列化且具备运行时校验；`spawn.lock`、`daemon.lock`、discovery 路径和原子写入能力有单元测试。 |
+| 2. 旧职责拆分与物理层抽取 | 从旧 connector 中先拆出 legacy 多开逻辑和真实物理连接层，但不启用 mux 新链路。 | `src/connector/LegacyMultiOpenGuard.ts`、`src/physical/PhysicalConnector.ts`、`src/physical/PhysicalMonitorUtils.ts`、`src/connector/DebugRouterConnector.ts` | mux disabled 行为保持兼容；真实设备和 `UsbClient` 只由 `PhysicalConnector` 持有；旧 `LatestDriverProcess` 多开逻辑可独立测试。 |
+| 3. Daemon 发现与拉起闭环 | 让 connector 侧可以发现、判断、拉起或替换 daemon，daemon 侧可以启动、写 discovery、刷新 heartbeat。 | `src/multiplexer/client/MultiplexerDiscovery.ts`、`src/multiplexer/client/MultiplexerDaemonManager.ts`、`src/multiplexer/daemon/entry.ts`、`src/multiplexer/daemon/MultiplexerDaemon.ts`、`scripts/build.sh`、`package.json` | `ensureDaemon()` 能复用可用 daemon、替换低版本 daemon、清理 stale daemon 并拉起新 daemon；daemon entry 构建产物路径可被 manager 稳定定位。 |
+| 4. Control 通道最小闭环 | 先把 health endpoint、control WebSocket、token 校验、RPC request/response 和事件订阅打通，Host 先使用最小 handler 或 fake handler。 | `src/multiplexer/daemon/MultiplexerControlServer.ts`、`src/multiplexer/daemon/MultiplexerControlConnection.ts`、`src/multiplexer/client/MultiplexerRemoteClient.ts` | 测试 connector 可通过 token 建立 control 连接；`MultiplexerRemoteClient.call()` 能完成 RPC pending 创建、响应、错误、超时和断线清理；事件订阅可用。 |
+| 5. Host 接入物理层与镜像同步 | 实现 daemon 内真实 RPC 分发、snapshot/event 发布，并在 connector 进程内维护设备和 client 镜像。 | `src/multiplexer/daemon/MultiplexerHost.ts`、`src/multiplexer/client/MultiplexerDevice.ts`、`src/multiplexer/client/MultiplexerUsbClient.ts`、`src/multiplexer/client/index.ts` | Host 能通过 `PhysicalConnector` 完成设备/client 查询和发送类 RPC；connector 侧只持有镜像对象，并能通过 snapshot 和增量事件同步本地 Map。 |
+| 6. WebSocket 前端接入与路由隔离 | 在 Host 已可处理物理 RPC 后，再接入 WebSocket frontend、message id 重写、pending route 和定向回包。 | `src/multiplexer/daemon/PendingRouteTable.ts`、`src/websocket/WebSocketServer.ts`、`src/websocket/WebSocketConnection.ts`、`src/multiplexer/daemon/MultiplexerHost.ts` | 多个 control client 和多个 WebSocket frontend 使用相同原始 message id 时不会串包；无 id 主动事件广播；未知 id response 不广播。 |
+| 7. DebugRouterConnector facade 接入 | 最后把 mux enabled 主链路接入公开 connector，同时保留 mux disabled fallback。 | `src/connector/DebugRouterConnector.ts`、`src/connector/index.ts`、`src/multiplexer/index.ts`、`src/index.ts` | 对外 API、事件名、option 和环境变量保持兼容；mux enabled 走 daemon 代理，mux disabled 走 `PhysicalConnector` + `LegacyMultiOpenGuard`。 |
+| 8. 构建、集成与真实链路验证 | 固化测试脚本和完整验证流程，补齐包内集成与真实设备端到端测试。 | `tsconfig.test.json`、`package.json`、`debug_router_connector/test/*`、`test/e2e_test/connector_test/multiplexer/*` | TypeScript 编译、构建、并发拉起、重连、路由隔离、fallback 和真实设备链路全部通过。 |
 
 阶段依赖关系：
 
 ```mermaid
 flowchart LR
-  P1["阶段 1<br/>协议与基础设施"] --> P2["阶段 2<br/>现有职责拆分"]
-  P2 --> P3["阶段 3<br/>Daemon 生命周期与控制入口"]
-  P3 --> P4["阶段 4<br/>Host 路由与 WebSocket 接入"]
-  P3 --> P5["阶段 5<br/>Connector 侧代理与镜像"]
-  P4 --> P6["阶段 6<br/>DebugRouterConnector 接入"]
-  P5 --> P6
-  P6 --> P7["阶段 7<br/>构建与完整验证"]
+  P1["阶段 1<br/>协议、路径与锁基础"] --> P2["阶段 2<br/>旧职责拆分与物理层抽取"]
+  P1 --> P3["阶段 3<br/>Daemon 发现与拉起闭环"]
+  P2 --> P5["阶段 5<br/>Host 接入物理层与镜像同步"]
+  P3 --> P4["阶段 4<br/>Control 通道最小闭环"]
+  P4 --> P5
+  P5 --> P6["阶段 6<br/>WebSocket 前端接入与路由隔离"]
+  P6 --> P7["阶段 7<br/>DebugRouterConnector facade 接入"]
+  P7 --> P8["阶段 8<br/>构建、集成与真实链路验证"]
 ```
 
-阶段 4 和阶段 5 可在阶段 3 完成后并行开发；其余阶段建议按顺序完成。
+阶段 2 和阶段 3 都只依赖阶段 1，可以并行开发；阶段 4 必须等阶段 3 完成，因为它需要真实 daemon 发现和 token；阶段 5 必须等阶段 2、4 完成，因为 Host 既依赖物理层，也依赖 control 通道；阶段 7 必须放在最后接入，避免公开 facade 过早绑定未稳定的内部模块。
 
 ## 3. 新增文件职责
 

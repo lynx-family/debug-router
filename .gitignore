@@ -24,6 +24,7 @@ out/
 ### debug_router_connector part
 debug_router_connector/node_modules
 debug_router_connector/dist
+debug_router_connector/*.tsbuildinfo
 
 ### test part
 test/e2e_test/android_/*.iml

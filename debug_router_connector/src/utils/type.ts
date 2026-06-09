@@ -104,6 +104,20 @@ export type DebugerRouterDriverEvents = {
   "app-client-disconnected": number;
 };
 
+export type PhysicalConnectorEvent = {
+  "device-connected": BaseDevice;
+  "device-disconnected": BaseDevice;
+  "client-connected": UsbClient;
+  "client-disconnected": number;
+  // usb-app
+  "usb-client-message": {
+    id: number;
+    message: string;
+  };
+  "app-client-connected": Client;
+  "app-client-disconnected": number;
+};
+
 export type ServerErrorType = {
   code: number;
   message: string;

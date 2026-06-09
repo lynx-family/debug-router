@@ -19,7 +19,7 @@ import {
   DriverReportService,
   setDriverReportService,
 } from "../report/interface/DriverReportService";
-import { Client } from "../connector/Client";
+import { PhysicalConnectorEvent } from "../utils/type";
 import {
   monitorUnregisterClient,
   monitorUnregisterDevice,
@@ -30,20 +30,6 @@ import type {
   ConnectionTraceOptions,
   ConnectionTraceRecorder,
 } from "../trace/ConnectionTraceRecorder";
-
-export type PhysicalConnectorEvent = {
-  "device-connected": BaseDevice;
-  "device-disconnected": BaseDevice;
-  "client-connected": UsbClient;
-  "client-disconnected": number;
-  // usb-app
-  "usb-client-message": {
-    id: number;
-    message: string;
-  };
-  "app-client-connected": Client;
-  "app-client-disconnected": number;
-};
 
 export type PhysicalConnectorOption = {
   enableWebSocket?: boolean;
