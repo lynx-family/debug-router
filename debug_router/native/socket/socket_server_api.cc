@@ -123,6 +123,19 @@ void SocketServer::setEnableServer(bool enable) {
   }
 }
 
+void SocketServer::AcceptExternalFd(SocketType fd) {
+  if (fd == kInvalidSocket) {
+    LOGE("AcceptExternalFd: invalid fd");
+    return;
+  }
+  LOGI("AcceptExternalFd: fd=" << fd);
+  auto client = std::make_shared<UsbClient>(fd);
+  std::shared_ptr<ClientListener> client_listener =
+      std::make_shared<ClientListener>(shared_from_this());
+  client->Init();
+  client->StartUp(client_listener);
+}
+
 void SocketServer::StartServer() { setEnableServer(true); }
 
 void SocketServer::StopServer() {

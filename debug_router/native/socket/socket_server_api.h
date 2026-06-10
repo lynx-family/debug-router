@@ -52,6 +52,7 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
 
   void StartServer();
   void StopServer();
+  void AcceptExternalFd(SocketType fd);
 
  protected:
   static void ThreadFunc(std::shared_ptr<SocketServer> socket_server);

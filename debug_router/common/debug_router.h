@@ -90,6 +90,8 @@ class DEBUG_ROUTER_EXPORT DebugRouter {
   void DisableDebugChannel();
   bool IsDebugChannelEnabled();
 
+  void AcceptExternalFd(int fd);
+
   DebugRouter(const DebugRouter &) = delete;
   DebugRouter &operator=(const DebugRouter &) = delete;
   DebugRouter(DebugRouter &&) = delete;

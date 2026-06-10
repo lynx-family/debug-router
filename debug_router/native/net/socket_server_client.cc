@@ -101,5 +101,11 @@ void SocketServerClient::StopServer() {
   }
 }
 
+void SocketServerClient::AcceptExternalFd(int fd) {
+  if (socket_server_) {
+    socket_server_->AcceptExternalFd(static_cast<SocketType>(fd));
+  }
+}
+
 }  // namespace net
 }  // namespace debugrouter

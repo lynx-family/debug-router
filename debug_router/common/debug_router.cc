@@ -215,5 +215,9 @@ bool DebugRouter::IsDebugChannelEnabled() {
   return core::DebugRouterCore::GetInstance().IsDebugChannelEnabled();
 }
 
+void DebugRouter::AcceptExternalFd(int fd) {
+  core::DebugRouterCore::GetInstance().AcceptExternalFd(fd);
+}
+
 }  // namespace common
 }  // namespace debugrouter

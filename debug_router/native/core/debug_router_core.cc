@@ -332,6 +332,19 @@ int32_t DebugRouterCore::GetUSBPort() {
   return usb_port_.load(std::memory_order_relaxed);
 }
 
+void DebugRouterCore::AcceptExternalFd(int fd) {
+#if ENABLE_MESSAGE_IMPL
+  external_fd_mode_.store(true, std::memory_order_relaxed);
+  UpdateServerState();
+  auto socket_server_client =
+      std::dynamic_pointer_cast<net::SocketServerClient>(
+          message_transceivers_[1]);
+  if (socket_server_client) {
+    socket_server_client->AcceptExternalFd(fd);
+  }
+#endif
+}
+
 void DebugRouterCore::Pull(int32_t session_id_) {
   LOGI("pull session: " << session_id_);
   bool removed_enabled_session = false;
@@ -800,6 +813,9 @@ std::string DebugRouterCore::GetConnectionStateMsg(ConnectionState state) {
 }
 
 bool DebugRouterCore::ShouldServerRun() {
+  if (external_fd_mode_.load(std::memory_order_relaxed)) {
+    return false;
+  }
   if (enable_all_sessions_.load(std::memory_order_relaxed) ||
       debug_channel_enabled_.load(std::memory_order_relaxed)) {
     return true;
