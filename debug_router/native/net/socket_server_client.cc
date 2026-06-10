@@ -101,9 +101,9 @@ void SocketServerClient::StopServer() {
   }
 }
 
-void SocketServerClient::AcceptExternalFd(int fd) {
+void SocketServerClient::AcceptExternalFd(SocketType fd) {
   if (socket_server_) {
-    socket_server_->AcceptExternalFd(static_cast<SocketType>(fd));
+    socket_server_->AcceptExternalFd(fd);
   }
 }
 

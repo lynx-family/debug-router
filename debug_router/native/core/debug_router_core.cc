@@ -336,11 +336,15 @@ void DebugRouterCore::AcceptExternalFd(int fd) {
 #if ENABLE_MESSAGE_IMPL
   external_fd_mode_.store(true, std::memory_order_relaxed);
   UpdateServerState();
-  auto socket_server_client =
-      std::dynamic_pointer_cast<net::SocketServerClient>(
-          message_transceivers_[1]);
-  if (socket_server_client) {
-    socket_server_client->AcceptExternalFd(fd);
+  for (size_t i = 0; i < kTransceiverCount; ++i) {
+    auto socket_server_client =
+        std::dynamic_pointer_cast<net::SocketServerClient>(
+            message_transceivers_[i]);
+    if (socket_server_client) {
+      socket_server_client->AcceptExternalFd(
+          static_cast<socket_server::SocketType>(fd));
+      break;
+    }
   }
 #endif
 }
@@ -459,6 +463,11 @@ void DebugRouterCore::OnClosed(
   if (transceiver != current_transceiver_ ||
       connection_state_.load(std::memory_order_relaxed) == DISCONNECTED) {
     return;
+  }
+  if (transceiver->GetType() == ConnectionType::kUsb &&
+      external_fd_mode_.load(std::memory_order_relaxed)) {
+    external_fd_mode_.store(false, std::memory_order_relaxed);
+    UpdateServerState();
   }
   connection_state_.store(DISCONNECTED, std::memory_order_relaxed);
   current_transceiver_ = nullptr;

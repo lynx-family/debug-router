@@ -129,11 +129,14 @@ void SocketServer::AcceptExternalFd(SocketType fd) {
     return;
   }
   LOGI("AcceptExternalFd: fd=" << fd);
-  auto client = std::make_shared<UsbClient>(fd);
+  if (temp_usb_client_) {
+    temp_usb_client_->Stop();
+  }
+  temp_usb_client_ = std::make_shared<UsbClient>(fd);
   std::shared_ptr<ClientListener> client_listener =
       std::make_shared<ClientListener>(shared_from_this());
-  client->Init();
-  client->StartUp(client_listener);
+  temp_usb_client_->Init();
+  temp_usb_client_->StartUp(client_listener);
 }
 
 void SocketServer::StartServer() { setEnableServer(true); }

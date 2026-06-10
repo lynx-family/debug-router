@@ -23,7 +23,7 @@ class SocketServerClient : public core::MessageTransceiver {
 
   void StartServer() override;
   void StopServer() override;
-  void AcceptExternalFd(int fd);
+  void AcceptExternalFd(SocketType fd);
 
  private:
   std::shared_ptr<debugrouter::socket_server::SocketServer> socket_server_;
