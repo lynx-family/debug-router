@@ -73,9 +73,6 @@ void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
           "SocketServerApi OnClose: curr client is null or not match, stop "
           "error client.");
       client->Stop();
-      if (auto listener = listener_.lock()) {
-        listener->OnStatusChanged(status, code, reason);
-      }
       return;
     }
     LOGI("SocketServerApi HandleOnCloseStatus: close curr client for OnClose.");
