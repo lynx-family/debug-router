@@ -18,10 +18,6 @@ function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-entry-"));
 }
 
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
-}
-
 describe("multiplexer daemon entry", function () {
   let tempDir;
 
@@ -47,6 +43,7 @@ describe("multiplexer daemon entry", function () {
         discoveryPath: "/tmp/daemon.json",
         daemonLockPath: "/tmp/daemon.lock",
         protocolVersion: 1,
+        minSupportedProtocolVersion: 1,
         controlPort: 0,
         heartbeatInterval: 1000,
         daemonVersion: undefined,
@@ -61,6 +58,7 @@ describe("multiplexer daemon entry", function () {
         "--discoveryPath=/tmp/daemon.json",
         "--daemonLockPath=/tmp/daemon.lock",
         "--protocolVersion=2",
+        "--minSupportedProtocolVersion=2",
         "--controlPort=9222",
         "--heartbeatInterval=200",
         "--daemonVersion=1.2.3",
@@ -69,6 +67,7 @@ describe("multiplexer daemon entry", function () {
         discoveryPath: "/tmp/daemon.json",
         daemonLockPath: "/tmp/daemon.lock",
         protocolVersion: 2,
+        minSupportedProtocolVersion: 2,
         controlPort: 9222,
         heartbeatInterval: 200,
         daemonVersion: "1.2.3",
@@ -115,22 +114,22 @@ describe("multiplexer daemon entry", function () {
     );
   });
 
-  it("creates a daemon with the entry host control port", async function () {
+  it("creates a daemon with entry host discovery fields", function () {
     const discoveryPath = path.join(tempDir, "daemon.json");
     const daemonLockPath = path.join(tempDir, "daemon.lock");
     const daemon = createMultiplexerDaemon({
       discoveryPath,
       daemonLockPath,
       protocolVersion: 1,
+      minSupportedProtocolVersion: 1,
       controlPort: 9333,
       heartbeatInterval: 100000,
     });
 
-    try {
-      await daemon.start();
-      assert.strictEqual(readJson(discoveryPath).controlPort, 9333);
-    } finally {
-      await daemon.stop();
-    }
+    const info = daemon.createDiscoveryInfo();
+    assert.strictEqual(info.controlPort, 9333);
+    assert.strictEqual(info.protocolVersion, 1);
+    assert.strictEqual(info.minSupportedProtocolVersion, 1);
+    assert.strictEqual(fs.existsSync(discoveryPath), false);
   });
 });

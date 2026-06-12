@@ -2,7 +2,11 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { MULTIPLEXER_PROTOCOL_VERSION, MultiplexerDiscoveryInfo } from "../protocol";
+import {
+  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
+  MULTIPLEXER_PROTOCOL_VERSION,
+  MultiplexerDiscoveryInfo,
+} from "../protocol";
 import { removeFileIfExists, writeJsonAtomic } from "../utils/atomic_file";
 import { FileLock } from "../utils/FileLock";
 
@@ -18,6 +22,7 @@ export type MultiplexerDaemonOption = {
   discoveryPath: string;
   daemonLockPath: string;
   protocolVersion?: number;
+  minSupportedProtocolVersion?: number;
   daemonVersion?: string;
   capabilities?: string[];
   host: MultiplexerDaemonHost;
@@ -124,6 +129,9 @@ export class MultiplexerDaemon {
       pid: process.pid,
       protocolVersion:
         this.option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
+      minSupportedProtocolVersion:
+        this.option.minSupportedProtocolVersion ??
+        MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
       controlPort,
       heartbeat: this.now(),
       startedAt,
@@ -169,10 +177,15 @@ export class MultiplexerDaemon {
   }
 
   private resolveControlPort(): number {
-    const controlPort =
-      this.host?.getControlPort?.() ?? 0;
-    if (!Number.isFinite(controlPort)) {
-      throw new Error(`Invalid multiplexer daemon control port: ${controlPort}`);
+    const controlPort = this.host?.getControlPort?.() ?? 0;
+    if (
+      !Number.isInteger(controlPort) ||
+      controlPort <= 0 ||
+      controlPort > 65535
+    ) {
+      throw new Error(
+        `Invalid multiplexer daemon control port: ${controlPort}`,
+      );
     }
 
     return controlPort;

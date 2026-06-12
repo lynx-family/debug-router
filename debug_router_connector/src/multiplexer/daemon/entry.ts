@@ -2,7 +2,11 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { MULTIPLEXER_PROTOCOL_VERSION } from "../protocol";
+import {
+  ControlRpcRequest,
+  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
+  MULTIPLEXER_PROTOCOL_VERSION,
+} from "../protocol";
 import { defaultLogger } from "../../utils/logger";
 import {
   DEFAULT_MULTIPLEXER_HEARTBEAT_INTERVAL,
@@ -10,11 +14,16 @@ import {
   MultiplexerDaemonHost,
   MultiplexerDaemonOption,
 } from "./MultiplexerDaemon";
+import {
+  MultiplexerControlHost,
+  MultiplexerControlServer,
+} from "./MultiplexerControlServer";
 
 export type MultiplexerDaemonEntryOption = {
   discoveryPath: string;
   daemonLockPath: string;
   protocolVersion: number;
+  minSupportedProtocolVersion: number;
   controlPort: number;
   heartbeatInterval: number;
   daemonVersion?: string;
@@ -30,6 +39,8 @@ const OPTION_ALIASES: Record<string, keyof MultiplexerDaemonEntryOption> = {
   daemonLockPath: "daemonLockPath",
   "protocol-version": "protocolVersion",
   protocolVersion: "protocolVersion",
+  "min-supported-protocol-version": "minSupportedProtocolVersion",
+  minSupportedProtocolVersion: "minSupportedProtocolVersion",
   "control-port": "controlPort",
   controlPort: "controlPort",
   "heartbeat-interval": "heartbeatInterval",
@@ -57,11 +68,12 @@ export async function startMultiplexerDaemonEntry(
 export function createMultiplexerDaemon(
   entryOption: MultiplexerDaemonEntryOption,
 ): MultiplexerDaemon {
-  const host = createEntryHost(entryOption.controlPort);
+  const host = createEntryHost(entryOption);
   const daemonOption: MultiplexerDaemonOption = {
     discoveryPath: entryOption.discoveryPath,
     daemonLockPath: entryOption.daemonLockPath,
     protocolVersion: entryOption.protocolVersion,
+    minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
     daemonVersion: entryOption.daemonVersion,
     capabilities: entryOption.capabilities,
     heartbeatInterval: entryOption.heartbeatInterval,
@@ -71,9 +83,7 @@ export function createMultiplexerDaemon(
   return new MultiplexerDaemon(daemonOption);
 }
 
-export function parseEntryOption(
-  argv: string[],
-): MultiplexerDaemonEntryOption {
+export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   const rawArgs = parseRawArgs(argv);
   const discoveryPath = getRequiredString(rawArgs, "discoveryPath");
   const daemonLockPath = getRequiredString(rawArgs, "daemonLockPath");
@@ -86,6 +96,11 @@ export function parseEntryOption(
       "protocolVersion",
       MULTIPLEXER_PROTOCOL_VERSION,
     ),
+    minSupportedProtocolVersion: getOptionalNumber(
+      rawArgs,
+      "minSupportedProtocolVersion",
+      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
+    ),
     controlPort: getOptionalNumber(rawArgs, "controlPort", 0),
     heartbeatInterval: getOptionalNumber(
       rawArgs,
@@ -97,12 +112,55 @@ export function parseEntryOption(
   };
 }
 
-function createEntryHost(controlPort: number): MultiplexerDaemonHost {
-  return {
-    start: () => {},
-    stop: () => {},
-    getControlPort: () => controlPort,
-  };
+function createEntryHost(
+  entryOption: MultiplexerDaemonEntryOption,
+): MultiplexerDaemonHost {
+  return new MultiplexerEntryControlHost(entryOption);
+}
+
+class MultiplexerEntryControlHost
+  implements MultiplexerDaemonHost, MultiplexerControlHost {
+  private controlServer: MultiplexerControlServer | null = null;
+
+  constructor(private readonly entryOption: MultiplexerDaemonEntryOption) {}
+
+  async start(): Promise<void> {
+    if (this.controlServer) {
+      return;
+    }
+
+    const controlServer = new MultiplexerControlServer({
+      host: this,
+      controlPort: this.entryOption.controlPort,
+      protocolVersion: this.entryOption.protocolVersion,
+      minSupportedProtocolVersion: this.entryOption.minSupportedProtocolVersion,
+      daemonVersion: this.entryOption.daemonVersion,
+      capabilities: this.entryOption.capabilities,
+    });
+
+    await controlServer.start();
+    this.controlServer = controlServer;
+  }
+
+  async stop(): Promise<void> {
+    const controlServer = this.controlServer;
+    this.controlServer = null;
+
+    if (controlServer) {
+      await controlServer.stop();
+    }
+  }
+
+  getControlPort(): number {
+    return this.controlServer?.controlPort ?? this.entryOption.controlPort;
+  }
+
+  handleControlRpc(_controlId: number, message: ControlRpcRequest): never {
+    throw {
+      code: "multiplexer-host-not-ready",
+      message: `Multiplexer host has not implemented control RPC: ${message.method}`,
+    };
+  }
 }
 
 function registerProcessCleanup(daemon: MultiplexerDaemon): void {
@@ -117,7 +175,9 @@ function registerProcessCleanup(daemon: MultiplexerDaemon): void {
     try {
       await daemon.stop();
     } catch (error: any) {
-      defaultLogger.error(`Multiplexer daemon cleanup failed: ${error?.message}`);
+      defaultLogger.error(
+        `Multiplexer daemon cleanup failed: ${error?.message}`,
+      );
       if (exitCode === 0) {
         process.exitCode = 1;
       }
@@ -134,7 +194,9 @@ function registerProcessCleanup(daemon: MultiplexerDaemon): void {
     void cleanup(143).finally(() => process.exit(143));
   });
   process.once("uncaughtException", (error) => {
-    defaultLogger.error(`Multiplexer daemon uncaught exception: ${error.message}`);
+    defaultLogger.error(
+      `Multiplexer daemon uncaught exception: ${error.message}`,
+    );
     void cleanup(1).finally(() => process.exit(1));
   });
   process.once("unhandledRejection", (reason) => {
@@ -230,7 +292,9 @@ function parseCapabilities(value?: string): string[] | undefined {
 
 if (require.main === module) {
   startMultiplexerDaemonEntry().catch((error: any) => {
-    defaultLogger.error(`Multiplexer daemon failed to start: ${error?.message}`);
+    defaultLogger.error(
+      `Multiplexer daemon failed to start: ${error?.message}`,
+    );
     process.exit(1);
   });
 }

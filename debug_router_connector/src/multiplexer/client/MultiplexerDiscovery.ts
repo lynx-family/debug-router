@@ -4,13 +4,11 @@
 
 import fs from "fs";
 import {
+  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
   MultiplexerDiscoveryInfo,
 } from "../protocol/discovery";
-import {
-  isMultiplexerDiscoveryInfo,
-  isRecord,
-} from "../protocol/validation";
+import { isMultiplexerDiscoveryInfo, isRecord } from "../protocol/validation";
 
 export type MultiplexerDiscoveryOption = {
   discoveryPath: string;
@@ -31,6 +29,13 @@ export type MultiplexerProtocolCompatibility =
       reason: "daemon-older-than-connector";
       daemonProtocolVersion: number;
       connectorProtocolVersion: number;
+    }
+  | {
+      status: "incompatible";
+      reason: "connector-older-than-daemon-min-supported";
+      daemonProtocolVersion: number;
+      daemonMinSupportedProtocolVersion: number;
+      connectorProtocolVersion: number;
     };
 
 export type MultiplexerDiscoveryValidation =
@@ -48,6 +53,15 @@ export type MultiplexerDiscoveryValidation =
       compatibility: Extract<
         MultiplexerProtocolCompatibility,
         { status: "replace-required" }
+      >;
+    }
+  | {
+      status: "unusable";
+      reason: "connector-protocol-too-old";
+      info: MultiplexerDiscoveryInfo;
+      compatibility: Extract<
+        MultiplexerProtocolCompatibility,
+        { status: "incompatible" }
       >;
     }
   | {
@@ -114,6 +128,20 @@ export class MultiplexerDiscovery {
   compareProtocolVersion(
     info: MultiplexerDiscoveryInfo,
   ): MultiplexerProtocolCompatibility {
+    const daemonMinSupportedProtocolVersion =
+      info.minSupportedProtocolVersion ??
+      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
+
+    if (this.localProtocolVersion < daemonMinSupportedProtocolVersion) {
+      return {
+        status: "incompatible",
+        reason: "connector-older-than-daemon-min-supported",
+        daemonProtocolVersion: info.protocolVersion,
+        daemonMinSupportedProtocolVersion,
+        connectorProtocolVersion: this.localProtocolVersion,
+      };
+    }
+
     if (info.protocolVersion < this.localProtocolVersion) {
       return {
         status: "replace-required",
@@ -179,6 +207,15 @@ export class MultiplexerDiscovery {
     }
 
     const compatibility = this.compareProtocolVersion(value);
+    if (compatibility.status === "incompatible") {
+      return {
+        status: "unusable",
+        reason: "connector-protocol-too-old",
+        info: value,
+        compatibility,
+      };
+    }
+
     if (compatibility.status === "replace-required") {
       return {
         status: "replace-required",

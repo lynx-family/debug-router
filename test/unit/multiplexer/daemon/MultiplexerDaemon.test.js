@@ -79,6 +79,7 @@ describe("MultiplexerDaemon", function () {
       discoveryPath,
       daemonLockPath,
       protocolVersion: 1,
+      minSupportedProtocolVersion: 1,
       daemonVersion: "0.0.1",
       capabilities: ["daemon"],
       heartbeatInterval: 100000,
@@ -102,6 +103,7 @@ describe("MultiplexerDaemon", function () {
     assert.deepStrictEqual(readJson(discoveryPath), {
       pid: process.pid,
       protocolVersion: 1,
+      minSupportedProtocolVersion: 1,
       controlPort: 9100,
       heartbeat: 1000,
       startedAt: 1000,
@@ -132,6 +134,7 @@ describe("MultiplexerDaemon", function () {
     assert.deepStrictEqual(readJson(discoveryPath), {
       pid: process.pid,
       protocolVersion: 1,
+      minSupportedProtocolVersion: 1,
       controlPort: 9100,
       heartbeat: 1500,
       startedAt: 1000,
@@ -201,7 +204,10 @@ describe("MultiplexerDaemon", function () {
     const { host } = createHost({ controlPort: Number.NaN });
     createDaemon(host);
 
-    await assert.rejects(() => daemon.start(), /Invalid multiplexer daemon control port/);
+    await assert.rejects(
+      () => daemon.start(),
+      /Invalid multiplexer daemon control port/
+    );
 
     assert.strictEqual(fs.existsSync(discoveryPath), false);
     assert.strictEqual(fs.existsSync(daemonLockPath), false);

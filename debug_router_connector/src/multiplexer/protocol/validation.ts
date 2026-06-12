@@ -164,6 +164,7 @@ export function isMultiplexerDiscoveryInfo(
     isRecord(value) &&
     isNumber(value.pid) &&
     isNumber(value.protocolVersion) &&
+    isOptional(value.minSupportedProtocolVersion, isNumber) &&
     isNumber(value.controlPort) &&
     isNumber(value.heartbeat) &&
     isOptional(value.startedAt, isNumber) &&
@@ -180,6 +181,7 @@ export function isMultiplexerHealthResponse(
     value.ok === true &&
     isNumber(value.pid) &&
     isNumber(value.protocolVersion) &&
+    isOptional(value.minSupportedProtocolVersion, isNumber) &&
     isNumber(value.heartbeat) &&
     isOptional(value.daemonVersion, isString) &&
     isOptional(value.capabilities, isStringArray)

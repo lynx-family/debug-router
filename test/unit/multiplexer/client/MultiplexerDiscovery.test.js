@@ -141,7 +141,10 @@ describe("MultiplexerDiscovery", function () {
   });
 
   it("accepts a newer daemon protocol as compatible", function () {
-    const info = createInfo({ protocolVersion: 2 });
+    const info = createInfo({
+      protocolVersion: 2,
+      minSupportedProtocolVersion: 1,
+    });
     writeJson(discoveryPath, info);
 
     assert.deepStrictEqual(discovery.validateDiscovery(), {
@@ -154,6 +157,29 @@ describe("MultiplexerDiscovery", function () {
         connectorProtocolVersion: 1,
       },
     });
+  });
+
+  it("rejects a newer daemon when connector protocol is too old", function () {
+    const info = createInfo({
+      protocolVersion: 2,
+      minSupportedProtocolVersion: 2,
+    });
+    writeJson(discoveryPath, info);
+
+    assert.deepStrictEqual(discovery.validateDiscovery(), {
+      status: "unusable",
+      reason: "connector-protocol-too-old",
+      info,
+      compatibility: {
+        status: "incompatible",
+        reason: "connector-older-than-daemon-min-supported",
+        daemonProtocolVersion: 2,
+        daemonMinSupportedProtocolVersion: 2,
+        connectorProtocolVersion: 1,
+      },
+    });
+    assert.strictEqual(discovery.getFreshDiscovery(), null);
+    assert.strictEqual(discovery.getReusableDiscovery(), null);
   });
 
   it("requires replacement for an older daemon protocol", function () {

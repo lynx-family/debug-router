@@ -264,6 +264,7 @@ describe("multiplexer protocol validation", function () {
       isMultiplexerDiscoveryInfo({
         pid: 123,
         protocolVersion: 1,
+        minSupportedProtocolVersion: 1,
         controlPort: 10000,
         heartbeat: Date.now(),
         startedAt: Date.now(),
@@ -295,6 +296,16 @@ describe("multiplexer protocol validation", function () {
       isMultiplexerDiscoveryInfo({
         pid: 123,
         protocolVersion: 1,
+        minSupportedProtocolVersion: "1",
+        controlPort: 10000,
+        heartbeat: Date.now(),
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerDiscoveryInfo({
+        pid: 123,
+        protocolVersion: 1,
         controlPort: 10000,
         heartbeat: Date.now(),
         capabilities: ["control", 1],
@@ -307,6 +318,7 @@ describe("multiplexer protocol validation", function () {
         ok: true,
         pid: 123,
         protocolVersion: 1,
+        minSupportedProtocolVersion: 1,
         heartbeat: Date.now(),
         daemonVersion: "0.0.1",
       }),
@@ -317,6 +329,16 @@ describe("multiplexer protocol validation", function () {
         ok: false,
         pid: 123,
         protocolVersion: 1,
+        heartbeat: Date.now(),
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerHealthResponse({
+        ok: true,
+        pid: 123,
+        protocolVersion: 1,
+        minSupportedProtocolVersion: "1",
         heartbeat: Date.now(),
       }),
       false
