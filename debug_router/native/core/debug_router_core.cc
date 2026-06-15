@@ -335,17 +335,16 @@ int32_t DebugRouterCore::GetUSBPort() {
 void DebugRouterCore::AcceptExternalFd(int fd) {
 #if ENABLE_MESSAGE_IMPL
   external_fd_mode_.store(true, std::memory_order_relaxed);
-  UpdateServerState();
   for (size_t i = 0; i < kTransceiverCount; ++i) {
-    auto socket_server_client =
-        std::dynamic_pointer_cast<net::SocketServerClient>(
-            message_transceivers_[i]);
-    if (socket_server_client) {
-      socket_server_client->AcceptExternalFd(
-          static_cast<socket_server::SocketType>(fd));
-      break;
-    }
+    message_transceivers_[i]->StopServer();
   }
+  if (!external_fd_transceiver_) {
+    external_fd_transceiver_ = std::make_shared<net::ExternalFdTransceiver>();
+    external_fd_transceiver_->Init();
+    external_fd_transceiver_->SetDelegate(this);
+  }
+  external_fd_transceiver_->AcceptFd(
+      static_cast<socket_server::SocketType>(fd));
 #endif
 }
 

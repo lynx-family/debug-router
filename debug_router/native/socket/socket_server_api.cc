@@ -123,22 +123,6 @@ void SocketServer::setEnableServer(bool enable) {
   }
 }
 
-void SocketServer::AcceptExternalFd(SocketType fd) {
-  if (fd == kInvalidSocket) {
-    LOGE("AcceptExternalFd: invalid fd");
-    return;
-  }
-  LOGI("AcceptExternalFd: fd=" << fd);
-  if (temp_usb_client_) {
-    temp_usb_client_->Stop();
-  }
-  temp_usb_client_ = std::make_shared<UsbClient>(fd);
-  std::shared_ptr<ClientListener> client_listener =
-      std::make_shared<ClientListener>(shared_from_this());
-  temp_usb_client_->Init();
-  temp_usb_client_->StartUp(client_listener);
-}
-
 void SocketServer::StartServer() { setEnableServer(true); }
 
 void SocketServer::StopServer() {

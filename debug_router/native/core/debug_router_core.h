@@ -22,6 +22,7 @@
 #include "debug_router/native/core/debug_router_state_listener.h"
 #include "debug_router/native/core/message_transceiver.h"
 #include "debug_router/native/core/native_slot.h"
+#include "debug_router/native/net/external_fd_transceiver.h"
 #include "debug_router/native/report/debug_router_native_report.h"
 
 namespace debugrouter {
@@ -213,6 +214,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   std::atomic<bool> enable_all_sessions_{false};
   std::atomic<bool> debug_channel_enabled_{false};
   std::atomic<bool> external_fd_mode_{false};
+  std::shared_ptr<net::ExternalFdTransceiver> external_fd_transceiver_;
   std::unordered_set<int32_t> enabled_session_ids_;
   std::shared_mutex enabled_sessions_mutex_;
 };
