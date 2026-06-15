@@ -332,6 +332,22 @@ int32_t DebugRouterCore::GetUSBPort() {
   return usb_port_.load(std::memory_order_relaxed);
 }
 
+void DebugRouterCore::AcceptExternalFd(int fd) {
+#if ENABLE_MESSAGE_IMPL
+  external_fd_mode_.store(true, std::memory_order_relaxed);
+  for (size_t i = 0; i < kTransceiverCount; ++i) {
+    message_transceivers_[i]->StopServer();
+  }
+  if (!external_fd_transceiver_) {
+    external_fd_transceiver_ = std::make_shared<net::ExternalFdTransceiver>();
+    external_fd_transceiver_->Init();
+    external_fd_transceiver_->SetDelegate(this);
+  }
+  external_fd_transceiver_->AcceptFd(
+      static_cast<socket_server::SocketType>(fd));
+#endif
+}
+
 void DebugRouterCore::Pull(int32_t session_id_) {
   LOGI("pull session: " << session_id_);
   bool removed_enabled_session = false;
@@ -446,6 +462,11 @@ void DebugRouterCore::OnClosed(
   if (transceiver != current_transceiver_ ||
       connection_state_.load(std::memory_order_relaxed) == DISCONNECTED) {
     return;
+  }
+  if (transceiver->GetType() == ConnectionType::kUsb &&
+      external_fd_mode_.load(std::memory_order_relaxed)) {
+    external_fd_mode_.store(false, std::memory_order_relaxed);
+    UpdateServerState();
   }
   connection_state_.store(DISCONNECTED, std::memory_order_relaxed);
   current_transceiver_ = nullptr;
@@ -800,6 +821,9 @@ std::string DebugRouterCore::GetConnectionStateMsg(ConnectionState state) {
 }
 
 bool DebugRouterCore::ShouldServerRun() {
+  if (external_fd_mode_.load(std::memory_order_relaxed)) {
+    return false;
+  }
   if (enable_all_sessions_.load(std::memory_order_relaxed) ||
       debug_channel_enabled_.load(std::memory_order_relaxed)) {
     return true;
