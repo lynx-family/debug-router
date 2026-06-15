@@ -50,6 +50,9 @@ export type ControlRpcMethod =
   | "connectDevices"
   | "getDevices"
   | "connectUsbClients"
+  | "startWatchClient"
+  | "stopWatchClient"
+  | "disconnectDevice"
   | "startWSServer"
   | "startWatchAllClients"
   | "sendMessageToWeb"
@@ -74,6 +77,15 @@ export type ControlRpcParams = {
     timeout?: number;
     waitTimeout?: boolean;
     clientName?: string | null;
+  };
+  startWatchClient: {
+    deviceId: string;
+  };
+  stopWatchClient: {
+    deviceId: string;
+  };
+  disconnectDevice: {
+    deviceId: string;
   };
   startWSServer: Record<string, never>;
   startWatchAllClients: {
@@ -111,6 +123,9 @@ export type ControlRpcResult = {
   connectDevices: DeviceSnapshot[];
   getDevices: DeviceSnapshot[];
   connectUsbClients: ClientSnapshot[];
+  startWatchClient: void;
+  stopWatchClient: void;
+  disconnectDevice: void;
   startWSServer: void;
   startWatchAllClients: void;
   sendMessageToWeb: void;

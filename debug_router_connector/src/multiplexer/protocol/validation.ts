@@ -27,6 +27,9 @@ const CONTROL_RPC_METHODS: ControlRpcMethod[] = [
   "connectDevices",
   "getDevices",
   "connectUsbClients",
+  "startWatchClient",
+  "stopWatchClient",
+  "disconnectDevice",
   "startWSServer",
   "startWatchAllClients",
   "sendMessageToWeb",
@@ -292,6 +295,10 @@ function isControlRpcParams(
         isOptional(params.waitTimeout, isBoolean) &&
         isOptionalStringOrNull(params.clientName)
       );
+    case "startWatchClient":
+    case "stopWatchClient":
+    case "disconnectDevice":
+      return isString(params.deviceId);
     case "startWSServer":
       return true;
     case "startWatchAllClients":
@@ -351,6 +358,9 @@ function isControlRpcResult(
       return isResponseMessage(result);
     case "startWSServer":
     case "startWatchAllClients":
+    case "startWatchClient":
+    case "stopWatchClient":
+    case "disconnectDevice":
     case "sendMessageToWeb":
     case "sendMessageToApp":
     case "sendMessage":

@@ -3,7 +3,6 @@
 // LICENSE file in the root directory of this source tree.
 
 import {
-  ControlRpcRequest,
   MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
 } from "../protocol";
@@ -14,10 +13,7 @@ import {
   MultiplexerDaemonHost,
   MultiplexerDaemonOption,
 } from "./MultiplexerDaemon";
-import {
-  MultiplexerControlHost,
-  MultiplexerControlServer,
-} from "./MultiplexerControlServer";
+import { MultiplexerHost } from "./MultiplexerHost";
 
 export type MultiplexerDaemonEntryOption = {
   discoveryPath: string;
@@ -115,52 +111,13 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
 function createEntryHost(
   entryOption: MultiplexerDaemonEntryOption,
 ): MultiplexerDaemonHost {
-  return new MultiplexerEntryControlHost(entryOption);
-}
-
-class MultiplexerEntryControlHost
-  implements MultiplexerDaemonHost, MultiplexerControlHost {
-  private controlServer: MultiplexerControlServer | null = null;
-
-  constructor(private readonly entryOption: MultiplexerDaemonEntryOption) {}
-
-  async start(): Promise<void> {
-    if (this.controlServer) {
-      return;
-    }
-
-    const controlServer = new MultiplexerControlServer({
-      host: this,
-      controlPort: this.entryOption.controlPort,
-      protocolVersion: this.entryOption.protocolVersion,
-      minSupportedProtocolVersion: this.entryOption.minSupportedProtocolVersion,
-      daemonVersion: this.entryOption.daemonVersion,
-      capabilities: this.entryOption.capabilities,
-    });
-
-    await controlServer.start();
-    this.controlServer = controlServer;
-  }
-
-  async stop(): Promise<void> {
-    const controlServer = this.controlServer;
-    this.controlServer = null;
-
-    if (controlServer) {
-      await controlServer.stop();
-    }
-  }
-
-  getControlPort(): number {
-    return this.controlServer?.controlPort ?? this.entryOption.controlPort;
-  }
-
-  handleControlRpc(_controlId: number, message: ControlRpcRequest): never {
-    throw {
-      code: "multiplexer-host-not-ready",
-      message: `Multiplexer host has not implemented control RPC: ${message.method}`,
-    };
-  }
+  return new MultiplexerHost({
+    controlPort: entryOption.controlPort,
+    protocolVersion: entryOption.protocolVersion,
+    minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
+    daemonVersion: entryOption.daemonVersion,
+    capabilities: entryOption.capabilities,
+  });
 }
 
 function registerProcessCleanup(daemon: MultiplexerDaemon): void {

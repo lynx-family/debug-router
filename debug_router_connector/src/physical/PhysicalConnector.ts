@@ -74,6 +74,7 @@ export class PhysicalConnector {
   private enableHarmony: boolean;
   private enableDesktop: boolean;
   private readonly enableNetworkDevice: boolean;
+  private autoListenClients = true;
   public readonly traceRecorder: ConnectionTraceRecorder | null = null;
   private readonly networkDeviceOpt:
     | {
@@ -167,6 +168,16 @@ export class PhysicalConnector {
       }
     }
   }
+  
+  startWatchClient(device: BaseDevice) {
+    if (device instanceof AndroidDevice) {
+        (device as AndroidDevice).forwards().then(() => {
+          device.startWatchClient();
+        });
+      } else {
+        device.startWatchClient();
+      }
+  }
 
   startWatchAllClients(force: boolean = true) {
     defaultLogger.debug("PhysicalConnector startWatchAllClients");
@@ -191,6 +202,7 @@ export class PhysicalConnector {
     serial: string | null = null,
     isAutoListenClients: boolean = true,
   ): Promise<BaseDevice[]> {
+    this.autoListenClients = isAutoListenClients;
     await this.startDeviceListeners();
     return this.getDevices(timeout, serial);
   }
@@ -224,7 +236,7 @@ export class PhysicalConnector {
             clientName,
           );
         } else {
-          clients = await this.waitDeviceUsbCliens(deviceId, timeout);
+          clients = await this.waitDeviceUsbClients(deviceId, timeout);
         }
         device.stopWatchClient();
         const clients_infos = clients.map((client) => {
@@ -296,7 +308,7 @@ export class PhysicalConnector {
     this.events.emit(event, payload);
   }
 
-  registerDevice(device: BaseDevice, shouldStartWatchClient: boolean = true) {
+  registerDevice(device: BaseDevice, shouldStartWatchClient?: boolean) {
     const { serial } = device.info;
     const existing = this.devices.get(serial);
     if (existing) {
@@ -310,7 +322,9 @@ export class PhysicalConnector {
       os: device.info.os,
       title: device.info.title,
     });
-    if (!this.manualConnect && shouldStartWatchClient) {
+    const shouldWatchClient =
+      shouldStartWatchClient ?? this.autoListenClients;
+    if (!this.manualConnect && shouldWatchClient) {
       device.startWatchClient();
     }
     this.emit("device-connected", device);
@@ -499,37 +513,44 @@ export class PhysicalConnector {
     return false;
   }
 
-  private waitDeviceUsbCliens(
+  waitDeviceUsbClients(
     deviceId: string,
     timeout: number = -1,
   ): Promise<UsbClient[]> {
     return new Promise((resolve) => {
       if (!this.devices.has(deviceId)) {
         resolve([]);
+        return; 
       }
-      if (timeout < 0) {
-        let clients = Array.from(this.usbClients.values());
-        clients = clients.filter((client) => {
-          return client.deviceId() === deviceId;
-        });
-        resolve(Array.from(clients.values()));
-      } else {
-        const handle = (client: UsbClient) => {
-          if (client.deviceId() === deviceId) {
-            resolve([client]);
-          }
-        };
-        this.on("client-connected", handle);
-        setTimeout(() => {
-          let clients = Array.from(this.usbClients.values());
-          clients = clients.filter((client) => {
-            return client.deviceId() === deviceId;
-          });
-          this.off("client-connected", handle);
-          resolve(Array.from(clients.values()));
-        }, timeout);
+      const currentClients = this.findUsbClientsByDeviceId(deviceId);
+      if (timeout < 0 || currentClients.length > 0) {
+        resolve(currentClients);
+        return; 
       }
+
+      const handle = (client: UsbClient) => {
+        if (client.deviceId() === deviceId) {
+          cleanup();
+          resolve([client]);
+        }
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.off("client-connected", handle);
+      };
+
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve(this.findUsbClientsByDeviceId(deviceId));
+      }, timeout);
+
+      this.on("client-connected", handle);
     });
+  }
+
+  private findUsbClientsByDeviceId(deviceId: string): UsbClient[] {
+    return this.getAllUsbClients()
+      .filter((client) => client.deviceId() === deviceId);
   }
 
   handleUsbMessage(id: number, message: string) {
