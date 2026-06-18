@@ -3,80 +3,91 @@
 // LICENSE file in the root directory of this source tree.
 
 import { EventEmitter } from "events";
-import { UsbClient } from "../usb/Client";
-import { BaseDevice } from "../device/BaseDevice";
-import { DeviceManager } from "../device/DeviceManager";
-import { DebugerRouterDriverEvents } from "../utils/type";
-import { WebSocketController } from "../websocket/WebSocketServer";
-import detectPort from "detect-port";
-import { address } from "ip";
-import { defaultLogger } from "../utils/logger";
+import fs from "fs";
+import path from "path";
 import {
   getDriverReportService,
   DriverReportService,
   setDriverReportService,
 } from "../report/interface/DriverReportService";
-import { Client } from "./Client";
-import { WebSocketClient } from "../websocket/WebSocketConnection";
-import { MultiOpenCallback, MultiOpenStatus } from "./MultiOpenCallBack";
-import * as fslock from "../utils/file_lock";
-import { DriverClient } from "./DriverClient";
-import { createConnectionTraceRecorder } from "../trace/ConnectionTraceRecorder";
-import type {
+import {
   ConnectionTraceNode,
   ConnectionTraceRecorder,
+  createConnectionTraceRecorder,
 } from "../trace/ConnectionTraceRecorder";
-import { LegacyMultiOpenGuard } from "./LegacyMultiOpenGuard";
+import { DeviceManager } from "../device/DeviceManager";
+import type { PhysicalConnectorOption } from "../physical/PhysicalConnector";
+import { defaultLogger } from "../utils/logger";
+import { DebugerRouterDriverEvents } from "../utils/type";
+import { Client } from "./Client";
+import { DriverClient } from "./DriverClient";
+import { MultiOpenCallback } from "./MultiOpenCallBack";
 import {
-  PhysicalConnectorOption,
-  PhysicalConnector,
-} from "../physical/PhysicalConnector";
+  ControlEvent,
+  DeviceSnapshot,
+  ClientSnapshot,
+  Snapshot,
+  WebSocketClientSnapshot,
+} from "../multiplexer/protocol";
+import { MultiplexerDaemonClient } from "../multiplexer/client/MultiplexerDaemonClient";
+import {
+  DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT,
+  MultiplexerDaemonManager,
+} from "../multiplexer/client/MultiplexerDaemonManager";
+import { MultiplexerDiscovery } from "../multiplexer/client/MultiplexerDiscovery";
+import { MultiplexerDevice, MultiplexerUsbClient } from "../multiplexer/client";
+import { createMultiplexerPaths } from "../multiplexer/utils/paths";
 
-export type devOption = PhysicalConnectorOption & {
-  enableMultiplexer?: boolean;
+const DEFAULT_DEV_SERVE_PORT = 19783;
+const DEFAULT_MULTIPLEXER_DAEMON_IDLE_TIMEOUT = 600000;
+const DEFAULT_MULTIPLEXER_STALE_TIMEOUT = 5000;
+
+export type DebugRouterConnectorOption = PhysicalConnectorOption & {
   multiplexerDaemonIdleTimeout?: number;
-  enableWebSocket?: boolean;
+  multiplexerStartupTimeout?: number;
+  multiplexerStaleTimeout?: number;
+  multiplexerRpcTimeout?: number;
+  multiplexerRootDir?: string;
+  multiplexerDataDir?: string;
+  multiplexerDaemonEntry?: string;
   websocketOption?: {
     port?: number;
     roomId?: string;
   };
 };
 
-const DEFAULT_DEV_SERVE_PORT = 19783;
+export type devOption = DebugRouterConnectorOption;
 
 export class DebugRouterConnector {
-  private enableMultiplexer: boolean;
-  private multiplexerDaemonIdleTimeout: number;
-  private physicalConnector: PhysicalConnector;
-  private readonly events = new EventEmitter();
-  reportService: DriverReportService | null = null;
-  readonly devices: Map<string, BaseDevice> | undefined = undefined;
-  readonly usbClients: Map<number, UsbClient> | undefined = undefined;
+  readonly devices: Map<string, MultiplexerDevice> = new Map();
+  readonly usbClients: Map<number, MultiplexerUsbClient> = new Map();
   readonly enableWebSocket;
-  private selectedClient: UsbClient | undefined;
-  private readonly driverClient: DriverClient;
-  public readonly traceRecorder: ConnectionTraceRecorder | null = null;
-  private readonly networkDeviceOpt:
-    | {
-        ip: string;
-        port: number[];
-      }
-    | undefined;
-  readonly adbOption: any;
-  readonly hdcOption: any;
-  readonly usbConnectOpt: {
-    retryTime: number;
-  };
-  private closed: boolean = false;
-  wssPort: number = DEFAULT_DEV_SERVE_PORT;
+  reportService: DriverReportService | null = null;
+  readonly traceRecorder: ConnectionTraceRecorder | null = null;
+  wssPort: number;
   wssHost: string | undefined;
   roomId: string | undefined;
-  wss: WebSocketController | null = null;
-  readonly legacyMultiOpenGuard: LegacyMultiOpenGuard;
+  wss: null = null;
+
+  private readonly events = new EventEmitter();
+  private readonly daemonClient: MultiplexerDaemonClient;
+  private readonly driverClient: DriverClient;
+  private selectedClient: MultiplexerUsbClient | undefined;
+  private readonly websocketAppClients: Map<
+    number,
+    WebSocketClientSnapshot
+  > = new Map();
+  private readonly websocketWebClients: Map<
+    number,
+    WebSocketClientSnapshot
+  > = new Map();
+  private nextClientId = 0;
+  private closed = false;
+  private webSocketServerStarted = false;
+  private unsubscribeDaemonEvents: (() => void) | undefined;
+
   constructor(
-    option: devOption = {
-      enableMultiplexer: false,
-      multiplexerDaemonIdleTimeout: 3000000,
+    option: DebugRouterConnectorOption = {
       manualConnect: false,
       enableWebSocket: false, // deprecated
       enableAndroid: true,
@@ -88,146 +99,142 @@ export class DebugRouterConnector {
       reportService: null,
     },
   ) {
-    this.enableMultiplexer = option.enableMultiplexer ?? false;
-    this.multiplexerDaemonIdleTimeout =
-      option.multiplexerDaemonIdleTimeout ?? 3000000;
     setDriverReportService(option.reportService ?? null);
     getDriverReportService()?.init(option.manualConnect);
-
-    /* if (this.enableMultiplexer) {
-      // TODO enableMultiplexer is not supported now
-      return ;
-    } */
-
-    this.legacyMultiOpenGuard = new LegacyMultiOpenGuard(() =>
-      this.disableAllClients(),
+    const msg = "DebugRouterOption:" + JSON.stringify(option);
+    defaultLogger.debug(msg);
+    getDriverReportService()?.report(
+      "DebugRouterConnectorInit",
+      {},
+      { option: msg },
     );
-    this.legacyMultiOpenGuard.prepareDriverDataDir();
-    this.legacyMultiOpenGuard.startMonitorMultiOpen();
+    if (!option.manualConnect) {
+      getDriverReportService()?.report(
+        "DriverInitOfNoManualConnect",
+        {},
+        { option: msg },
+      );
+    }
+
     this.traceRecorder = createConnectionTraceRecorder(
       option.connectionTrace,
       process.env.DriverConnectionTracePath,
     );
 
-    this.physicalConnector = new PhysicalConnector({
-      ...option,
-      traceRecorder: this.traceRecorder,
-      reportService: option.reportService,
-    });
-    this.devices = this.physicalConnector.devices;
-    this.usbClients = this.physicalConnector.usbClients;
-    this.selectedClient = this.physicalConnector.selectedClient;
-    this.adbOption = this.physicalConnector.adbOption;
-    this.hdcOption = this.physicalConnector.hdcOption;
-    this.usbConnectOpt = this.physicalConnector.usbConnectOpt;
-    this.bindPhysicalConnectorEvents();
-
     this.enableWebSocket = option.enableWebSocket;
+    this.wssPort = option.websocketOption?.port ?? DEFAULT_DEV_SERVE_PORT;
     this.roomId = option.websocketOption?.roomId;
+
+    const paths = createMultiplexerPaths({
+      rootDir: option.multiplexerRootDir,
+      dataDir: option.multiplexerDataDir,
+    });
+    const staleTimeout =
+      option.multiplexerStaleTimeout ?? DEFAULT_MULTIPLEXER_STALE_TIMEOUT;
+    const discovery = new MultiplexerDiscovery({
+      discoveryPath: paths.discoveryPath,
+      staleTimeout,
+    });
+    const daemonManager = new MultiplexerDaemonManager({
+      discovery,
+      spawnLockPath: paths.spawnLockPath,
+      daemonLockPath: paths.daemonLockPath,
+      daemonEntry: option.multiplexerDaemonEntry ?? resolveDaemonEntryPath(),
+      startupTimeout:
+        option.multiplexerStartupTimeout ?? DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT,
+      staleTimeout,
+      multiplexerDaemonIdleTimeout:
+        option.multiplexerDaemonIdleTimeout ??
+        DEFAULT_MULTIPLEXER_DAEMON_IDLE_TIMEOUT,
+      enableWebSocket: option.enableWebSocket,
+      websocketOption: option.websocketOption,
+    });
+
+    this.daemonClient = new MultiplexerDaemonClient({
+      daemonManager,
+      rpcTimeout: option.multiplexerRpcTimeout,
+    });
+    this.unsubscribeDaemonEvents = this.daemonClient.subscribe((event) =>
+      this.applyHostEvent(event),
+    );
+
     this.driverClient = new DriverClient(this.createClientId());
+
     if (!option.manualConnect) {
-      this.connectDevices();
+      void this.connectDevices();
     }
   }
 
-  private bindPhysicalConnectorEvents() {
-    this.physicalConnector.on("device-connected", (device) => {
-      this.emit("device-connected", device);
-    });
-    this.physicalConnector.on("device-disconnected", (device) => {
-      this.emit("device-disconnected", device);
-    });
-    this.physicalConnector.on("client-connected", (client) => {
-      this.emit("client-connected", client);
-    });
-    this.physicalConnector.on("client-disconnected", (id) => {
-      this.emit("client-disconnected", id);
-    });
-    this.physicalConnector.on("app-client-connected", (client) => {
-      this.emit("app-client-connected", client);
-      this.handleUsbClienChange();
-    });
-    this.physicalConnector.on("app-client-disconnected", (id) => {
-      this.emit("app-client-disconnected", id);
-      this.handleUsbClienChange();
-    });
-    this.physicalConnector.on("usb-client-message", ({ id, message }) => {
-      this.emit("usb-client-message", { id, message });
-      this.handleUsbMessage(id, message);
-    });
+  setMultiOpenCallback(_callback: MultiOpenCallback): void {
+    defaultLogger.warn(
+      "setMultiOpenCallback is ignored by the Multiplexer-only DebugRouterConnector.",
+    );
   }
 
-  setMultiOpenCallback(callback: MultiOpenCallback) {
-    this.legacyMultiOpenGuard.setMultiOpenCallback(callback);
+  disableAllClients(): void {
+    this.selectedClient = undefined;
+    defaultLogger.warn(
+      "disableAllClients is ignored by the Multiplexer-only DebugRouterConnector; device and client ownership is shared by the daemon.",
+    );
   }
 
-  disableAllClients() {
-    this.physicalConnector.disableAllClients();
-    this.getAllWebsocketAppClients().forEach((client) => {
-      client.close();
-    });
-  }
-
-  startWatchAllClients(force: boolean = true) {
-    defaultLogger.debug("DebugRouterConnector startWatchAllClients");
-
-    /* if(this.enableMultiplexer) {
-      // TODO enableMultiplexer is not supported now
-      return;
-    } */
-
-    if (
-      !force &&
-      this.legacyMultiOpenGuard.currentStatus === MultiOpenStatus.attached
-    ) {
-      defaultLogger.debug("startWatchAllClients: has already attached");
-      return;
-    }
-    this.legacyMultiOpenGuard.currentStatus = MultiOpenStatus.unInit;
-    fslock.clearLockFile();
-    this.legacyMultiOpenGuard.monitorLatestDriverProcessFile();
-    this.physicalConnector.startWatchAllClients();
+  startWatchAllClients(force: boolean = true): void {
+    void this.daemonClient
+      .call("startWatchAllClients", { force })
+      .catch((error: Error) => {
+        defaultLogger.warn(
+          `Failed to start multiplexer client watchers: ${error.message}`,
+        );
+      });
   }
 
   createClientId(): number {
-    return this.physicalConnector.createClientId();
+    if (this.nextClientId > 4294967294) {
+      this.nextClientId = 0;
+    }
+    return ++this.nextClientId;
   }
 
   async connectDevices(
     timeout: number = -1,
     serial: string | null = null,
     isAutoListenClients: boolean = true,
-  ): Promise<BaseDevice[]> {
-    return await this.physicalConnector.connectDevices(
+  ): Promise<MultiplexerDevice[]> {
+    const snapshots = await this.daemonClient.call("connectDevices", {
       timeout,
       serial,
       isAutoListenClients,
-    );
+    });
+
+    return this.upsertDeviceSnapshots(snapshots);
   }
 
-  // clientName:
-  // for android: processName
-  // for ios: AppName
   async connectUsbClients(
     deviceId: string,
     timeout: number = -1,
     waitTimeout: boolean = true,
     clientName: string | null = null,
-  ): Promise<UsbClient[]> {
-    return await this.physicalConnector.connectUsbClients(
+  ): Promise<MultiplexerUsbClient[]> {
+    const snapshots = await this.daemonClient.call("connectUsbClients", {
       deviceId,
       timeout,
       waitTimeout,
       clientName,
+    });
+
+    return this.upsertClientSnapshots(snapshots);
+  }
+
+  selecteUsbClient(id: number): void {
+    if (this.usbClients.has(id)) {
+      this.selectedClient = this.usbClients.get(id);
+    }
+  }
+
+  addDeviceManager(_manager: DeviceManager): void {
+    defaultLogger.warn(
+      "addDeviceManager is ignored by the Multiplexer-only DebugRouterConnector; physical device managers live in the daemon.",
     );
-  }
-
-  selecteUsbClient(id: number) {
-    this.physicalConnector.selecteUsbClient(id);
-  }
-
-  addDeviceManager(manager: DeviceManager) {
-    this.physicalConnector.addDeviceManager(manager);
   }
 
   on<Event extends keyof DebugerRouterDriverEvents>(
@@ -252,6 +259,7 @@ export class DebugRouterConnector {
     if (!this.traceRecorder) {
       return () => {};
     }
+
     return this.traceRecorder.addListener(listener);
   }
 
@@ -259,17 +267,12 @@ export class DebugRouterConnector {
     if (this.closed) {
       return;
     }
+
     this.closed = true;
-    if (this.legacyMultiOpenGuard.multiOpenMonitorTimer) {
-      clearInterval(this.legacyMultiOpenGuard.multiOpenMonitorTimer);
-      this.legacyMultiOpenGuard.multiOpenMonitorTimer = undefined;
-    }
-    this.disableAllClients();
-    if (this.wss) {
-      this.wss.close();
-      this.wss = null;
-    }
-    await new Promise((resolve) => setImmediate(resolve));
+    this.unsubscribeDaemonEvents?.();
+    this.unsubscribeDaemonEvents = undefined;
+    await this.daemonClient.close();
+    this.webSocketServerStarted = false;
     await this.traceRecorder?.close();
   }
 
@@ -284,9 +287,7 @@ export class DebugRouterConnector {
       this.traceRecorder?.recordAppClientDisconnected(payload as number);
     }
     if (event === "websocket-app-client-connected") {
-      this.traceRecorder?.recordWebsocketAppClientConnected(
-        payload as WebSocketClient,
-      );
+      this.traceRecorder?.recordWebsocketAppClientConnected(payload as any);
     }
     if (event === "websocket-app-client-disconnected") {
       this.traceRecorder?.recordWebsocketAppClientDisconnected(
@@ -294,9 +295,7 @@ export class DebugRouterConnector {
       );
     }
     if (event === "websocket-web-client-connected") {
-      this.traceRecorder?.recordWebsocketWebClientConnected(
-        payload as WebSocketClient,
-      );
+      this.traceRecorder?.recordWebsocketWebClientConnected(payload as any);
     }
     if (event === "websocket-web-client-disconnected") {
       this.traceRecorder?.recordWebsocketWebClientDisconnected(
@@ -306,160 +305,464 @@ export class DebugRouterConnector {
     this.events.emit(event, payload);
   }
 
-  registerDevice(device: BaseDevice) {
-    this.physicalConnector.registerDevice(
-      device,
-      this.legacyMultiOpenGuard.currentStatus === MultiOpenStatus.attached,
+  registerDevice(device: MultiplexerDevice): void {
+    const existing = this.devices.get(device.serial);
+    if (existing) {
+      defaultLogger.debug("registerDevice: has exists:" + device.serial);
+      return;
+    }
+
+    defaultLogger.debug("register new device:" + device.serial);
+    this.devices.set(device.serial, device);
+    this.traceRecorder?.recordDeviceRegistered(device.serial, {
+      os: device.info.os,
+      title: device.info.title,
+    });
+    this.emit("device-connected", device as any);
+  }
+
+  unregisterDevice(serial: string): void {
+    this.unregisterDeviceInternal(serial, false);
+  }
+
+  regiserUsbClient(client: MultiplexerUsbClient): void {
+    defaultLogger.debug(
+      "regiserUsbClient:" + " info:" + JSON.stringify(client.info),
     );
+    const existing = this.usbClients.get(client.clientId());
+    if (existing) {
+      defaultLogger.debug("regiserUsbClient: has exist:" + client.clientId());
+      return;
+    }
+
+    this.usbClients.set(client.clientId(), client);
+    this.emit("client-connected", client as any);
+    this.emit("app-client-connected", client as any);
+    this.handleUsbClienChange();
   }
 
-  unregisterDevice(serial: string) {
-    this.physicalConnector.unregisterDevice(serial);
-  }
-
-  regiserUsbClient(client: UsbClient) {
-    this.physicalConnector.regiserUsbClient(client);
-  }
-
-  unregiserUsbClient(id: number) {
-    this.physicalConnector.unregiserUsbClient(id);
+  unregiserUsbClient(id: number): void {
+    this.unregisterUsbClientInternal(id, true);
   }
 
   getDevices(
     timeout: number = -1,
     serial: string | null = null,
-  ): Promise<BaseDevice[]> {
-    return this.physicalConnector.getDevices(timeout, serial);
-  }
-
-  getAllUsbClients(): UsbClient[] {
-    return this.physicalConnector.getAllUsbClients();
-  }
-
-  getDeviceUsbClients(
-    deviceId: string,
-    timeout: number = -1,
-    clientName: string | null = null,
-  ): Promise<UsbClient[]> {
-    return this.physicalConnector.getDeviceUsbClients(
-      deviceId,
-      timeout,
-      clientName,
-    );
-  }
-
-  handleUsbMessage(id: number, message: string) {
-    if (this.wss) {
-      const response = JSON.parse(message);
-      if (response.data && response.data["sender"]) {
-        response.data["sender"] = id;
-      }
-      if (
-        response.data?.data &&
-        response.data?.data.hasOwnProperty("client_id")
-      ) {
-        response.data.data["client_id"] = id;
-      }
-      this.wss.sendMessageToWeb(JSON.stringify(response));
-    }
-  }
-
-  handleWsMessage(id: number, message: string) {
-    const client = this.usbClients?.get(id);
-    if (client) {
-      const data = JSON.parse(message);
-      if (
-        data?.data?.type === "UsbConnect" ||
-        data?.data?.type === "UsbConnectAck"
-      )
+  ): Promise<MultiplexerDevice[]> {
+    return new Promise((resolve) => {
+      if (timeout < 0) {
+        resolve(this.findDevice(serial));
         return;
-      if (data?.data?.data?.client_id) {
-        data.data.data.client_id = -1;
       }
-      client.sendMessage(data);
-    }
-  }
 
-  handleUsbClienChange() {
-    if (this.wss) {
-      this.wss.sendClientList();
-    }
-  }
+      const deviceCallback = (device: MultiplexerDevice) => {
+        if (device.serial === serial) {
+          resolve([device]);
+          this.off("device-connected", deviceCallback as any);
+        }
+      };
 
-  handleUsbDeviceChange() {
-    if (this.wss) {
-      this.wss.sendClientList();
-    }
-  }
-
-  getAllWebsocketAppClients(): WebSocketClient[] {
-    const clients = new Array();
-    if (this.enableWebSocket && this.wss) {
-      this.wss
-        .getAllWebsocketAppClients()
-        .forEach((client: WebSocketClient) => {
-          clients.push(client);
-        });
-    }
-    return clients;
-  }
-
-  getAllAppClients() {
-    const clients: Client[] = [
-      ...(this.physicalConnector.getAllUsbClients() as Client[]),
-      ...(this.getAllWebsocketAppClients() as Client[]),
-    ];
-    return clients;
-  }
-
-  // send message to web platform
-  sendMessageToWeb(message: string) {
-    if (!this.enableWebSocket) {
-      defaultLogger.warn("enableWebSocket isn't opened!");
-      return;
-    }
-    if (this.wss === null) {
-      defaultLogger.warn("websocket server hasn't started up");
-      return;
-    }
-    this.wss.sendMessageToWeb(message);
-  }
-
-  // send message to app(include apps connected by usb and wifi)
-  sendMessageToApp(id: number, message: string) {
-    if (!this.enableWebSocket) {
-      defaultLogger.warn("enableWebSocket isn't opened!");
-      return;
-    }
-    if (this.wss === null) {
-      defaultLogger.warn("websocket server hasn't started up");
-      return;
-    }
-    this.wss?.sendMessageToApp(id, message);
-  }
-
-  async startWSServer(): Promise<void> {
-    return new Promise(async (resolve) => {
-      if (this.enableWebSocket) {
-        const port = this.wssPort;
-        this.wssPort = await detectPort(port);
-        this.wssHost = `${address()}:${this.wssPort}`;
-        getDriverReportService()?.report("websocket_server_init", null, {
-          port: "wssPort:" + this.wssHost,
-        });
-        this.wss = new WebSocketController(this, {
-          port: this.wssPort,
-          host: this.wssHost,
-          roomId: this.roomId,
-          callback: resolve,
-        });
-      } else {
-        resolve();
+      if (serial !== null) {
+        const targetDevices = this.findDevice(serial);
+        if (targetDevices.length > 0) {
+          resolve(targetDevices);
+          return;
+        }
+        this.on("device-connected", deviceCallback as any);
       }
+
+      setTimeout(() => {
+        this.off("device-connected", deviceCallback as any);
+        resolve(this.findDevice(serial));
+      }, timeout);
     });
   }
 
-  public getDriverClient(): DriverClient {
+  getAllUsbClients(): MultiplexerUsbClient[] {
+    return Array.from(this.usbClients.values());
+  }
+
+  async getDeviceUsbClients(
+    deviceId: string,
+    timeout: number = -1,
+    clientName: string | null = null,
+  ): Promise<MultiplexerUsbClient[]> {
+    return new Promise((resolve) => {
+      if (!this.devices.has(deviceId)) {
+        defaultLogger.debug("getDeviceUsbClients: has" + deviceId);
+        resolve([]);
+        return;
+      }
+
+      if (timeout < 0) {
+        resolve(this.findDeviceUsbClients(deviceId, clientName));
+        return;
+      }
+
+      const clientCallback = (client: MultiplexerUsbClient) => {
+        if (client.deviceId() !== deviceId) {
+          return;
+        }
+        if (this.isTargetClient(client, clientName)) {
+          resolve([client]);
+          this.off("client-connected", clientCallback as any);
+        }
+      };
+
+      if (clientName != null) {
+        const targetClients = this.findDeviceUsbClients(deviceId, clientName);
+        if (targetClients.length > 0) {
+          resolve(targetClients);
+          return;
+        }
+        this.on("client-connected", clientCallback as any);
+      }
+
+      setTimeout(() => {
+        this.off("client-connected", clientCallback as any);
+        resolve(this.findDeviceUsbClients(deviceId, clientName));
+      }, timeout);
+    });
+  }
+
+  handleUsbMessage(id: number, message: string): void {
+    const client = this.usbClients.get(id);
+    this.emit("usb-client-message", { id, message } as any);
+    client?.handleMessage(message);
+  }
+
+  handleWsMessage(id: number, message: string): void {
+    const client = this.usbClients.get(id);
+    if (!client) {
+      return;
+    }
+
+    const data = JSON.parse(message);
+    if (
+      data?.data?.type === "UsbConnect" ||
+      data?.data?.type === "UsbConnectAck"
+    ) {
+      return;
+    }
+    if (data?.data?.data?.client_id) {
+      data.data.data.client_id = -1;
+    }
+    void this.daemonClient
+      .call("sendMessageToApp", { id, message: JSON.stringify(data) })
+      .catch((error: Error) => {
+        defaultLogger.warn(
+          `Failed to route websocket message to app through multiplexer host: ${error.message}`,
+        );
+      });
+  }
+
+  handleUsbClienChange(): void {
+    // Client-list fanout is owned by the daemon-side WebSocket controller.
+  }
+
+  handleUsbDeviceChange(): void {
+    // Device-list fanout is owned by the daemon-side WebSocket controller.
+  }
+
+  getAllWebsocketAppClients(): WebSocketClientSnapshot[] {
+    return Array.from(this.websocketAppClients.values());
+  }
+
+  getAllAppClients(): Client[] {
+    const clients: Client[] = [...Array.from(this.usbClients.values())];
+    this.getAllWebsocketAppClients().forEach((client) => {
+      clients.push(client as any);
+    });
+    return clients;
+  }
+
+  sendMessageToWeb(message: string): void {
+    if (!this.enableWebSocket) {
+      defaultLogger.warn("enableWebSocket isn't opened!");
+      return;
+    }
+    if (!this.webSocketServerStarted) {
+      defaultLogger.warn("websocket server hasn't started up");
+      return;
+    }
+    void this.daemonClient
+      .call("sendMessageToWeb", { message })
+      .catch((error: Error) => {
+        defaultLogger.warn(
+          `Failed to send multiplexer message to web: ${error.message}`,
+        );
+      });
+  }
+
+  sendMessageToApp(id: number, message: string): void {
+    if (!this.enableWebSocket) {
+      defaultLogger.warn("enableWebSocket isn't opened!");
+      return;
+    }
+    if (!this.webSocketServerStarted) {
+      defaultLogger.warn("websocket server hasn't started up");
+      return;
+    }
+    void this.daemonClient
+      .call("sendMessageToApp", { id, message })
+      .catch((error: Error) => {
+        defaultLogger.warn(
+          `Failed to send multiplexer message to app: ${error.message}`,
+        );
+      });
+  }
+
+  async startWSServer(): Promise<void> {
+    if (!this.enableWebSocket) {
+      return;
+    }
+    const info = await this.daemonClient.call("startWSServer", {});
+    if (info) {
+      this.wssPort = info.port;
+      this.wssHost = info.host;
+      this.roomId = info.roomId;
+    }
+    this.webSocketServerStarted = true;
+  }
+
+  getDriverClient(): DriverClient {
     return this.driverClient;
   }
+
+  applySnapshot(snapshot: Snapshot): void {
+    this.syncDeviceSnapshots(snapshot.devices);
+    this.syncClientSnapshots(snapshot.clients);
+  }
+
+  applyHostEvent(event: ControlEvent): void {
+    switch (event.event) {
+      case "snapshot":
+        this.applySnapshot(event.data);
+        break;
+      case "device-connected": {
+        const device = MultiplexerDevice.fromSnapshot(
+          event.data,
+          this.daemonClient,
+        );
+        this.registerDevice(device);
+        break;
+      }
+      case "device-disconnected":
+        this.unregisterDeviceInternal(event.data.serial, false);
+        break;
+      case "client-connected": {
+        const client = MultiplexerUsbClient.fromSnapshot(
+          event.data,
+          this.daemonClient,
+        );
+        this.regiserUsbClient(client);
+        break;
+      }
+      case "client-disconnected":
+        this.unregisterUsbClientInternal(event.data.id, true);
+        break;
+      case "usb-client-message":
+        this.handleUsbMessage(event.data.id, event.data.message);
+        break;
+      case "ws-client-message":
+        this.emit("ws-client-message", event.data as any);
+        break;
+      case "ws-web-message":
+        this.emit("ws-web-message", event.data as any);
+        break;
+      case "websocket-app-client-connected":
+        this.websocketAppClients.set(event.data.id, event.data);
+        this.emit("websocket-app-client-connected", event.data as any);
+        this.emit("app-client-connected", event.data as any);
+        break;
+      case "websocket-app-client-disconnected":
+        this.websocketAppClients.delete(event.data.id);
+        this.emit("websocket-app-client-disconnected", event.data.id as any);
+        this.emit("app-client-disconnected", event.data.id as any);
+        break;
+      case "websocket-web-client-connected":
+        this.websocketWebClients.set(event.data.id, event.data);
+        this.emit("websocket-web-client-connected", event.data as any);
+        break;
+      case "websocket-web-client-disconnected":
+        this.websocketWebClients.delete(event.data.id);
+        this.emit("websocket-web-client-disconnected", event.data.id as any);
+        break;
+    }
+  }
+
+  private syncDeviceSnapshots(snapshots: DeviceSnapshot[]): void {
+    const activeSerials = new Set(snapshots.map((snapshot) => snapshot.serial));
+    this.upsertDeviceSnapshots(snapshots);
+
+    for (const serial of Array.from(this.devices.keys())) {
+      if (!activeSerials.has(serial)) {
+        this.unregisterDeviceInternal(serial, false);
+      }
+    }
+  }
+
+  private syncClientSnapshots(snapshots: Snapshot["clients"]): void {
+    const activeIds = new Set(snapshots.map((snapshot) => snapshot.id));
+    this.upsertClientSnapshots(snapshots);
+
+    for (const id of Array.from(this.usbClients.keys())) {
+      if (!activeIds.has(id)) {
+        this.unregisterUsbClientInternal(id, true);
+      }
+    }
+  }
+
+  private upsertDeviceSnapshots(
+    snapshots: DeviceSnapshot[],
+  ): MultiplexerDevice[] {
+    return snapshots.map((snapshot) => this.upsertDeviceSnapshot(snapshot));
+  }
+
+  private upsertDeviceSnapshot(snapshot: DeviceSnapshot): MultiplexerDevice {
+    const existing = this.devices.get(snapshot.serial);
+    if (existing) {
+      existing.updateFromSnapshot(snapshot);
+      return existing;
+    }
+
+    const device = MultiplexerDevice.fromSnapshot(snapshot, this.daemonClient);
+    this.registerDevice(device);
+    return device;
+  }
+
+  private upsertClientSnapshots(
+    snapshots: Snapshot["clients"],
+  ): MultiplexerUsbClient[] {
+    return snapshots.map((snapshot) => this.upsertClientSnapshot(snapshot));
+  }
+
+  private upsertClientSnapshot(snapshot: ClientSnapshot): MultiplexerUsbClient {
+    const existing = this.usbClients.get(snapshot.id);
+    if (existing) {
+      existing.updateFromSnapshot(snapshot);
+      return existing;
+    }
+
+    const client = MultiplexerUsbClient.fromSnapshot(
+      snapshot,
+      this.daemonClient,
+    );
+    this.regiserUsbClient(client);
+    return client;
+  }
+
+  private findDevice(serial: string | null): MultiplexerDevice[] {
+    let targetDevices = Array.from(this.devices.values());
+    if (serial === null) {
+      return targetDevices;
+    }
+
+    targetDevices = targetDevices.filter((device) => {
+      return device.serial === serial;
+    });
+    return targetDevices;
+  }
+
+  private findDeviceUsbClients(
+    deviceId: string,
+    clientName: string | null,
+  ): MultiplexerUsbClient[] {
+    const clients = Array.from(this.usbClients.values()).filter((client) => {
+      return client.deviceId() === deviceId;
+    });
+    return this.findUsbClient(clientName, clients);
+  }
+
+  private findUsbClient(
+    clientName: string | null,
+    clients: MultiplexerUsbClient[],
+  ): MultiplexerUsbClient[] {
+    if (clientName === null) {
+      return clients;
+    }
+
+    return clients.filter((client) => {
+      return this.isTargetClient(client, clientName);
+    });
+  }
+
+  private isTargetClient(
+    client: MultiplexerUsbClient,
+    clientName: string | null,
+  ): boolean {
+    if (clientName == null) {
+      return false;
+    }
+    if (
+      client?.info?.query?.os === "Android" &&
+      client.info.query.raw_info?.AppProcessName === clientName
+    ) {
+      return true;
+    }
+    if (
+      client?.info?.query?.device_model?.indexOf("iPhone") !== -1 &&
+      client.info.query.raw_info?.App === clientName
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  private unregisterDeviceInternal(
+    serial: string,
+    disconnect: boolean,
+    emitEvent: boolean = true,
+  ): void {
+    const device = this.devices.get(serial);
+    if (!device) {
+      defaultLogger.debug(
+        "unregisterDevice warning: no existed device:" + serial,
+      );
+      return;
+    }
+
+    defaultLogger.debug("unregisterDevice:" + serial);
+    this.traceRecorder?.recordDeviceUnregistered(serial, {
+      os: device.info.os,
+      title: device.info.title,
+    });
+    this.devices.delete(serial);
+    if (disconnect) {
+      device.disConnect();
+    }
+    if (emitEvent) {
+      this.emit("device-disconnected", device as any);
+    }
+  }
+
+  private unregisterUsbClientInternal(id: number, emitEvent: boolean): void {
+    const existing = this.usbClients.get(id);
+    if (!existing) {
+      defaultLogger.debug("unregiserUsbClient unknown id:" + id);
+      return;
+    }
+
+    defaultLogger.debug("unregiserUsbClient:" + JSON.stringify(existing.info));
+    if (this.selectedClient?.clientId() === id) {
+      this.selectedClient = undefined;
+    }
+    this.usbClients.delete(id);
+    if (emitEvent) {
+      this.emit("client-disconnected", id as any);
+      this.emit("app-client-disconnected", id as any);
+      this.handleUsbClienChange();
+    }
+  }
+}
+
+function resolveDaemonEntryPath(): string {
+  const candidates = [
+    path.resolve(__dirname, "../multiplexer/daemon/entry.js"),
+    path.resolve(__dirname, "../../dist/cjs/src/multiplexer/daemon/entry.js"),
+  ];
+
+  return (
+    candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]
+  );
 }

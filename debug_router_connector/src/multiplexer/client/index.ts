@@ -2,8 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-export * from "./MultiplexerDaemonClient";
-export * from "./MultiplexerDaemonManager";
-export * from "./MultiplexerDevice";
-export * from "./MultiplexerDiscovery";
-export * from "./MultiplexerUsbClient";
+export { MultiplexerDevice } from "./MultiplexerDevice";
+export type { MultiplexerDeviceOption } from "./MultiplexerDevice";
+export { MultiplexerUsbClient } from "./MultiplexerUsbClient";
+export type { MultiplexerUsbClientOption } from "./MultiplexerUsbClient";

@@ -148,6 +148,9 @@ function createClient(id, overrides = {}) {
       );
     },
     sendMessage(message) {
+      if (overrides.sendMessageError) {
+        throw overrides.sendMessageError;
+      }
       state.sendMessageCalls.push(message);
     },
     close() {
@@ -175,6 +178,8 @@ class FakePhysicalConnector extends EventEmitter {
     this.sendMessageCalls = [];
     this.closeClientCalls = [];
     this.closeCalls = 0;
+    this.nextClientId = option.nextClientId ?? 1;
+    this.createClientIdCalls = 0;
     this.connectDevicesImpl = option.connectDevicesImpl;
     this.getDeviceUsbClientsResult = option.getDeviceUsbClientsResult;
     this.waitDeviceUsbClientsResult = option.waitDeviceUsbClientsResult;
@@ -212,6 +217,11 @@ class FakePhysicalConnector extends EventEmitter {
   getAllUsbClients() {
     this.getAllUsbClientsCalls++;
     return Array.from(this.usbClients.values());
+  }
+
+  createClientId() {
+    this.createClientIdCalls++;
+    return this.nextClientId++;
   }
 
   startWatchClient(device) {
@@ -312,6 +322,7 @@ class FakeControlServer {
 class FakeStartControlServer {
   static instances = [];
   static startError = null;
+  static stopError = null;
 
   constructor(option) {
     this.option = option;
@@ -332,6 +343,9 @@ class FakeStartControlServer {
 
   async stop() {
     this.stopCalls++;
+    if (FakeStartControlServer.stopError) {
+      throw FakeStartControlServer.stopError;
+    }
   }
 
   broadcast(event) {
@@ -357,6 +371,7 @@ function createHost(options = {}) {
     controlPort: options.controlPort,
     manualConnect: options.manualConnect,
     enableWebSocket: options.enableWebSocket,
+    websocketOption: options.websocketOption,
     now: options.now ?? (() => 1000),
   });
 
@@ -391,6 +406,71 @@ function replaceControlServerForStart() {
   };
 }
 
+function replaceWebSocketStartDependencies({
+  detectPortImpl = async (port) => port,
+  addressImpl = () => "127.0.0.1",
+  WebSocketControllerCtor,
+}) {
+  const detectPortImport = hostModule.__get__("detect_port_1");
+  const ipImport = hostModule.__get__("ip_1");
+  const webSocketServerImport = hostModule.__get__("WebSocketServer_1");
+  const originalDetectPort = detectPortImport.default;
+  const originalAddress = ipImport.address;
+  const originalWebSocketController = webSocketServerImport.WebSocketController;
+
+  detectPortImport.default = detectPortImpl;
+  ipImport.address = addressImpl;
+  webSocketServerImport.WebSocketController = WebSocketControllerCtor;
+
+  return () => {
+    detectPortImport.default = originalDetectPort;
+    ipImport.address = originalAddress;
+    webSocketServerImport.WebSocketController = originalWebSocketController;
+  };
+}
+
+function createCustomizedEnvelope({
+  id,
+  method = "Runtime.evaluate",
+  result,
+  params = {},
+  clientId = -1,
+  sender = 0,
+  sessionId = -1,
+  type = "CDP",
+  messageAsString = false,
+}) {
+  const inner =
+    result === undefined
+      ? {
+          id,
+          method,
+          params,
+        }
+      : {
+          id,
+          result,
+        };
+  return {
+    event: "Customized",
+    data: {
+      type,
+      data: {
+        client_id: clientId,
+        session_id: sessionId,
+        message: messageAsString ? JSON.stringify(inner) : inner,
+      },
+      sender,
+    },
+  };
+}
+
+function readCustomizedInner(message) {
+  const data = typeof message === "string" ? JSON.parse(message) : message;
+  const raw = data.data.data.message;
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
+}
+
 describe("MultiplexerHost", function () {
   afterEach(function () {
     defaultLogger.setOutput(() => {});
@@ -422,6 +502,7 @@ describe("MultiplexerHost", function () {
   it("starts once, reports the listening port, and stops idempotently", async function () {
     FakeStartControlServer.instances = [];
     FakeStartControlServer.startError = null;
+    FakeStartControlServer.stopError = null;
     const resetControlServer = replaceControlServerForStart();
     const { host, physical } = createHost();
 
@@ -471,6 +552,28 @@ describe("MultiplexerHost", function () {
       assert.strictEqual(physical.listenerCount("client-connected"), 0);
     } finally {
       FakeStartControlServer.startError = null;
+      FakeStartControlServer.stopError = null;
+      resetControlServer();
+    }
+  });
+
+  it("continues closing physical resources when the control server stop fails", async function () {
+    FakeStartControlServer.instances = [];
+    FakeStartControlServer.startError = null;
+    FakeStartControlServer.stopError = new Error("control stop failed");
+    const resetControlServer = replaceControlServerForStart();
+    const { host, physical } = createHost();
+
+    try {
+      await host.start();
+
+      await assert.rejects(() => host.stop(), /control stop failed/);
+
+      assert.strictEqual(FakeStartControlServer.instances[0].stopCalls, 1);
+      assert.strictEqual(physical.closeCalls, 1);
+      assert.strictEqual(physical.listenerCount("device-connected"), 0);
+    } finally {
+      FakeStartControlServer.stopError = null;
       resetControlServer();
     }
   });
@@ -1105,64 +1208,112 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("delegates sendCustomizedMessage with defaults and explicit arguments", async function () {
+  it("routes sendCustomizedMessage through the runtime and resolves from physical responses", async function () {
     const { host, physical } = createHost();
     const client = createClient(11);
     physical.usbClients.set(client.clientId(), client);
 
-    const first = await host.handleControlRpc(
+    const firstPromise = host.handleControlRpc(
       1,
       createRpcRequest("sendCustomizedMessage", {
         clientId: 11,
         method: "Runtime.evaluate",
       })
     );
-    const second = await host.handleControlRpc(
-      1,
-      createRpcRequest("sendCustomizedMessage", {
-        clientId: 11,
-        method: "App.call",
-        params: {
-          ok: true,
-        },
-        sessionId: 99,
-        type: "App",
-      })
-    );
-    const third = await host.handleControlRpc(
-      1,
-      createRpcRequest("sendCustomizedMessage", {
-        clientId: 11,
-        method: "String.params",
-        params: "raw",
-      })
-    );
-
-    assert.strictEqual(first, "customized-result");
-    assert.strictEqual(second, "customized-result");
-    assert.strictEqual(third, "customized-result");
-    assert.deepStrictEqual(client.state.sendCustomizedCalls, [
+    assert.deepStrictEqual(
+      readCustomizedInner(client.state.sendMessageCalls[0]),
       {
+        id: 1,
         method: "Runtime.evaluate",
         params: "",
-        sessionId: -1,
-        type: "CDP",
-      },
-      {
+      }
+    );
+    host.handlePhysicalMessage(
+      11,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 1,
+          result: {
+            ok: true,
+          },
+          messageAsString: true,
+        })
+      )
+    );
+    const first = await firstPromise;
+
+    const secondPromise = host.handleControlRpc(
+      1,
+      createRpcRequest("sendCustomizedMessage", {
+        clientId: 11,
         method: "App.call",
         params: {
           ok: true,
         },
         sessionId: 99,
         type: "App",
-      },
+      })
+    );
+    assert.deepStrictEqual(
+      readCustomizedInner(client.state.sendMessageCalls[1]),
       {
+        id: 2,
+        method: "App.call",
+        params: {
+          ok: true,
+        },
+      }
+    );
+    assert.strictEqual(client.state.sendMessageCalls[1].data.type, "App");
+    assert.strictEqual(
+      client.state.sendMessageCalls[1].data.data.session_id,
+      99
+    );
+    host.handlePhysicalMessage(
+      11,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 2,
+          result: "second",
+          messageAsString: false,
+          type: "App",
+        })
+      )
+    );
+    const second = await secondPromise;
+
+    const thirdPromise = host.handleControlRpc(
+      1,
+      createRpcRequest("sendCustomizedMessage", {
+        clientId: 11,
         method: "String.params",
         params: "raw",
-        sessionId: -1,
-        type: "CDP",
-      },
-    ]);
+      })
+    );
+    assert.deepStrictEqual(
+      readCustomizedInner(client.state.sendMessageCalls[2]),
+      {
+        id: 3,
+        method: "String.params",
+        params: "raw",
+      }
+    );
+    host.handlePhysicalMessage(
+      11,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 3,
+          result: null,
+          messageAsString: true,
+        })
+      )
+    );
+    const third = await thirdPromise;
+
+    assert.strictEqual(first, '{"id":1,"result":{"ok":true}}');
+    assert.strictEqual(second, '{"id":2,"result":"second"}');
+    assert.strictEqual(third, '{"id":3,"result":null}');
+    assert.deepStrictEqual(client.state.sendCustomizedCalls, []);
   });
 
   it("throws a control error when sendCustomizedMessage targets a missing client", async function () {
@@ -1409,7 +1560,7 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("sendMessageToApp ignores missing clients when websocket is disabled and throws when it is enabled", async function () {
+  it("sendMessageToApp rejects missing clients before attempting control or websocket routing", async function () {
     const disabled = createHost({
       enableWebSocket: false,
     });
@@ -1417,12 +1568,23 @@ describe("MultiplexerHost", function () {
       enableWebSocket: true,
     });
 
-    await disabled.host.handleControlRpc(
-      1,
-      createRpcRequest("sendMessageToApp", {
-        id: 404,
-        message: "{}",
-      })
+    await assert.rejects(
+      () =>
+        disabled.host.handleControlRpc(
+          1,
+          createRpcRequest("sendMessageToApp", {
+            id: 404,
+            message: "{}",
+          })
+        ),
+      (error) => {
+        assertControlError(
+          error,
+          "multiplexer-client-not-found",
+          /Multiplexer USB client was not found: 404/
+        );
+        return true;
+      }
     );
     await assert.rejects(
       () =>
@@ -1437,37 +1599,76 @@ describe("MultiplexerHost", function () {
         assertControlError(
           error,
           "multiplexer-client-not-found",
-          /Multiplexer target app client was not found: 404/
+          /Multiplexer USB client was not found: 404/
         );
         return true;
       }
     );
   });
 
-  it("startWSServer returns when websocket is disabled and rejects when phase 6 routing is not ready", async function () {
+  it("startWSServer returns when websocket is disabled", async function () {
     const disabled = createHost({
       enableWebSocket: false,
-    });
-    const enabled = createHost({
-      enableWebSocket: true,
     });
 
     await disabled.host.handleControlRpc(
       1,
       createRpcRequest("startWSServer", {})
     );
-    await assert.rejects(
-      () =>
-        enabled.host.handleControlRpc(1, createRpcRequest("startWSServer", {})),
-      (error) => {
-        assertControlError(
-          error,
-          "multiplexer-websocket-not-ready",
-          /phase 6/i
-        );
-        return true;
+  });
+
+  it("startWSServer creates a WebSocketController with detected port and configured room", async function () {
+    const instances = [];
+    class FakeWebSocketController {
+      constructor(controllerHost, option) {
+        this.controllerHost = controllerHost;
+        this.option = option;
+        this.closeCalls = 0;
+        instances.push(this);
+        option.callback();
       }
-    );
+
+      close() {
+        this.closeCalls++;
+      }
+
+      sendMessageToWeb() {}
+
+      sendMessageToWebClient() {}
+    }
+    const reset = replaceWebSocketStartDependencies({
+      detectPortImpl: async (port) => {
+        assert.strictEqual(port, 19000);
+        return 19001;
+      },
+      addressImpl: () => "10.0.0.5",
+      WebSocketControllerCtor: FakeWebSocketController,
+    });
+    const { host, physical } = createHost({
+      enableWebSocket: true,
+      websocketOption: {
+        port: 19000,
+        roomId: "room-a",
+      },
+    });
+
+    try {
+      await host.handleControlRpc(1, createRpcRequest("startWSServer", {}));
+      await host.handleControlRpc(1, createRpcRequest("startWSServer", {}));
+
+      assert.strictEqual(instances.length, 1);
+      assert.strictEqual(instances[0].controllerHost, host);
+      assert.deepStrictEqual(instances[0].option, {
+        port: 19001,
+        host: "10.0.0.5:19001",
+        roomId: "room-a",
+        callback: instances[0].option.callback,
+      });
+      assert.strictEqual(host.createClientId(), 1);
+      assert.strictEqual(physical.createClientIdCalls, 1);
+    } finally {
+      reset();
+    }
   });
 
   it("startWSServer shares in-flight starts and is idempotent after success", async function () {
@@ -1522,7 +1723,7 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(calls, 2);
   });
 
-  it("sendMessageToWeb returns when websocket is disabled and throws when websocket is enabled before phase 6", async function () {
+  it("sendMessageToWeb returns when websocket is disabled or the server has not started", async function () {
     const disabled = createHost({
       enableWebSocket: false,
     });
@@ -1536,23 +1737,399 @@ describe("MultiplexerHost", function () {
         message: "hello",
       })
     );
-    await assert.rejects(
-      () =>
-        enabled.host.handleControlRpc(
-          1,
-          createRpcRequest("sendMessageToWeb", {
-            message: "hello",
-          })
-        ),
-      (error) => {
-        assertControlError(
-          error,
-          "multiplexer-websocket-not-ready",
-          /cannot send message to Web/
-        );
-        return true;
-      }
+    await enabled.host.handleControlRpc(
+      1,
+      createRpcRequest("sendMessageToWeb", {
+        message: "hello",
+      })
     );
+  });
+
+  it("routes concurrent websocket messages with duplicate original ids back to the originating web clients", function () {
+    const { host, physical } = createHost({
+      enableWebSocket: true,
+    });
+    const client = createClient(21);
+    const webMessages = [];
+    physical.usbClients.set(client.clientId(), client);
+    host.webSocketController = {
+      sendMessageToWeb(message) {
+        webMessages.push({
+          kind: "broadcast",
+          message,
+        });
+      },
+      sendMessageToWebClient(webClientId, message) {
+        webMessages.push({
+          kind: "targeted",
+          webClientId,
+          message,
+        });
+      },
+      close() {},
+    };
+
+    host.handleWebSocketMessage(
+      100,
+      21,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 5,
+          clientId: 21,
+          method: "Runtime.evaluate",
+          params: {
+            expression: "first",
+          },
+          messageAsString: true,
+        })
+      )
+    );
+    host.handleWebSocketMessage(
+      101,
+      21,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 5,
+          clientId: 21,
+          method: "Runtime.evaluate",
+          params: {
+            expression: "second",
+          },
+          messageAsString: true,
+        })
+      )
+    );
+
+    assert.strictEqual(client.state.sendMessageCalls.length, 2);
+    assert.strictEqual(
+      readCustomizedInner(client.state.sendMessageCalls[0]).id,
+      1
+    );
+    assert.strictEqual(
+      readCustomizedInner(client.state.sendMessageCalls[1]).id,
+      2
+    );
+    assert.strictEqual(
+      client.state.sendMessageCalls[0].data.data.client_id,
+      -1
+    );
+    assert.strictEqual(
+      client.state.sendMessageCalls[1].data.data.client_id,
+      -1
+    );
+
+    host.handlePhysicalMessage(
+      21,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 2,
+          result: {
+            value: "second",
+          },
+          messageAsString: true,
+        })
+      )
+    );
+    host.handlePhysicalMessage(
+      21,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 1,
+          result: {
+            value: "first",
+          },
+          messageAsString: true,
+        })
+      )
+    );
+
+    assert.deepStrictEqual(
+      webMessages.map((item) => ({
+        kind: item.kind,
+        webClientId: item.webClientId,
+        inner: readCustomizedInner(item.message),
+        clientId: JSON.parse(item.message).data.data.client_id,
+      })),
+      [
+        {
+          kind: "targeted",
+          webClientId: 101,
+          inner: {
+            id: 5,
+            result: {
+              value: "second",
+            },
+          },
+          clientId: 21,
+        },
+        {
+          kind: "targeted",
+          webClientId: 100,
+          inner: {
+            id: 5,
+            result: {
+              value: "first",
+            },
+          },
+          clientId: 21,
+        },
+      ]
+    );
+  });
+
+  it("resolves routed control events without a promise through sendToControl", function () {
+    const { host, physical } = createHost();
+    const client = createClient(22);
+    physical.usbClients.set(client.clientId(), client);
+    const controlServer = attachControlServer(host);
+
+    host.sendMessageToApp(
+      22,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 9,
+          clientId: 22,
+          method: "Runtime.evaluate",
+          messageAsString: false,
+        })
+      ),
+      undefined,
+      55
+    );
+    assert.strictEqual(
+      readCustomizedInner(client.state.sendMessageCalls[0]).id,
+      1
+    );
+
+    host.handlePhysicalMessage(
+      22,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 1,
+          result: {
+            value: 42,
+          },
+          messageAsString: false,
+        })
+      )
+    );
+
+    assert.deepStrictEqual(controlServer.targeted, [
+      {
+        controlId: 55,
+        event: {
+          kind: "event",
+          event: "usb-client-message",
+          data: {
+            id: 22,
+            message: JSON.stringify(
+              createCustomizedEnvelope({
+                id: 9,
+                result: {
+                  value: 42,
+                },
+                clientId: 22,
+                sender: 22,
+                messageAsString: false,
+              })
+            ),
+          },
+        },
+      },
+    ]);
+  });
+
+  it("drops unknown response ids but broadcasts notifications to controls and web clients", function () {
+    const { host } = createHost({
+      enableWebSocket: true,
+    });
+    const controlServer = attachControlServer(host);
+    const webMessages = [];
+    host.webSocketController = {
+      sendMessageToWeb(message) {
+        webMessages.push(message);
+      },
+      sendMessageToWebClient(webClientId, message) {
+        webMessages.push({
+          webClientId,
+          message,
+        });
+      },
+      close() {},
+    };
+
+    host.handlePhysicalMessage(
+      31,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 999,
+          result: {
+            dropped: true,
+          },
+          messageAsString: true,
+        })
+      )
+    );
+    host.handlePhysicalMessage(
+      31,
+      JSON.stringify({
+        event: "Customized",
+        data: {
+          type: "CDP",
+          data: {
+            client_id: -1,
+            message: JSON.stringify({
+              method: "Runtime.consoleAPICalled",
+            }),
+          },
+          sender: 0,
+        },
+      })
+    );
+
+    assert.deepStrictEqual(webMessages, [
+      JSON.stringify({
+        event: "Customized",
+        data: {
+          type: "CDP",
+          data: {
+            client_id: 31,
+            message: JSON.stringify({
+              method: "Runtime.consoleAPICalled",
+            }),
+          },
+          sender: 31,
+        },
+      }),
+    ]);
+    assert.deepStrictEqual(
+      controlServer.broadcasts.map((event) => event.event),
+      ["usb-client-message"]
+    );
+    assert.strictEqual(controlServer.broadcasts[0].data.id, 31);
+    assert.strictEqual(
+      controlServer.broadcasts[0].data.message,
+      webMessages[0]
+    );
+  });
+
+  it("rejects pending control routes on control disconnect and removes pending websocket routes on web disconnect", async function () {
+    const { host, physical } = createHost({
+      enableWebSocket: true,
+    });
+    const controlClient = createClient(41);
+    const webClient = createClient(42);
+    const webMessages = [];
+    physical.usbClients.set(controlClient.clientId(), controlClient);
+    physical.usbClients.set(webClient.clientId(), webClient);
+    host.webSocketController = {
+      sendMessageToWeb() {},
+      sendMessageToWebClient(webClientId, message) {
+        webMessages.push({
+          webClientId,
+          message,
+        });
+      },
+      close() {},
+    };
+
+    const pendingControl = host.handleControlRpc(
+      77,
+      createRpcRequest("sendCustomizedMessage", {
+        clientId: 41,
+        method: "Runtime.evaluate",
+      })
+    );
+    host.handleControlDisconnected(77);
+
+    await assert.rejects(
+      () => pendingControl,
+      /Multiplexer control 77 disconnected/
+    );
+
+    host.handleWebSocketMessage(
+      88,
+      42,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 50,
+          clientId: 42,
+          method: "Runtime.evaluate",
+          messageAsString: true,
+        })
+      )
+    );
+    assert.strictEqual(
+      readCustomizedInner(webClient.state.sendMessageCalls[0]).id,
+      2
+    );
+    host.handleWebSocketClientDisconnected(88);
+    host.handlePhysicalMessage(
+      42,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 2,
+          result: {
+            late: true,
+          },
+          messageAsString: true,
+        })
+      )
+    );
+
+    assert.deepStrictEqual(webMessages, []);
+  });
+
+  it("removes a pending route if sending to the runtime throws", function () {
+    const { host, physical } = createHost({
+      enableWebSocket: true,
+    });
+    const client = createClient(51, {
+      sendMessageError: new Error("runtime send failed"),
+    });
+    const webMessages = [];
+    physical.usbClients.set(client.clientId(), client);
+    host.webSocketController = {
+      sendMessageToWeb() {},
+      sendMessageToWebClient(webClientId, message) {
+        webMessages.push({
+          webClientId,
+          message,
+        });
+      },
+      close() {},
+    };
+
+    assert.throws(
+      () =>
+        host.handleWebSocketMessage(
+          99,
+          51,
+          JSON.stringify(
+            createCustomizedEnvelope({
+              id: 8,
+              clientId: 51,
+              method: "Runtime.evaluate",
+              messageAsString: true,
+            })
+          )
+        ),
+      /runtime send failed/
+    );
+    host.handlePhysicalMessage(
+      51,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 1,
+          result: {
+            shouldDrop: true,
+          },
+          messageAsString: true,
+        })
+      )
+    );
+
+    assert.deepStrictEqual(webMessages, []);
   });
 
   it("throws a control error for unknown RPC methods", async function () {
@@ -1577,7 +2154,7 @@ describe("MultiplexerHost", function () {
     );
   });
 
-  it("keeps handleControlDisconnected as a no-op until phase 6 route cleanup", function () {
+  it("keeps handleControlDisconnected harmless when no routes belong to the control", function () {
     const { host } = createHost();
 
     assert.doesNotThrow(() => host.handleControlDisconnected(123));

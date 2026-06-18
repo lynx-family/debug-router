@@ -12,9 +12,7 @@ export type ControlMessageMeta = {
   capabilities?: string[];
 };
 
-export type ControlRpcRequest<
-  M extends ControlRpcMethod = ControlRpcMethod,
-> = {
+export type ControlRpcRequest<M extends ControlRpcMethod = ControlRpcMethod> = {
   kind: "rpc";
   id: number;
   method: M;
@@ -22,9 +20,7 @@ export type ControlRpcRequest<
   meta?: ControlMessageMeta;
 };
 
-export type ControlRpcResponse<
-  M extends ControlRpcMethod = ControlRpcMethod,
-> =
+export type ControlRpcResponse<M extends ControlRpcMethod = ControlRpcMethod> =
   | {
       kind: "rpc-response";
       id: number;
@@ -44,6 +40,12 @@ export type ControlRpcError = {
   code: string;
   message: string;
   details?: unknown;
+};
+
+export type WebSocketServerInfo = {
+  port: number;
+  host: string;
+  roomId?: string;
 };
 
 export type ControlRpcMethod =
@@ -126,7 +128,7 @@ export type ControlRpcResult = {
   startWatchClient: void;
   stopWatchClient: void;
   disconnectDevice: void;
-  startWSServer: void;
+  startWSServer: WebSocketServerInfo | undefined;
   startWatchAllClients: void;
   sendMessageToWeb: void;
   sendMessageToApp: void;

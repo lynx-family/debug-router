@@ -174,14 +174,14 @@ export class WebSocketClient extends Client {
       if (id == -1) {
         return;
       }
-      this.server.sendMessageToApp(id, message);
+      this.server.sendMessageToApp(id, message, this.clientId());
     } else {
-      // message from app, only send to web
+      // message from app, let the server/host decide whether to route or broadcast
       const id = data.data?.sender ?? -1;
       if (id == -1) {
         return;
       }
-      this.server.sendMessageToWeb(message);
+      this.server.handleWebSocketAppMessage(this.clientId(), message);
     }
   }
 

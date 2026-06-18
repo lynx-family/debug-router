@@ -16,6 +16,7 @@ export type MultiplexerDaemonHost = {
   start: (option?: unknown) => void | Promise<void>;
   stop: () => void | Promise<void>;
   getControlPort: () => number;
+  setIdleTimeoutHandler?: (handler: () => void | Promise<void>) => void;
 };
 
 export type MultiplexerDaemonOption = {
@@ -163,6 +164,7 @@ export class MultiplexerDaemon {
       return;
     }
 
+    this.host.setIdleTimeoutHandler?.(this.handleHostIdleTimeout);
     await this.host.start(this.option?.hostOption);
     this.hostStarted = true;
   }
@@ -194,4 +196,10 @@ export class MultiplexerDaemon {
   private now(): number {
     return this.option?.now?.() ?? this.defaultNow();
   }
+
+  private readonly handleHostIdleTimeout = (): void => {
+    void this.stop().catch(() => {
+      // Process-level cleanup handlers will retry stop on exit paths.
+    });
+  };
 }

@@ -60,6 +60,12 @@ export type MultiplexerDaemonManagerOption = {
   minSupportedProtocolVersion?: number;
   daemonVersion?: string;
   capabilities?: string[];
+  multiplexerDaemonIdleTimeout?: number;
+  enableWebSocket?: boolean;
+  websocketOption?: {
+    port?: number;
+    roomId?: string;
+  };
   readyPollInterval?: number;
   replacementTimeout?: number;
   healthCheckTimeout?: number;
@@ -84,6 +90,12 @@ export class MultiplexerDaemonManager {
   readonly minSupportedProtocolVersion: number;
   readonly daemonVersion?: string;
   readonly capabilities?: string[];
+  readonly multiplexerDaemonIdleTimeout?: number;
+  readonly enableWebSocket?: boolean;
+  readonly websocketOption?: {
+    port?: number;
+    roomId?: string;
+  };
   private readonly readyPollInterval: number;
   private readonly replacementTimeout: number;
   private readonly healthCheckTimeout: number;
@@ -113,6 +125,9 @@ export class MultiplexerDaemonManager {
       MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
     this.daemonVersion = option.daemonVersion;
     this.capabilities = option.capabilities;
+    this.multiplexerDaemonIdleTimeout = option.multiplexerDaemonIdleTimeout;
+    this.enableWebSocket = option.enableWebSocket;
+    this.websocketOption = option.websocketOption;
     this.readyPollInterval =
       option.readyPollInterval ?? DEFAULT_MULTIPLEXER_READY_POLL_INTERVAL;
     this.replacementTimeout =
@@ -248,23 +263,45 @@ export class MultiplexerDaemonManager {
   ): Promise<void> {
     const yielded = await this.requestDaemonYield(info, reason);
     if (!yielded) {
-      await this.forceStopDaemon(info);
+      await this.forceStopDaemon(info, true);
     }
   }
 
   async requestDaemonYield(
-    _info: MultiplexerDiscoveryInfo,
+    info: MultiplexerDiscoveryInfo,
     _reason: MultiplexerDaemonReplaceReason,
   ): Promise<boolean> {
-    return false;
-  }
-
-  async forceStopDaemon(info: MultiplexerDiscoveryInfo): Promise<void> {
     try {
       this.killProcess(info.pid, "SIGTERM");
     } catch (error: any) {
-      if (error?.code !== "ESRCH") {
-        throw error;
+      if (error?.code === "ESRCH") {
+        return true;
+      }
+      return false;
+    }
+
+    const startedAt = this.now();
+    while (this.now() - startedAt <= this.replacementTimeout) {
+      if (await this.hasDaemonYielded(info)) {
+        return true;
+      }
+      await this.sleepFor(this.readyPollInterval);
+    }
+
+    return this.hasDaemonYielded(info);
+  }
+
+  async forceStopDaemon(
+    info: MultiplexerDiscoveryInfo,
+    skipSigterm: boolean = false,
+  ): Promise<void> {
+    if (!skipSigterm) {
+      try {
+        this.killProcess(info.pid, "SIGTERM");
+      } catch (error: any) {
+        if (error?.code !== "ESRCH") {
+          throw error;
+        }
       }
     }
 
@@ -327,6 +364,25 @@ export class MultiplexerDaemonManager {
 
     if (this.capabilities?.length) {
       args.push("--capabilities", this.capabilities.join(","));
+    }
+
+    if (this.multiplexerDaemonIdleTimeout !== undefined) {
+      args.push(
+        "--multiplexer-daemon-idle-timeout",
+        String(this.multiplexerDaemonIdleTimeout),
+      );
+    }
+
+    if (this.enableWebSocket !== undefined) {
+      args.push("--enable-websocket", String(this.enableWebSocket));
+    }
+
+    if (this.websocketOption?.port !== undefined) {
+      args.push("--websocket-port", String(this.websocketOption.port));
+    }
+
+    if (this.websocketOption?.roomId !== undefined) {
+      args.push("--websocket-room-id", this.websocketOption.roomId);
     }
 
     return args;
@@ -419,6 +475,13 @@ export class MultiplexerDaemonManager {
         finish({ ok: false, reason: error.message });
       });
     });
+  }
+
+  private async hasDaemonYielded(
+    info: MultiplexerDiscoveryInfo,
+  ): Promise<boolean> {
+    const healthCheck = await this.checkDaemonHealth(info);
+    return !healthCheck.ok;
   }
 }
 

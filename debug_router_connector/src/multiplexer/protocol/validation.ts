@@ -357,6 +357,7 @@ function isControlRpcResult(
     case "sendRawMessage":
       return isResponseMessage(result);
     case "startWSServer":
+      return result === undefined || isWebSocketServerInfo(result);
     case "startWatchAllClients":
     case "startWatchClient":
     case "stopWatchClient":
@@ -369,6 +370,15 @@ function isControlRpcResult(
     default:
       return false;
   }
+}
+
+function isWebSocketServerInfo(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNumber(value.port) &&
+    isString(value.host) &&
+    isOptional(value.roomId, isString)
+  );
 }
 
 function isControlRpcError(value: unknown): value is ControlRpcError {

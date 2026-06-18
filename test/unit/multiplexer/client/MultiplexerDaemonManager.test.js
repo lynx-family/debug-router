@@ -429,6 +429,29 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(spawnRecorder.calls.length, 1);
   });
 
+  it("requestDaemonYield asks the daemon to stop and succeeds after health disappears", async function () {
+    class HealthGoneManager extends MultiplexerDaemonManager {
+      async checkDaemonHealth() {
+        return { ok: false, reason: "connect ECONNREFUSED" };
+      }
+    }
+
+    const killCalls = [];
+    const { manager } = createManager(tempDir, {
+      ManagerClass: HealthGoneManager,
+      kill: (pid, signal) => killCalls.push([pid, signal]),
+    });
+
+    assert.strictEqual(
+      await manager.requestDaemonYield(
+        createInfo({ pid: 312 }),
+        "stale-daemon"
+      ),
+      true
+    );
+    assert.deepStrictEqual(killCalls, [[312, "SIGTERM"]]);
+  });
+
   it("times out while waiting for discovery to become usable", async function () {
     let now = 0;
     const discovery = createSequenceDiscovery(

@@ -3,13 +3,18 @@
 // LICENSE file in the root directory of this source tree.
 
 import { BaseDevice } from "../../device/BaseDevice";
+import detectPort from "detect-port";
+import { address } from "ip";
 import {
   PhysicalConnector,
   PhysicalConnectorOption,
 } from "../../physical/PhysicalConnector";
+import { getDriverReportService } from "../../report/interface/DriverReportService";
 import { UsbClient } from "../../usb/Client";
 import { defaultLogger } from "../../utils/logger";
+import { WebSocketController } from "../../websocket/WebSocketServer";
 import {
+  SocketEvent,
   ClientDescription,
   DeviceDescription,
   PhysicalConnectorEvent,
@@ -24,12 +29,48 @@ import {
   MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
   Snapshot,
+  WebSocketServerInfo,
 } from "../protocol";
 import { MultiplexerDaemonHost } from "./MultiplexerDaemon";
 import {
   MultiplexerControlHost,
   MultiplexerControlServer,
 } from "./MultiplexerControlServer";
+import { PendingRoute, PendingRouteTable } from "./PendingRouteTable";
+
+const DEFAULT_DEV_SERVE_PORT = 19783;
+
+export type PendingTargetSeed =
+  | {
+      kind: "control";
+      controlId: number;
+      clientId: number;
+      resolve?: (value: unknown) => void;
+      reject?: (error: Error) => void;
+    }
+  | {
+      kind: "websocket";
+      webClientId: number;
+      clientId: number;
+    };
+
+export type RoutedMessage = {
+  target: PendingRoute;
+  clientId: number;
+  message: string;
+};
+
+type CustomizedPayload = {
+  container: any;
+  message: any;
+  messageWasString: boolean;
+};
+
+type WebSocketControllerLike = {
+  sendMessageToWeb(message: string): void;
+  sendMessageToWebClient(webClientId: number, message: string): void;
+  close(): void;
+};
 
 export type MultiplexerHostOption = PhysicalConnectorOption & {
   controlPort?: number;
@@ -37,6 +78,7 @@ export type MultiplexerHostOption = PhysicalConnectorOption & {
   minSupportedProtocolVersion?: number;
   daemonVersion?: string;
   capabilities?: string[];
+  multiplexerDaemonIdleTimeout?: number;
   websocketOption?: {
     port?: number;
     roomId?: string;
@@ -50,6 +92,10 @@ export type MultiplexerHostOption = PhysicalConnectorOption & {
   now?: () => number;
 };
 
+type MultiplexerHostStartOption = {
+  multiplexerDaemonIdleTimeout?: number;
+};
+
 export class MultiplexerHost
   implements MultiplexerDaemonHost, MultiplexerControlHost {
   private readonly physicalConnector: PhysicalConnector;
@@ -57,7 +103,10 @@ export class MultiplexerHost
   private readonly protocolVersion: number;
   private readonly minSupportedProtocolVersion: number;
   private readonly now: () => number;
+  private readonly pendingRoutes: PendingRouteTable;
   private controlServer: MultiplexerControlServer | null = null;
+  private webSocketController: WebSocketControllerLike | null = null;
+  private webSocketServerInfo: WebSocketServerInfo | undefined;
   private deviceDiscoveryStarted = false;
   private deviceDiscoveryStarting: Promise<void> | null = null;
   private deviceDiscoveryAutoListensClients = false;
@@ -69,6 +118,13 @@ export class MultiplexerHost
   private allClientWatchersRequested = false;
   private webSocketServerStarted = false;
   private webSocketServerStarting: Promise<void> | null = null;
+  private readonly activeControlIds = new Set<number>();
+  private readonly activeWebSocketDriverIds = new Set<number>();
+  private idleTimer: NodeJS.Timeout | null = null;
+  private idleTimeoutHandler: (() => void | Promise<void>) | undefined;
+  private runtimeIdleTimeout: number | undefined;
+  private nextGlobalMessageId = 1;
+  private nextControlMessageId = 1;
   private started = false;
 
   private readonly handleDeviceConnected = (device: BaseDevice): void => {
@@ -123,14 +179,7 @@ export class MultiplexerHost
   private readonly handleUsbClientMessage = (
     payload: PhysicalConnectorEvent["usb-client-message"],
   ): void => {
-    this.broadcast({
-      kind: "event",
-      event: "usb-client-message",
-      data: {
-        id: payload.id,
-        message: payload.message,
-      },
-    });
+    this.handlePhysicalMessage(payload.id, payload.message);
   };
 
   constructor(option: MultiplexerHostOption = {}) {
@@ -141,6 +190,9 @@ export class MultiplexerHost
       option.minSupportedProtocolVersion ??
       MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
     this.now = option.now ?? Date.now;
+    this.pendingRoutes = new PendingRouteTable({
+      now: this.now,
+    });
 
     const PhysicalConnectorCtor =
       option.PhysicalConnectorCtor ?? PhysicalConnector;
@@ -148,11 +200,17 @@ export class MultiplexerHost
       option.physicalConnector ?? new PhysicalConnectorCtor(option);
   }
 
-  async start(): Promise<void> {
+  async start(startOption?: unknown): Promise<void> {
     if (this.started) {
       return;
     }
 
+    if (
+      isMultiplexerHostStartOption(startOption) &&
+      startOption.multiplexerDaemonIdleTimeout !== undefined
+    ) {
+      this.runtimeIdleTimeout = startOption.multiplexerDaemonIdleTimeout;
+    }
     this.bindPhysicalConnectorEvents();
 
     const controlServer = new MultiplexerControlServer({
@@ -170,6 +228,7 @@ export class MultiplexerHost
     try {
       await controlServer.start();
       this.started = true;
+      this.scheduleIdleTimeoutIfNeeded();
     } catch (error) {
       await this.stop();
       throw error;
@@ -177,28 +236,61 @@ export class MultiplexerHost
   }
 
   async stop(): Promise<void> {
-    if (!this.started && !this.controlServer) {
+    if (!this.started && !this.controlServer && !this.webSocketController) {
       return;
     }
 
+    const stopErrors: unknown[] = [];
     this.started = false;
+    this.clearIdleTimeout();
+    this.activeControlIds.clear();
+    this.activeWebSocketDriverIds.clear();
     this.unbindPhysicalConnectorEvents();
+
+    const webSocketController = this.webSocketController;
+    this.webSocketController = null;
+    this.webSocketServerInfo = undefined;
+    this.webSocketServerStarted = false;
+    this.webSocketServerStarting = null;
+    try {
+      webSocketController?.close();
+    } catch (error) {
+      stopErrors.push(error);
+    }
 
     const controlServer = this.controlServer;
     this.controlServer = null;
-    if (controlServer) {
-      await controlServer.stop();
+    try {
+      await controlServer?.stop();
+    } catch (error) {
+      stopErrors.push(error);
     }
 
-    await this.physicalConnector.close();
-    this.resetDiscoveryState();
+    try {
+      await this.physicalConnector.close();
+    } catch (error) {
+      stopErrors.push(error);
+    } finally {
+      this.resetDiscoveryState();
+    }
+
+    if (stopErrors.length > 0) {
+      throw createStopError(stopErrors);
+    }
   }
 
   getControlPort(): number {
     return this.controlServer?.controlPort ?? this.option.controlPort ?? 0;
   }
 
+  setIdleTimeoutHandler(handler: () => void | Promise<void>): void {
+    this.idleTimeoutHandler = handler;
+    this.scheduleIdleTimeoutIfNeeded();
+  }
+
   handleControlConnected(controlId: number): void {
+    this.activeControlIds.add(controlId);
+    this.clearIdleTimeout();
     this.sendToControl(controlId, {
       kind: "event",
       event: "snapshot",
@@ -206,12 +298,17 @@ export class MultiplexerHost
     });
   }
 
-  handleControlDisconnected(_controlId: number): void {
-    // Route cleanup for WebSocket/frontend traffic belongs to phase 6.
+  handleControlDisconnected(controlId: number): void {
+    this.activeControlIds.delete(controlId);
+    this.rejectRoutes(
+      this.pendingRoutes.clearByControlId(controlId),
+      new Error(`Multiplexer control ${controlId} disconnected`),
+    );
+    this.scheduleIdleTimeoutIfNeeded();
   }
 
   async handleControlRpc(
-    _controlId: number,
+    controlId: number,
     message: ControlRpcRequest,
   ): Promise<unknown> {
     switch (message.method) {
@@ -220,7 +317,9 @@ export class MultiplexerHost
           message.params as ControlRpcParams["connectDevices"],
         );
       case "getDevices":
-        return this.getDevices(message.params as ControlRpcParams["getDevices"]);
+        return this.getDeviceSnapshots(
+          message.params as ControlRpcParams["getDevices"],
+        );
       case "connectUsbClients":
         return this.connectUsbClients(
           message.params as ControlRpcParams["connectUsbClients"],
@@ -245,15 +344,20 @@ export class MultiplexerHost
         );
       case "sendMessageToWeb":
         return this.sendMessageToWeb(
-          message.params as ControlRpcParams["sendMessageToWeb"],
+          (message.params as ControlRpcParams["sendMessageToWeb"]).message,
         );
       case "sendMessageToApp":
         return this.sendMessageToApp(
-          message.params as ControlRpcParams["sendMessageToApp"],
+          (message.params as ControlRpcParams["sendMessageToApp"]).id,
+          (message.params as ControlRpcParams["sendMessageToApp"]).message,
+          (message.params as ControlRpcParams["sendMessageToApp"])
+            .fromWebClientId,
+          controlId,
         );
       case "sendCustomizedMessage":
         return this.sendCustomizedMessage(
           message.params as ControlRpcParams["sendCustomizedMessage"],
+          controlId,
         );
       case "sendRawMessage":
         return this.physicalConnector.sendRawMessage(
@@ -274,7 +378,9 @@ export class MultiplexerHost
       default:
         throw createControlError(
           "unknown-control-rpc",
-          `Unknown multiplexer control RPC: ${(message as ControlRpcRequest).method}`,
+          `Unknown multiplexer control RPC: ${
+            (message as ControlRpcRequest).method
+          }`,
         );
     }
   }
@@ -318,17 +424,190 @@ export class MultiplexerHost
     return clients.map((client) => this.serializeClient(client));
   }
 
+  createClientId(): number {
+    return this.physicalConnector.createClientId();
+  }
+
+  getAllUsbClients(): UsbClient[] {
+    return this.physicalConnector.getAllUsbClients();
+  }
+
+  getDevices(
+    timeout: number = -1,
+    serial: string | null = null,
+  ): Promise<BaseDevice[]> {
+    return this.physicalConnector.getDevices(timeout, serial);
+  }
+
+  handleWebSocketMessage(
+    // Web Frontend -> Runtime
+    webClientId: number,
+    targetClientId: number,
+    message: string,
+  ): void {
+    this.sendMessageToRuntime(targetClientId, message, {
+      kind: "websocket",
+      webClientId,
+      clientId: targetClientId,
+    });
+  }
+
+  handleWebSocketAppMessage(appClientId: number, message: string): void {
+    // Runtime message through WebSocket
+    this.handlePhysicalMessage(appClientId, message);
+  }
+
+  handleWebSocketClientConnected(clientId: number, type?: string): void {
+    if (isWebSocketDriverType(type)) {
+      this.activeWebSocketDriverIds.add(clientId);
+      this.clearIdleTimeout();
+    }
+  }
+
+  handleWebSocketClientDisconnected(clientId: number, type?: string): void {
+    if (isWebSocketDriverType(type)) {
+      this.activeWebSocketDriverIds.delete(clientId);
+    }
+    this.pendingRoutes.clearByWebClientId(clientId);
+    this.scheduleIdleTimeoutIfNeeded();
+  }
+
+  handlePhysicalMessage(clientId: number, message: string): void {
+    const routed = this.restoreInboundMessage(message);
+    if (routed) {
+      if (routed.target.kind === "control") {
+        if (routed.target.resolve) {
+          routed.target.resolve(extractCustomizedMessage(routed.message));
+        } else {
+          this.sendToControl(routed.target.controlId, {
+            kind: "event",
+            event: "usb-client-message",
+            data: {
+              id: routed.clientId,
+              message: routed.message,
+            },
+          });
+        }
+      } else {
+        this.sendMessageToWebClient(routed.target.webClientId, routed.message);
+      }
+      return;
+    }
+
+    if (hasResponseId(message)) {
+      defaultLogger.debug(
+        `Drop multiplexer response with unknown message id from client ${clientId}`,
+      );
+      return;
+    }
+
+    const broadcastMessage = rewriteRuntimeClientId(message, clientId);
+    if (this.option.enableWebSocket) {
+      this.sendMessageToWeb(broadcastMessage);
+    }
+    this.broadcast({
+      kind: "event",
+      event: "usb-client-message",
+      data: {
+        id: clientId,
+        message: broadcastMessage,
+      },
+    });
+  }
+
+  sendMessageToWeb(message: string): void {
+    if (!this.option.enableWebSocket) {
+      defaultLogger.warn("enableWebSocket isn't opened!");
+      return;
+    }
+
+    if (!this.webSocketController) {
+      defaultLogger.warn("websocket server hasn't started up");
+      return;
+    }
+
+    this.webSocketController.sendMessageToWeb(message);
+  }
+
+  sendMessageToWebClient(webClientId: number, message: string): void {
+    if (!this.option.enableWebSocket) {
+      defaultLogger.warn("enableWebSocket isn't opened!");
+      return;
+    }
+
+    if (!this.webSocketController) {
+      defaultLogger.warn("websocket server hasn't started up");
+      return;
+    }
+
+    this.webSocketController.sendMessageToWebClient(webClientId, message);
+  }
+
+  sendMessageToApp(
+    id: number,
+    message: string,
+    fromWebClientId?: number,
+    controlId?: number,
+  ): void {
+    if (fromWebClientId !== undefined) {
+      this.handleWebSocketMessage(fromWebClientId, id, message);
+      return;
+    }
+
+    this.sendMessageToRuntime(id, message, {
+      kind: "control",
+      controlId: controlId ?? 0,
+      clientId: id,
+    });
+  }
+
+  rewriteOutboundMessage(message: string, target: PendingTargetSeed): string {
+    const data = parseJsonMessage(message);
+    this.rewriteOutboundMessageData(data, target);
+    return JSON.stringify(data);
+  }
+
+  restoreInboundMessage(message: string): RoutedMessage | null {
+    const data = parseJsonMessageOrNull(message);
+    if (!data) {
+      return null;
+    }
+
+    const customized = getCustomizedPayload(data);
+    const globalMessageId = getValidMessageId(customized?.message);
+    if (globalMessageId === null) {
+      return null;
+    }
+
+    const target = this.pendingRoutes.take(globalMessageId);
+    if (!target) {
+      return null;
+    }
+
+    if (customized) {
+      customized.message.id = target.originalId;
+      writeCustomizedMessage(customized);
+    }
+    rewriteRuntimeClientIdData(data, target.clientId);
+
+    return {
+      target,
+      clientId: target.clientId,
+      message: JSON.stringify(data),
+    };
+  }
+
   private async connectDevices(
     params: ControlRpcParams["connectDevices"],
   ): Promise<DeviceSnapshot[]> {
     await this.ensureDeviceDiscovery(params.isAutoListenClients ?? true);
-    return this.getDevices({
+    return this.getDeviceSnapshots({
       timeout: params.timeout,
       serial: params.serial,
     });
   }
 
-  private async getDevices(
+  private async getDeviceSnapshots(
     params: ControlRpcParams["getDevices"],
   ): Promise<DeviceSnapshot[]> {
     const devices = await this.physicalConnector.getDevices(
@@ -374,9 +653,7 @@ export class MultiplexerHost
     await device.stopWatchClient();
   }
 
-  private disconnectDevice(
-    params: ControlRpcParams["disconnectDevice"],
-  ): void {
+  private disconnectDevice(params: ControlRpcParams["disconnectDevice"]): void {
     this.clearClientDiscoveryForDevice(params.deviceId);
 
     const device = this.physicalConnector.devices.get(params.deviceId);
@@ -418,7 +695,7 @@ export class MultiplexerHost
     await this.ensureClientDiscoveryForCurrentDevices();
   }
 
-  private async ensureClientDiscovery(deviceId: string): Promise<void> { 
+  private async ensureClientDiscovery(deviceId: string): Promise<void> {
     if (this.clientDiscoveryStartedDeviceIds.has(deviceId)) {
       return;
     }
@@ -435,7 +712,7 @@ export class MultiplexerHost
         if (!device) {
           return;
         }
-        
+
         this.physicalConnector.startWatchClient(device);
         this.clientDiscoveryStartedDeviceIds.add(deviceId);
       })
@@ -466,7 +743,6 @@ export class MultiplexerHost
     );
   }
 
-
   private async startWatchAllClients(
     params: ControlRpcParams["startWatchAllClients"],
   ): Promise<void> {
@@ -475,19 +751,20 @@ export class MultiplexerHost
     await this.ensureClientDiscoveryForCurrentDevices();
   }
 
-  private async startWSServer(): Promise<void> {
+  private async startWSServer(): Promise<WebSocketServerInfo | undefined> {
     if (!this.option.enableWebSocket) {
       return;
     }
 
     if (this.webSocketServerStarted) {
-      return;
+      return this.webSocketServerInfo;
     }
 
     if (!this.webSocketServerStarting) {
       this.webSocketServerStarting = this.startWebSocketServerInternal()
-        .then(() => {
+        .then((info) => {
           this.webSocketServerStarted = true;
+          this.webSocketServerInfo = info;
         })
         .finally(() => {
           this.webSocketServerStarting = null;
@@ -495,65 +772,70 @@ export class MultiplexerHost
     }
 
     await this.webSocketServerStarting;
+    return this.webSocketServerInfo;
   }
 
-  private async startWebSocketServerInternal(): Promise<void> {
-    throw createControlError(
-      "multiplexer-websocket-not-ready",
-      "Multiplexer WebSocket frontend routing will be implemented in phase 6",
-    );
+  private async startWebSocketServerInternal(): Promise<WebSocketServerInfo> {
+    const port = this.option.websocketOption?.port ?? DEFAULT_DEV_SERVE_PORT;
+    const wssPort = await detectPort(port);
+    const wssHost = `${address()}:${wssPort}`;
+    const info: WebSocketServerInfo = {
+      port: wssPort,
+      host: wssHost,
+      roomId: this.option.websocketOption?.roomId,
+    };
+
+    getDriverReportService()?.report("websocket_server_init", null, {
+      port: "wssPort:" + wssHost,
+    });
+
+    await new Promise<void>((resolve) => {
+      this.webSocketController = new WebSocketController(this, {
+        port: wssPort,
+        host: wssHost,
+        roomId: this.option.websocketOption?.roomId,
+        callback: resolve,
+      });
+    });
+    return info;
   }
 
-  private sendMessageToWeb(
-    params: ControlRpcParams["sendMessageToWeb"],
-  ): void {
-    if (!this.option.enableWebSocket) {
-      defaultLogger.warn("enableWebSocket isn't opened!");
-      return;
+  private createControlMessageId(): number {
+    while (this.pendingRoutes.has(this.nextControlMessageId)) {
+      this.nextControlMessageId++;
     }
-
-    throw createControlError(
-      "multiplexer-websocket-not-ready",
-      `Multiplexer cannot send message to Web before phase 6 routing is ready: ${params.message}`,
-    );
-  }
-
-  private sendMessageToApp(
-    params: ControlRpcParams["sendMessageToApp"],
-  ): void {
-    const client = this.physicalConnector.usbClients.get(params.id);
-    if (!client) {
-      if (!this.option.enableWebSocket) {
-        defaultLogger.warn("enableWebSocket isn't opened!");
-        return;
-      }
-
-      throw createControlError(
-        "multiplexer-client-not-found",
-        `Multiplexer target app client was not found: ${params.id}`,
-      );
+    if (this.nextControlMessageId >= Number.MAX_SAFE_INTEGER) {
+      this.nextControlMessageId = 1;
     }
-
-    const data = parseJsonMessage(params.message);
-    if (data?.data?.type === "UsbConnect" || data?.data?.type === "UsbConnectAck") {
-      return;
-    }
-    if (data?.data?.data?.client_id) {
-      data.data.data.client_id = -1;
-    }
-    client.sendMessage(data);
+    return this.nextControlMessageId++;
   }
 
   private async sendCustomizedMessage(
     params: ControlRpcParams["sendCustomizedMessage"],
+    controlId: number,
   ): Promise<string> {
-    const client = this.getUsbClient(params.clientId);
-    return client.sendCustomizedMessage(
-      params.method,
-      normalizeCustomizedParams(params.params),
-      params.sessionId ?? -1,
-      params.type ?? "CDP",
-    );
+    const originalId = this.createControlMessageId();
+    const message = createCustomizedMessage({
+      id: originalId,
+      method: params.method,
+      params: normalizeCustomizedParams(params.params),
+      sessionId: params.sessionId ?? -1,
+      type: params.type ?? "CDP",
+    });
+
+    return new Promise<string>((resolve, reject) => {
+      try {
+        this.sendMessageToRuntime(params.clientId, message, {
+          kind: "control",
+          controlId,
+          clientId: params.clientId,
+          resolve: (value) => resolve(String(value)),
+          reject,
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
 
   private getUsbClient(clientId: number): UsbClient {
@@ -667,6 +949,135 @@ export class MultiplexerHost
     this.allClientWatchersRequested = false;
     this.webSocketServerStarted = false;
     this.webSocketServerStarting = null;
+    this.activeControlIds.clear();
+    this.activeWebSocketDriverIds.clear();
+    this.clearIdleTimeout();
+    this.rejectRoutes(
+      this.pendingRoutes.clear(),
+      new Error("Multiplexer host route table was reset"),
+    );
+  }
+
+  private sendMessageToRuntime(
+    clientId: number,
+    message: string | object,
+    target: PendingTargetSeed,
+  ): void {
+    const client = this.getUsbClient(clientId);
+    const data =
+      typeof message === "string"
+        ? parseJsonMessage(message)
+        : cloneJsonValue(message);
+
+    if (
+      data?.data?.type === "UsbConnect" ||
+      data?.data?.type === "UsbConnectAck"
+    ) {
+      return;
+    }
+    if (data?.data?.data?.client_id) {
+      data.data.data.client_id = -1;
+    }
+
+    const route = this.rewriteOutboundMessageData(data, target);
+    try {
+      client.sendMessage(data);
+    } catch (error) {
+      if (route) {
+        this.pendingRoutes.delete(route.globalMessageId);
+      }
+      throw error;
+    }
+  }
+
+  private rewriteOutboundMessageData(
+    data: any,
+    target: PendingTargetSeed,
+  ): PendingRoute | null {
+    const customized = getCustomizedPayload(data);
+    const originalId = getValidMessageId(customized?.message);
+    if (!customized || originalId === null) {
+      return null;
+    }
+
+    const globalMessageId = this.createGlobalMessageId();
+    const route = this.pendingRoutes.add(globalMessageId, {
+      ...target,
+      originalId,
+      clientId: target.clientId,
+    });
+
+    customized.message.id = globalMessageId;
+    writeCustomizedMessage(customized);
+    return route;
+  }
+
+  private createGlobalMessageId(): number {
+    while (this.pendingRoutes.has(this.nextGlobalMessageId)) {
+      this.nextGlobalMessageId++;
+    }
+    if (this.nextGlobalMessageId >= Number.MAX_SAFE_INTEGER) {
+      this.nextGlobalMessageId = 1;
+    }
+    return this.nextGlobalMessageId++;
+  }
+
+  private rejectRoutes(routes: PendingRoute[], error: Error): void {
+    for (const route of routes) {
+      if (route.kind === "control") {
+        route.reject?.(error);
+      }
+    }
+  }
+
+  private scheduleIdleTimeoutIfNeeded(): void {
+    if (!this.started || !this.idleTimeoutHandler) {
+      return;
+    }
+
+    const idleTimeout = this.getIdleTimeout();
+    if (idleTimeout === undefined || !this.isIdle()) {
+      return;
+    }
+
+    this.clearIdleTimeout();
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (!this.isIdle()) {
+        return;
+      }
+      void this.idleTimeoutHandler?.();
+    }, idleTimeout);
+  }
+
+  private clearIdleTimeout(): void {
+    if (!this.idleTimer) {
+      return;
+    }
+
+    clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  private isIdle(): boolean {
+    return (
+      this.activeControlIds.size === 0 &&
+      this.activeWebSocketDriverIds.size === 0
+    );
+  }
+
+  private getIdleTimeout(): number | undefined {
+    const idleTimeout =
+      this.runtimeIdleTimeout ?? this.option.multiplexerDaemonIdleTimeout;
+    if (
+      idleTimeout === undefined ||
+      !Number.isFinite(idleTimeout) ||
+      idleTimeout < 0
+    ) {
+      return undefined;
+    }
+
+    return idleTimeout;
   }
 }
 
@@ -680,6 +1091,15 @@ function createControlError(
     message,
     details,
   };
+}
+
+function createStopError(errors: unknown[]): Error {
+  const message = errors
+    .map((error) => (error instanceof Error ? error.message : String(error)))
+    .join("; ");
+  const stopError = new Error(`Failed to stop multiplexer host: ${message}`);
+  (stopError as any).errors = errors;
+  return stopError;
 }
 
 function safeGetDeviceHost(device: BaseDevice): string | undefined {
@@ -724,4 +1144,140 @@ function parseJsonMessage(message: string): any {
       `Invalid JSON message for multiplexer app client: ${error?.message}`,
     );
   }
+}
+
+function parseJsonMessageOrNull(message: string): any | null {
+  try {
+    return JSON.parse(message);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function createCustomizedMessage(option: {
+  id: number;
+  method: string;
+  params: Object;
+  sessionId: number;
+  type: string;
+}): object {
+  return {
+    event: SocketEvent.Customized,
+    data: {
+      type: option.type,
+      data: {
+        client_id: -1,
+        session_id: option.sessionId,
+        message: {
+          id: option.id,
+          method: option.method,
+          params: option.params,
+        },
+      },
+      sender: 0,
+    },
+  };
+}
+
+function getCustomizedPayload(data: any): CustomizedPayload | null {
+  const container = data?.data?.data;
+  if (
+    !container ||
+    !Object.prototype.hasOwnProperty.call(container, "message")
+  ) {
+    return null;
+  }
+
+  const rawMessage = container.message;
+  if (typeof rawMessage === "string") {
+    const message = parseJsonMessageOrNull(rawMessage);
+    if (!message) {
+      return null;
+    }
+
+    return {
+      container,
+      message,
+      messageWasString: true,
+    };
+  }
+
+  if (typeof rawMessage === "object" && rawMessage !== null) {
+    return {
+      container,
+      message: rawMessage,
+      messageWasString: false,
+    };
+  }
+
+  return null;
+}
+
+function writeCustomizedMessage(payload: CustomizedPayload): void {
+  payload.container.message = payload.messageWasString
+    ? JSON.stringify(payload.message)
+    : payload.message;
+}
+
+function getValidMessageId(message: any | null | undefined): number | null {
+  const id = message?.id;
+  if (!Number.isSafeInteger(id)) {
+    return null;
+  }
+
+  return id;
+}
+
+function hasResponseId(message: string): boolean {
+  const data = parseJsonMessageOrNull(message);
+  if (!data) {
+    return false;
+  }
+
+  const customized = getCustomizedPayload(data);
+  return getValidMessageId(customized?.message) !== null;
+}
+
+function extractCustomizedMessage(message: string): string {
+  const data = parseJsonMessageOrNull(message);
+  const customized = data ? getCustomizedPayload(data) : null;
+  if (!customized) {
+    return message;
+  }
+
+  return typeof customized.container.message === "string"
+    ? customized.container.message
+    : JSON.stringify(customized.container.message);
+}
+
+function rewriteRuntimeClientId(message: string, clientId: number): string {
+  const data = parseJsonMessageOrNull(message);
+  if (!data) {
+    return message;
+  }
+
+  rewriteRuntimeClientIdData(data, clientId);
+  return JSON.stringify(data);
+}
+
+function rewriteRuntimeClientIdData(data: any, clientId: number): void {
+  if (data?.data && Object.prototype.hasOwnProperty.call(data.data, "sender")) {
+    data.data.sender = clientId;
+  }
+  if (
+    data?.data?.data &&
+    Object.prototype.hasOwnProperty.call(data.data.data, "client_id")
+  ) {
+    data.data.data.client_id = clientId;
+  }
+}
+
+function isWebSocketDriverType(type?: string): boolean {
+  return type === "Driver";
+}
+
+function isMultiplexerHostStartOption(
+  option: unknown,
+): option is MultiplexerHostStartOption {
+  return typeof option === "object" && option !== null;
 }

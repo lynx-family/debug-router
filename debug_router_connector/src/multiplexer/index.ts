@@ -2,5 +2,16 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-export * from "./protocol";
-export * from "./client";
+export { MultiplexerDevice, MultiplexerUsbClient } from "./client";
+export type {
+  MultiplexerDeviceOption,
+  MultiplexerUsbClientOption,
+} from "./client";
+export type {
+  ClientSnapshot,
+  ControlEvent,
+  ControlEventEnvelope,
+  DeviceSnapshot,
+  Snapshot,
+  WebSocketClientSnapshot,
+} from "./protocol";
