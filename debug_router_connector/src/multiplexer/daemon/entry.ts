@@ -13,6 +13,7 @@ import {
   MultiplexerDaemonHost,
   MultiplexerDaemonOption,
 } from "./MultiplexerDaemon";
+import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
 import { MultiplexerHost } from "./MultiplexerHost";
 
 const ENTRY_CLEANUP_TIMEOUT = 3000;
@@ -26,12 +27,14 @@ export type MultiplexerDaemonEntryOption = {
   heartbeatInterval: number;
   daemonVersion?: string;
   capabilities?: string[];
+  legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
   enableWebSocket?: boolean;
   websocketOption?: {
     port?: number;
     roomId?: string;
   };
+  physicalConnectorOption?: PhysicalConnectorOption;
 };
 
 type EntryArgKey =
@@ -57,6 +60,8 @@ const OPTION_ALIASES: Record<string, EntryArgKey> = {
   "daemon-version": "daemonVersion",
   daemonVersion: "daemonVersion",
   capabilities: "capabilities",
+  "legacy-driver-dir": "legacyDriverDir",
+  legacyDriverDir: "legacyDriverDir",
   "multiplexer-daemon-idle-timeout": "multiplexerDaemonIdleTimeout",
   multiplexerDaemonIdleTimeout: "multiplexerDaemonIdleTimeout",
   "enable-websocket": "enableWebSocket",
@@ -65,6 +70,8 @@ const OPTION_ALIASES: Record<string, EntryArgKey> = {
   websocketPort: "websocketPort",
   "websocket-room-id": "websocketRoomId",
   websocketRoomId: "websocketRoomId",
+  "physical-connector-option": "physicalConnectorOption",
+  physicalConnectorOption: "physicalConnectorOption",
 };
 
 export async function startMultiplexerDaemonEntry(
@@ -111,6 +118,7 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   const daemonLockPath = getRequiredString(rawArgs, "daemonLockPath");
   const enableWebSocket = getOptionalBoolean(rawArgs, "enableWebSocket");
   const websocketOption = parseWebSocketOption(rawArgs);
+  const physicalConnectorOption = parsePhysicalConnectorOption(rawArgs);
 
   const option: MultiplexerDaemonEntryOption = {
     discoveryPath,
@@ -134,6 +142,10 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
     daemonVersion: getOptionalString(rawArgs, "daemonVersion"),
     capabilities: parseCapabilities(getOptionalString(rawArgs, "capabilities")),
   };
+  const legacyDriverDir = getOptionalString(rawArgs, "legacyDriverDir");
+  if (legacyDriverDir !== undefined) {
+    option.legacyDriverDir = legacyDriverDir;
+  }
   const multiplexerDaemonIdleTimeout = getOptionalNumberOrUndefined(
     rawArgs,
     "multiplexerDaemonIdleTimeout",
@@ -146,6 +158,9 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   }
   if (websocketOption !== undefined) {
     option.websocketOption = websocketOption;
+  }
+  if (physicalConnectorOption !== undefined) {
+    option.physicalConnectorOption = physicalConnectorOption;
   }
   return option;
 }
@@ -160,6 +175,9 @@ function createEntryHost(
     daemonVersion: entryOption.daemonVersion,
     capabilities: entryOption.capabilities,
   };
+  if (entryOption.legacyDriverDir !== undefined) {
+    Object.assign(hostOption, { legacyDriverDir: entryOption.legacyDriverDir });
+  }
   if (entryOption.multiplexerDaemonIdleTimeout !== undefined) {
     Object.assign(hostOption, {
       multiplexerDaemonIdleTimeout: entryOption.multiplexerDaemonIdleTimeout,
@@ -170,6 +188,9 @@ function createEntryHost(
   }
   if (entryOption.websocketOption !== undefined) {
     Object.assign(hostOption, { websocketOption: entryOption.websocketOption });
+  }
+  if (entryOption.physicalConnectorOption !== undefined) {
+    Object.assign(hostOption, entryOption.physicalConnectorOption);
   }
   return new MultiplexerHost(hostOption);
 }
@@ -393,6 +414,37 @@ function parseCapabilities(value?: string): string[] | undefined {
     .split(",")
     .map((capability) => capability.trim())
     .filter(Boolean);
+}
+
+function parsePhysicalConnectorOption(
+  rawArgs: RawEntryArgs,
+): PhysicalConnectorOption | undefined {
+  const value = rawArgs.physicalConnectorOption;
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(
+      `Invalid multiplexer daemon option physicalConnectorOption: ${value}`,
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error: any) {
+    throw new Error(
+      `Invalid multiplexer daemon option physicalConnectorOption: ${error?.message}`,
+    );
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      "Invalid multiplexer daemon option physicalConnectorOption: expected object",
+    );
+  }
+
+  return parsed as PhysicalConnectorOption;
 }
 
 if (require.main === module) {

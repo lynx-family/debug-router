@@ -26,6 +26,9 @@ const rootIndexPath = require.resolve("../../../../debug_router_connector/src");
 const {
   defaultLogger,
 } = require("../../../../debug_router_connector/src/utils/logger");
+const {
+  MultiOpenStatus,
+} = require("../../../../debug_router_connector/src/connector/MultiOpenCallBack");
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -129,6 +132,7 @@ function loadConnectorWithFakes(config = {}) {
     results: new Map(config.results ?? []),
     rejectMethods: new Set(config.rejectMethods ?? []),
     unsubscribeCalls: 0,
+    unsubscribeConnectionCalls: 0,
     closeCalls: 0,
   };
 
@@ -189,8 +193,27 @@ function loadConnectorWithFakes(config = {}) {
       };
     }
 
+    subscribeConnectionState(listener) {
+      this.connectionListener = listener;
+      let active = true;
+      return () => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        state.unsubscribeConnectionCalls++;
+        if (this.connectionListener === listener) {
+          this.connectionListener = undefined;
+        }
+      };
+    }
+
     emitHostEvent(event) {
       this.listener?.(event);
+    }
+
+    emitConnectionState(state) {
+      this.connectionListener?.(state);
     }
 
     async close() {
@@ -257,6 +280,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
         multiplexerRootDir: "/tmp/mux-root",
         multiplexerDataDir: "/tmp/mux-data",
         multiplexerDaemonEntry: "/tmp/entry.js",
+        multiplexerLegacyDriverDir: "/tmp/legacy-driver",
         multiplexerStaleTimeout: 222,
         multiplexerStartupTimeout: 333,
         multiplexerDaemonIdleTimeout: 444,
@@ -281,6 +305,10 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.strictEqual(state.managers[0].option.daemonEntry, "/tmp/entry.js");
       assert.strictEqual(state.managers[0].option.startupTimeout, 333);
       assert.strictEqual(state.managers[0].option.staleTimeout, 222);
+      assert.strictEqual(
+        state.managers[0].option.legacyDriverDir,
+        "/tmp/legacy-driver"
+      );
       assert.strictEqual(
         state.managers[0].option.multiplexerDaemonIdleTimeout,
         444
@@ -316,6 +344,10 @@ describe("DebugRouterConnector multiplexer facade", function () {
       await nextTick();
 
       assert.deepStrictEqual(state.clients[0].calls, [
+        {
+          method: "reacquireLegacyOwnership",
+          params: {},
+        },
         {
           method: "connectDevices",
           params: {
@@ -355,6 +387,10 @@ describe("DebugRouterConnector multiplexer facade", function () {
       const devices = await connector.connectDevices(12, "device-1", false);
 
       assert.deepStrictEqual(state.clients[0].calls, [
+        {
+          method: "reacquireLegacyOwnership",
+          params: {},
+        },
         {
           method: "connectDevices",
           params: {
@@ -702,6 +738,65 @@ describe("DebugRouterConnector multiplexer facade", function () {
     }
   });
 
+  it("maps legacy ownership events to multi-open callbacks and clears watch state on unattached", function () {
+    const { DebugRouterConnector, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+      });
+      const statuses = [];
+      connector.setMultiOpenCallback({
+        statusChanged(status) {
+          statuses.push(status);
+        },
+      });
+      connector.watchAllClientsStarted = true;
+      connector.selectedClient = {
+        clientId() {
+          return 1;
+        },
+      };
+
+      connector.applyHostEvent({
+        kind: "event",
+        event: "legacy-ownership-changed",
+        data: {
+          status: "attached",
+          ownerPid: 100,
+          reason: "daemon-started",
+        },
+      });
+      connector.applyHostEvent({
+        kind: "event",
+        event: "legacy-ownership-changed",
+        data: {
+          status: "attached",
+          ownerPid: 100,
+          reason: "daemon-started",
+        },
+      });
+      connector.applyHostEvent({
+        kind: "event",
+        event: "legacy-ownership-changed",
+        data: {
+          status: "unattached",
+          ownerPid: 100,
+          previousOwnerPid: 200,
+          reason: "legacy-preempted",
+        },
+      });
+
+      assert.deepStrictEqual(statuses, [
+        MultiOpenStatus.attached,
+        MultiOpenStatus.unattached,
+      ]);
+      assert.strictEqual(connector.watchAllClientsStarted, false);
+      assert.strictEqual(connector.selectedClient, undefined);
+    } finally {
+      restore();
+    }
+  });
+
   it("routes USB and websocket messages through local mirrors and daemon RPCs", async function () {
     const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
     try {
@@ -805,6 +900,9 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.strictEqual(enabled.wssPort, 8888);
       assert.strictEqual(enabled.wssHost, "127.0.0.1:8888");
       assert.strictEqual(enabled.roomId, "room-2");
+      assert.deepStrictEqual(enabled.wss, {
+        wssPath: "ws://127.0.0.1:8888/mdevices/page/android",
+      });
       assert.deepStrictEqual(state.clients[1].calls, [
         {
           method: "startWSServer",
@@ -829,14 +927,258 @@ describe("DebugRouterConnector multiplexer facade", function () {
     }
   });
 
+  it("keeps desired websocket state, clears the mirror on daemon disconnect, and restores it after reconnect", async function () {
+    let starts = 0;
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes({
+      results: [
+        [
+          "startWSServer",
+          () => {
+            starts++;
+            return {
+              port: 8800 + starts,
+              host: `127.0.0.1:${8800 + starts}`,
+              roomId: `room-${starts}`,
+            };
+          },
+        ],
+      ],
+    });
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: true,
+      });
+
+      await connector.startWSServer();
+      assert.strictEqual(connector.desiredWSServerStarted, true);
+      assert.strictEqual(connector.webSocketServerStarted, true);
+      assert.deepStrictEqual(connector.wss, {
+        wssPath: "ws://127.0.0.1:8801/mdevices/page/android",
+      });
+
+      state.clients[0].emitConnectionState({
+        state: "disconnected",
+        error: new Error("daemon lost"),
+      });
+      assert.strictEqual(connector.webSocketServerStarted, false);
+      assert.strictEqual(connector.wss, null);
+
+      await delay(120);
+      assert.strictEqual(connector.webSocketServerStarted, true);
+      assert.deepStrictEqual(connector.wss, {
+        wssPath: "ws://127.0.0.1:8802/mdevices/page/android",
+      });
+      assert.deepStrictEqual(
+        state.clients[0].calls
+          .filter((call) => call.method === "startWSServer")
+          .map((call) => call.params),
+        [{}, {}]
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("schedules desired recovery with a fixed 100ms delay", function () {
+    const { DebugRouterConnector, restore } = loadConnectorWithFakes();
+    const originalSetTimeout = global.setTimeout;
+    const originalClearTimeout = global.clearTimeout;
+    const delays = [];
+    try {
+      global.setTimeout = (callback, delay) => {
+        delays.push(delay);
+        return {
+          callback,
+        };
+      };
+      global.clearTimeout = () => {};
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: true,
+      });
+      connector.desiredWSServerStarted = true;
+
+      connector.scheduleDesiredRecovery();
+      connector.scheduleDesiredRecovery();
+
+      assert.deepStrictEqual(delays, [100]);
+    } finally {
+      global.setTimeout = originalSetTimeout;
+      global.clearTimeout = originalClearTimeout;
+      restore();
+    }
+  });
+
+  it("clears all local mirrors and emits offline events in dependency order on daemon disconnect", function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: true,
+      });
+      connector.applySnapshot({
+        protocolVersion: 1,
+        generatedAt: 1,
+        devices: [createDeviceSnapshot()],
+        clients: [createClientSnapshot()],
+      });
+      connector.applyHostEvent({
+        kind: "event",
+        event: "websocket-app-client-connected",
+        data: createWebSocketSnapshot({
+          id: 100,
+        }),
+      });
+      connector.applyHostEvent({
+        kind: "event",
+        event: "websocket-web-client-connected",
+        data: createWebSocketSnapshot({
+          id: 200,
+        }),
+      });
+      connector.wss = {
+        wssPath: "ws://127.0.0.1:8888/mdevices/page/android",
+      };
+      connector.webSocketServerStarted = true;
+      connector.watchAllClientsStarted = true;
+
+      const events = [];
+      connector.on("client-disconnected", (id) =>
+        events.push(["client-disconnected", id])
+      );
+      connector.on("app-client-disconnected", (id) =>
+        events.push(["app-client-disconnected", id])
+      );
+      connector.on("websocket-app-client-disconnected", (id) =>
+        events.push(["websocket-app-client-disconnected", id])
+      );
+      connector.on("websocket-web-client-disconnected", (id) =>
+        events.push(["websocket-web-client-disconnected", id])
+      );
+      connector.on("device-disconnected", (device) =>
+        events.push(["device-disconnected", device.serial])
+      );
+
+      state.clients[0].emitConnectionState({
+        state: "disconnected",
+        error: new Error("daemon lost"),
+      });
+
+      assert.strictEqual(connector.wss, null);
+      assert.strictEqual(connector.webSocketServerStarted, false);
+      assert.strictEqual(connector.watchAllClientsStarted, false);
+      assert.strictEqual(connector.usbClients.size, 0);
+      assert.strictEqual(connector.websocketAppClients.size, 0);
+      assert.strictEqual(connector.websocketWebClients.size, 0);
+      assert.strictEqual(connector.devices.size, 0);
+      assert.deepStrictEqual(events, [
+        ["client-disconnected", 1],
+        ["app-client-disconnected", 1],
+        ["websocket-app-client-disconnected", 100],
+        ["app-client-disconnected", 100],
+        ["websocket-web-client-disconnected", 200],
+        ["device-disconnected", "device-1"],
+      ]);
+      assert.deepStrictEqual(
+        state.clients[0].calls.filter(
+          (call) => call.method === "disconnectDevice"
+        ),
+        []
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps desired WatchAllClients state and restores it after daemon reconnect", async function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+      });
+
+      connector.startWatchAllClients(false);
+      await nextTick();
+      assert.strictEqual(connector.desiredWatchAllClientsForce, false);
+      assert.strictEqual(connector.watchAllClientsStarted, true);
+      assert.deepStrictEqual(state.clients[0].calls.slice(0, 2), [
+        {
+          method: "reacquireLegacyOwnership",
+          params: {},
+        },
+        {
+          method: "startWatchAllClients",
+          params: {
+            force: false,
+          },
+        },
+      ]);
+
+      state.clients[0].emitConnectionState({
+        state: "disconnected",
+        error: new Error("daemon lost"),
+      });
+      assert.strictEqual(connector.watchAllClientsStarted, false);
+
+      await delay(120);
+      assert.strictEqual(connector.watchAllClientsStarted, true);
+      assert.deepStrictEqual(
+        state.clients[0].calls
+          .filter((call) => call.method === "startWatchAllClients")
+          .map((call) => call.params),
+        [{ force: false }, { force: false }]
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not create a websocket mirror when startWSServer returns no server info", async function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes({
+      results: [["startWSServer", undefined]],
+    });
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: true,
+      });
+
+      await connector.startWSServer();
+      connector.sendMessageToWeb("web");
+      connector.sendMessageToApp(1, "app");
+      await nextTick();
+
+      assert.strictEqual(connector.desiredWSServerStarted, true);
+      assert.strictEqual(connector.webSocketServerStarted, false);
+      assert.strictEqual(connector.wss, null);
+      assert.deepStrictEqual(state.clients[0].calls, [
+        {
+          method: "startWSServer",
+          params: {},
+        },
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
   it("handles fire-and-forget RPC rejections without throwing", async function () {
     const { DebugRouterConnector, state, restore } = loadConnectorWithFakes({
       rejectMethods: [
-        "startWatchAllClients",
         "sendMessageToWeb",
         "sendMessageToApp",
       ],
-      results: [["startWSServer", undefined]],
+      results: [
+        [
+          "startWSServer",
+          {
+            port: 8888,
+            host: "127.0.0.1:8888",
+            roomId: "room-1",
+          },
+        ],
+      ],
     });
     try {
       const connector = new DebugRouterConnector({
@@ -856,6 +1198,18 @@ describe("DebugRouterConnector multiplexer facade", function () {
 
       assert.deepStrictEqual(state.clients[0].calls, [
         {
+          method: "reacquireLegacyOwnership",
+          params: {},
+        },
+        {
+          method: "reacquireLegacyOwnership",
+          params: {},
+        },
+        {
+          method: "startWSServer",
+          params: {},
+        },
+        {
           method: "startWatchAllClients",
           params: {
             force: true,
@@ -866,10 +1220,6 @@ describe("DebugRouterConnector multiplexer facade", function () {
           params: {
             force: false,
           },
-        },
-        {
-          method: "startWSServer",
-          params: {},
         },
         {
           method: "sendMessageToWeb",
@@ -885,6 +1235,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
           },
         },
       ]);
+      await connector.close();
     } finally {
       restore();
     }
@@ -928,7 +1279,16 @@ describe("DebugRouterConnector multiplexer facade", function () {
 
   it("closes idempotently, unsubscribes daemon events, and clears websocket started state", async function () {
     const { DebugRouterConnector, state, restore } = loadConnectorWithFakes({
-      results: [["startWSServer", undefined]],
+      results: [
+        [
+          "startWSServer",
+          {
+            port: 8888,
+            host: "127.0.0.1:8888",
+            roomId: "room-1",
+          },
+        ],
+      ],
     });
     try {
       const connector = new DebugRouterConnector({
@@ -948,7 +1308,9 @@ describe("DebugRouterConnector multiplexer facade", function () {
 
       assert.strictEqual(state.closeCalls, 1);
       assert.strictEqual(state.unsubscribeCalls, 1);
+      assert.strictEqual(state.unsubscribeConnectionCalls, 1);
       assert.strictEqual(connector.webSocketServerStarted, false);
+      assert.strictEqual(connector.wss, null);
       assert.strictEqual(connector.devices.size, 0);
     } finally {
       restore();

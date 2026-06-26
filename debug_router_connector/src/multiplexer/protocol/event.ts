@@ -19,6 +19,20 @@ export type ControlEventEnvelope<Event extends string, Data> = {
 
 export type ControlEvent =
   | ControlEventEnvelope<"snapshot", Snapshot>
+  | ControlEventEnvelope<
+      "legacy-ownership-changed",
+      {
+        status: "attached" | "unattached";
+        ownerPid: number;
+        previousOwnerPid?: number;
+        reason:
+          | "daemon-started"
+          | "legacy-preempted"
+          | "reacquire-requested"
+          | "stale-owner"
+          | "invalid-owner";
+      }
+    >
   | ControlEventEnvelope<"device-connected", DeviceSnapshot>
   | ControlEventEnvelope<
       "device-disconnected",

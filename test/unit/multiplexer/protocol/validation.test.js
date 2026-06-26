@@ -377,6 +377,7 @@ describe("multiplexer protocol validation", function () {
       ["startWatchClient", { deviceId: "device-1" }],
       ["stopWatchClient", { deviceId: "device-1" }],
       ["disconnectDevice", { deviceId: "device-1" }],
+      ["reacquireLegacyOwnership", {}],
       ["startWSServer", {}],
       ["startWatchAllClients", { force: true }],
       ["sendMessageToWeb", { message: "hello" }],
@@ -531,6 +532,7 @@ describe("multiplexer protocol validation", function () {
       createRpcResponse(undefined, "startWatchClient"),
       createRpcResponse(undefined, "stopWatchClient"),
       createRpcResponse(undefined, "disconnectDevice"),
+      createRpcResponse(undefined, "reacquireLegacyOwnership"),
       createRpcResponse(undefined, "startWSServer"),
       createRpcResponse(undefined, "startWatchAllClients"),
       createRpcResponse(undefined, "sendMessageToWeb"),
@@ -626,6 +628,18 @@ describe("multiplexer protocol validation", function () {
       {
         kind: "rpc-response",
         id: 1,
+        ok: true,
+        result: { port: 61660, host: "127.0.0.1:61660" },
+      },
+      {
+        kind: "rpc-response",
+        id: 1,
+        ok: true,
+        result: 1,
+      },
+      {
+        kind: "rpc-response",
+        id: 1,
         ok: false,
         error: { code: "E_TEST", message: "failed", details: { ok: false } },
       },
@@ -640,15 +654,25 @@ describe("multiplexer protocol validation", function () {
         kind: "rpc-response",
         id: 1,
         ok: true,
-        result: 1,
       }),
-      false
+      true
     );
   });
 
   it("validates every control event branch", function () {
     const validEvents = [
       createEvent("snapshot", createSnapshot()),
+      createEvent("legacy-ownership-changed", {
+        status: "attached",
+        ownerPid: 100,
+        reason: "daemon-started",
+      }),
+      createEvent("legacy-ownership-changed", {
+        status: "unattached",
+        ownerPid: 100,
+        previousOwnerPid: 200,
+        reason: "legacy-preempted",
+      }),
       createEvent("device-connected", createDeviceSnapshot()),
       createEvent("device-disconnected", { serial: "device-1" }),
       createEvent("client-connected", createClientSnapshot()),
@@ -683,6 +707,27 @@ describe("multiplexer protocol validation", function () {
       { kind: "event", event: 1, data: {} },
       createEvent("unknown", {}),
       createEvent("snapshot", { ...createSnapshot(), generatedAt: "1000" }),
+      createEvent("legacy-ownership-changed", {
+        status: "unknown",
+        ownerPid: 100,
+        reason: "daemon-started",
+      }),
+      createEvent("legacy-ownership-changed", {
+        status: "attached",
+        ownerPid: "100",
+        reason: "daemon-started",
+      }),
+      createEvent("legacy-ownership-changed", {
+        status: "attached",
+        ownerPid: 100,
+        previousOwnerPid: "200",
+        reason: "daemon-started",
+      }),
+      createEvent("legacy-ownership-changed", {
+        status: "attached",
+        ownerPid: 100,
+        reason: "unknown",
+      }),
       createEvent("device-connected", { ...createDeviceSnapshot(), serial: 1 }),
       createEvent("device-disconnected", { serial: 1 }),
       createEvent("client-connected", { ...createClientSnapshot(), id: "1" }),

@@ -18,16 +18,18 @@ import {
 import { DeviceManager } from "../device/DeviceManager";
 import type { PhysicalConnectorOption } from "../physical/PhysicalConnector";
 import { defaultLogger } from "../utils/logger";
+import { driver_dir } from "../utils/file_lock";
 import { DebugerRouterDriverEvents } from "../utils/type";
 import { Client } from "./Client";
 import { DriverClient } from "./DriverClient";
-import { MultiOpenCallback } from "./MultiOpenCallBack";
+import { MultiOpenCallback, MultiOpenStatus } from "./MultiOpenCallBack";
 import {
   ControlEvent,
   DeviceSnapshot,
   ClientSnapshot,
   Snapshot,
   WebSocketClientSnapshot,
+  WebSocketServerInfo,
 } from "../multiplexer/protocol";
 import { MultiplexerDaemonClient } from "../multiplexer/client/MultiplexerDaemonClient";
 import {
@@ -41,6 +43,11 @@ import { createMultiplexerPaths } from "../multiplexer/utils/paths";
 const DEFAULT_DEV_SERVE_PORT = 19783;
 const DEFAULT_MULTIPLEXER_DAEMON_IDLE_TIMEOUT = 600000;
 const DEFAULT_MULTIPLEXER_STALE_TIMEOUT = 5000;
+const DESIRED_RECOVERY_RETRY_DELAY_MS = 100;
+
+type WebSocketServerCompat = {
+  wssPath: string;
+};
 
 export type DebugRouterConnectorOption = PhysicalConnectorOption & {
   multiplexerDaemonIdleTimeout?: number;
@@ -50,6 +57,7 @@ export type DebugRouterConnectorOption = PhysicalConnectorOption & {
   multiplexerRootDir?: string;
   multiplexerDataDir?: string;
   multiplexerDaemonEntry?: string;
+  multiplexerLegacyDriverDir?: string;
   websocketOption?: {
     port?: number;
     roomId?: string;
@@ -67,7 +75,7 @@ export class DebugRouterConnector {
   wssPort: number;
   wssHost: string | undefined;
   roomId: string | undefined;
-  wss: null = null;
+  wss: WebSocketServerCompat | null = null;
 
   private readonly events = new EventEmitter();
   private readonly daemonClient: MultiplexerDaemonClient;
@@ -82,9 +90,17 @@ export class DebugRouterConnector {
     WebSocketClientSnapshot
   > = new Map();
   private nextClientId = 0;
+  private multiOpenCallback: MultiOpenCallback | undefined;
+  private multiOpenStatus = MultiOpenStatus.unInit;
   private closed = false;
   private webSocketServerStarted = false;
+  private desiredWSServerStarted = false;
+  private startingWSServer: Promise<void> | null = null;
+  private desiredWatchAllClientsForce: boolean | undefined;
+  private watchAllClientsStarted = false;
+  private desiredRecoveryTimer: NodeJS.Timeout | null = null;
   private unsubscribeDaemonEvents: (() => void) | undefined;
+  private unsubscribeDaemonConnectionState: (() => void) | undefined;
 
   constructor(
     option: DebugRouterConnectorOption = {
@@ -143,11 +159,13 @@ export class DebugRouterConnector {
       startupTimeout:
         option.multiplexerStartupTimeout ?? DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT,
       staleTimeout,
+      legacyDriverDir: option.multiplexerLegacyDriverDir ?? driver_dir,
       multiplexerDaemonIdleTimeout:
         option.multiplexerDaemonIdleTimeout ??
         DEFAULT_MULTIPLEXER_DAEMON_IDLE_TIMEOUT,
       enableWebSocket: option.enableWebSocket,
       websocketOption: option.websocketOption,
+      physicalConnectorOption: createDaemonPhysicalConnectorOption(option),
     });
 
     this.daemonClient = new MultiplexerDaemonClient({
@@ -157,6 +175,17 @@ export class DebugRouterConnector {
     this.unsubscribeDaemonEvents = this.daemonClient.subscribe((event) =>
       this.applyHostEvent(event),
     );
+    this.unsubscribeDaemonConnectionState =
+      this.daemonClient.subscribeConnectionState((state) => {
+        if (state.state === "disconnected") {
+          this.handleDaemonDisconnected();
+          return;
+        }
+        if (state.state === "connected") {
+          this.handleDaemonConnected();
+          return;
+        }
+      });
 
     this.driverClient = new DriverClient(this.createClientId());
 
@@ -165,10 +194,8 @@ export class DebugRouterConnector {
     }
   }
 
-  setMultiOpenCallback(_callback: MultiOpenCallback): void {
-    defaultLogger.warn(
-      "setMultiOpenCallback is ignored by the Multiplexer-only DebugRouterConnector.",
-    );
+  setMultiOpenCallback(callback: MultiOpenCallback): void {
+    this.multiOpenCallback = callback;
   }
 
   disableAllClients(): void {
@@ -179,13 +206,35 @@ export class DebugRouterConnector {
   }
 
   startWatchAllClients(force: boolean = true): void {
-    void this.daemonClient
-      .call("startWatchAllClients", { force })
+    this.desiredWatchAllClientsForce = force;
+    void this.reacquireLegacyOwnership()
+      .then(() => this.ensureWatchAllClientsStarted(force))
       .catch((error: Error) => {
         defaultLogger.warn(
           `Failed to start multiplexer client watchers: ${error.message}`,
         );
+        this.scheduleDesiredRecovery();
       });
+  }
+
+  private async ensureWatchAllClientsStarted(force: boolean): Promise<void> {
+    await this.daemonClient.call("startWatchAllClients", { force });
+    this.watchAllClientsStarted = true;
+  }
+
+  private async reacquireLegacyOwnership(): Promise<void> {
+    await this.daemonClient.call("reacquireLegacyOwnership", {});
+  }
+
+  private restoreDesiredWatchAllClients(): Promise<void> | undefined {
+    if (
+      this.desiredWatchAllClientsForce === undefined ||
+      this.watchAllClientsStarted
+    ) {
+      return undefined;
+    }
+
+    return this.ensureWatchAllClientsStarted(this.desiredWatchAllClientsForce);
   }
 
   createClientId(): number {
@@ -200,6 +249,7 @@ export class DebugRouterConnector {
     serial: string | null = null,
     isAutoListenClients: boolean = true,
   ): Promise<MultiplexerDevice[]> {
+    await this.reacquireLegacyOwnership();
     const snapshots = await this.daemonClient.call("connectDevices", {
       timeout,
       serial,
@@ -271,8 +321,11 @@ export class DebugRouterConnector {
     this.closed = true;
     this.unsubscribeDaemonEvents?.();
     this.unsubscribeDaemonEvents = undefined;
+    this.unsubscribeDaemonConnectionState?.();
+    this.unsubscribeDaemonConnectionState = undefined;
+    this.clearDesiredRecoveryTimer();
     await this.daemonClient.close();
-    this.webSocketServerStarted = false;
+    this.clearWSServerMirror();
     await this.traceRecorder?.close();
   }
 
@@ -516,13 +569,131 @@ export class DebugRouterConnector {
     if (!this.enableWebSocket) {
       return;
     }
-    const info = await this.daemonClient.call("startWSServer", {});
-    if (info) {
-      this.wssPort = info.port;
-      this.wssHost = info.host;
-      this.roomId = info.roomId;
+    this.desiredWSServerStarted = true;
+    try {
+      await this.ensureWSServerStarted();
+    } catch (error) {
+      this.scheduleDesiredRecovery();
+      throw error;
     }
+  }
+
+  private ensureWSServerStarted(): Promise<void> {
+    if (!this.enableWebSocket || this.closed) {
+      return Promise.resolve();
+    }
+    if (this.startingWSServer) {
+      return this.startingWSServer;
+    }
+
+    this.startingWSServer = this.daemonClient
+      .call("startWSServer", {})
+      .then((info) => {
+        if (!info) {
+          this.clearWSServerMirror();
+          return;
+        }
+
+        this.applyWebSocketServerInfo(info);
+      })
+      .finally(() => {
+        this.startingWSServer = null;
+      });
+
+    return this.startingWSServer;
+  }
+
+  private applyWebSocketServerInfo(info: WebSocketServerInfo): void {
+    this.wssPort = info.port;
+    this.wssHost = info.host;
+    this.roomId = info.roomId;
+    this.wss = {
+      wssPath: `ws://${info.host}/mdevices/page/android`,
+    };
     this.webSocketServerStarted = true;
+  }
+
+  private clearWSServerMirror(): void {
+    this.wss = null;
+    this.webSocketServerStarted = false;
+  }
+
+  private handleDaemonDisconnected(): void {
+    this.clearDaemonMirrors();
+    this.scheduleDesiredRecovery();
+  }
+
+  private handleDaemonConnected(): void {
+    this.scheduleDesiredRecovery();
+  }
+
+  private scheduleDesiredRecovery(): void {
+    if (!this.hasDesiredStateToRestore() || this.closed) {
+      return;
+    }
+    if (this.desiredRecoveryTimer) {
+      return;
+    }
+
+    this.desiredRecoveryTimer = setTimeout(() => {
+      this.desiredRecoveryTimer = null;
+      void this.restoreDesiredState()
+        .catch((error: Error) => {
+          defaultLogger.warn(
+            `Failed to restore desired multiplexer state after daemon reconnect: ${error.message}`,
+          );
+          this.scheduleDesiredRecovery();
+        });
+    }, DESIRED_RECOVERY_RETRY_DELAY_MS);
+  }
+
+  private async restoreDesiredState(): Promise<void> {
+    const tasks: Promise<void>[] = [];
+    const watchAllClients = this.restoreDesiredWatchAllClients();
+    if (watchAllClients) {
+      tasks.push(watchAllClients);
+    }
+    if (this.desiredWSServerStarted && !this.webSocketServerStarted) {
+      tasks.push(this.ensureWSServerStarted());
+    }
+
+    await Promise.all(tasks);
+  }
+
+  private hasDesiredStateToRestore(): boolean {
+    return (
+      (this.desiredWatchAllClientsForce !== undefined &&
+        !this.watchAllClientsStarted) ||
+      (this.desiredWSServerStarted && !this.webSocketServerStarted)
+    );
+  }
+
+  private clearDesiredRecoveryTimer(): void {
+    if (this.desiredRecoveryTimer) {
+      clearTimeout(this.desiredRecoveryTimer);
+      this.desiredRecoveryTimer = null;
+    }
+  }
+
+  private clearDaemonMirrors(): void {
+    this.clearWSServerMirror();
+    this.watchAllClientsStarted = false;
+
+    for (const id of Array.from(this.usbClients.keys())) {
+      this.unregisterUsbClientInternal(id, true);
+    }
+    for (const id of Array.from(this.websocketAppClients.keys())) {
+      this.websocketAppClients.delete(id);
+      this.emit("websocket-app-client-disconnected", id as any);
+      this.emit("app-client-disconnected", id as any);
+    }
+    for (const id of Array.from(this.websocketWebClients.keys())) {
+      this.websocketWebClients.delete(id);
+      this.emit("websocket-web-client-disconnected", id as any);
+    }
+    for (const serial of Array.from(this.devices.keys())) {
+      this.unregisterDeviceInternal(serial, false);
+    }
   }
 
   getDriverClient(): DriverClient {
@@ -538,6 +709,9 @@ export class DebugRouterConnector {
     switch (event.event) {
       case "snapshot":
         this.applySnapshot(event.data);
+        break;
+      case "legacy-ownership-changed":
+        this.applyLegacyOwnershipChange(event.data.status);
         break;
       case "device-connected": {
         const device = MultiplexerDevice.fromSnapshot(
@@ -600,6 +774,26 @@ export class DebugRouterConnector {
         this.unregisterDeviceInternal(serial, false);
       }
     }
+  }
+
+  private applyLegacyOwnershipChange(
+    status: "attached" | "unattached",
+  ): void {
+    const nextStatus =
+      status === "attached"
+        ? MultiOpenStatus.attached
+        : MultiOpenStatus.unattached;
+
+    if (this.multiOpenStatus === nextStatus) {
+      return;
+    }
+
+    this.multiOpenStatus = nextStatus;
+    if (nextStatus === MultiOpenStatus.unattached) {
+      this.watchAllClientsStarted = false;
+      this.selectedClient = undefined;
+    }
+    this.multiOpenCallback?.statusChanged?.(nextStatus);
   }
 
   private syncClientSnapshots(snapshots: Snapshot["clients"]): void {
@@ -757,12 +951,71 @@ export class DebugRouterConnector {
 }
 
 function resolveDaemonEntryPath(): string {
+  const packageDaemonEntry =
+    "@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/daemon/entry.js";
+  const defaultDaemonEntry = path.resolve(
+    __dirname,
+    "../multiplexer/daemon/entry.js",
+  );
   const candidates = [
-    path.resolve(__dirname, "../multiplexer/daemon/entry.js"),
+    defaultDaemonEntry,
     path.resolve(__dirname, "../../dist/cjs/src/multiplexer/daemon/entry.js"),
+    resolvePackagePath(packageDaemonEntry, [__dirname, process.cwd()]),
+    resolveTransitivePackagePath(
+      "@byted-lynx/debug-router-driver/package.json",
+      packageDaemonEntry,
+    ),
   ];
 
   return (
-    candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]
+    candidates.find(
+      (candidate): candidate is string =>
+        candidate !== undefined && fs.existsSync(candidate),
+    ) ?? defaultDaemonEntry
   );
+}
+
+function resolvePackagePath(
+  specifier: string,
+  paths?: string[],
+): string | undefined {
+  try {
+    return require.resolve(specifier, paths ? { paths } : undefined);
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+function resolveTransitivePackagePath(
+  parentPackageJson: string,
+  specifier: string,
+): string | undefined {
+  const parent = resolvePackagePath(parentPackageJson, [
+    __dirname,
+    process.cwd(),
+  ]);
+  if (!parent) {
+    return undefined;
+  }
+
+  return resolvePackagePath(specifier, [path.dirname(parent)]);
+}
+
+function createDaemonPhysicalConnectorOption(
+  option: DebugRouterConnectorOption,
+): PhysicalConnectorOption {
+  return {
+    manualConnect: option.manualConnect,
+    enableWebSocket: option.enableWebSocket,
+    enableAndroid: option.enableAndroid,
+    enableIOS: option.enableIOS,
+    enableHarmony: option.enableHarmony,
+    enableDesktop: option.enableDesktop,
+    enableNetworkDevice: option.enableNetworkDevice,
+    adbHostPort: option.adbHostPort,
+    hdcHostPort: option.hdcHostPort,
+    usbConnectOpt: option.usbConnectOpt,
+    networkDeviceOpt: option.networkDeviceOpt,
+    reportService: null,
+  };
 }

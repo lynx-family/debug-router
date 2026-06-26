@@ -2,6 +2,13 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
+/* !!!!!!!!!!!!! deprecated !!!!!!!!!!!!!!
+ * LegacyDebugRouterConnector is the legacy debug router connector.
+ * Please use DebugRouterConnector instead.
+ * @deprecated
+ * @see DebugRouterConnector
+ */
+
 import { EventEmitter } from "events";
 import { UsbClient } from "../usb/Client";
 import { BaseDevice } from "../device/BaseDevice";

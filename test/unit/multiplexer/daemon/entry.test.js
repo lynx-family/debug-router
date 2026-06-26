@@ -92,7 +92,7 @@ function replaceEntryHostCtor(Ctor = FakeEntryHost) {
 }
 
 function createEntryOption(overrides = {}) {
-  return {
+  const option = {
     discoveryPath: overrides.discoveryPath ?? "/tmp/daemon.json",
     daemonLockPath: overrides.daemonLockPath ?? "/tmp/daemon.lock",
     protocolVersion: overrides.protocolVersion ?? 1,
@@ -101,7 +101,12 @@ function createEntryOption(overrides = {}) {
     heartbeatInterval: overrides.heartbeatInterval ?? 100000,
     daemonVersion: overrides.daemonVersion,
     capabilities: overrides.capabilities,
+    physicalConnectorOption: overrides.physicalConnectorOption,
   };
+  if (overrides.legacyDriverDir !== undefined) {
+    option.legacyDriverDir = overrides.legacyDriverDir;
+  }
+  return option;
 }
 
 function stubProcessOnce() {
@@ -180,6 +185,20 @@ describe("multiplexer daemon entry", function () {
     );
   });
 
+  it("parses legacy driver dir for daemon-side multi-open ownership", function () {
+    assert.deepStrictEqual(
+      parseEntryOption([
+        "--discovery-path",
+        "/tmp/daemon.json",
+        "--daemon-lock-path",
+        "/tmp/daemon.lock",
+        "--legacy-driver-dir",
+        "/tmp/legacy-driver",
+      ]).legacyDriverDir,
+      "/tmp/legacy-driver"
+    );
+  });
+
   it("treats blank optional strings as omitted and trims empty capabilities", function () {
     assert.deepStrictEqual(
       parseEntryOption([
@@ -206,6 +225,70 @@ describe("multiplexer daemon entry", function () {
         "--capabilities",
       ]).capabilities,
       undefined
+    );
+  });
+
+  it("parses physical connector options from JSON", function () {
+    const parsed = parseEntryOption([
+      "--discovery-path",
+      "/tmp/daemon.json",
+      "--daemon-lock-path",
+      "/tmp/daemon.lock",
+      "--physical-connector-option",
+      JSON.stringify({
+        manualConnect: true,
+        enableAndroid: true,
+        enableIOS: false,
+        enableHarmony: false,
+        adbHostPort: {
+          host: "127.0.0.1",
+          port: 5037,
+        },
+        usbConnectOpt: {
+          retryTime: 5000,
+        },
+      }),
+    ]);
+
+    assert.deepStrictEqual(parsed.physicalConnectorOption, {
+      manualConnect: true,
+      enableAndroid: true,
+      enableIOS: false,
+      enableHarmony: false,
+      adbHostPort: {
+        host: "127.0.0.1",
+        port: 5037,
+      },
+      usbConnectOpt: {
+        retryTime: 5000,
+      },
+    });
+  });
+
+  it("rejects malformed physical connector options", function () {
+    assert.throws(
+      () =>
+        parseEntryOption([
+          "--discovery-path",
+          "/tmp/daemon.json",
+          "--daemon-lock-path",
+          "/tmp/daemon.lock",
+          "--physical-connector-option",
+          "{bad-json",
+        ]),
+      /Invalid multiplexer daemon option physicalConnectorOption/
+    );
+    assert.throws(
+      () =>
+        parseEntryOption([
+          "--discovery-path",
+          "/tmp/daemon.json",
+          "--daemon-lock-path",
+          "/tmp/daemon.lock",
+          "--physical-connector-option",
+          "[]",
+        ]),
+      /expected object/
     );
   });
 
@@ -337,6 +420,17 @@ describe("multiplexer daemon entry", function () {
           controlPort: 9444,
           daemonVersion: "0.0.4",
           capabilities: ["control", "routing"],
+          legacyDriverDir: "/tmp/legacy-driver",
+          physicalConnectorOption: {
+            manualConnect: true,
+            enableAndroid: true,
+            enableIOS: false,
+            enableHarmony: false,
+            enableNetworkDevice: false,
+            usbConnectOpt: {
+              retryTime: 5000,
+            },
+          },
         })
       );
 
@@ -347,6 +441,15 @@ describe("multiplexer daemon entry", function () {
         minSupportedProtocolVersion: 2,
         daemonVersion: "0.0.4",
         capabilities: ["control", "routing"],
+        legacyDriverDir: "/tmp/legacy-driver",
+        manualConnect: true,
+        enableAndroid: true,
+        enableIOS: false,
+        enableHarmony: false,
+        enableNetworkDevice: false,
+        usbConnectOpt: {
+          retryTime: 5000,
+        },
       });
     } finally {
       restoreHost();

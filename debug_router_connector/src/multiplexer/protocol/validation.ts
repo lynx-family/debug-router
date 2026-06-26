@@ -30,6 +30,7 @@ const CONTROL_RPC_METHODS: ControlRpcMethod[] = [
   "startWatchClient",
   "stopWatchClient",
   "disconnectDevice",
+  "reacquireLegacyOwnership",
   "startWSServer",
   "startWatchAllClients",
   "sendMessageToWeb",
@@ -241,6 +242,8 @@ export function isControlEvent(value: unknown): value is ControlEvent {
   switch (value.event) {
     case "snapshot":
       return isSnapshot(value.data);
+    case "legacy-ownership-changed":
+      return isLegacyOwnershipChangedEventData(value.data);
     case "device-connected":
       return isDeviceSnapshot(value.data);
     case "device-disconnected":
@@ -299,6 +302,8 @@ function isControlRpcParams(
     case "stopWatchClient":
     case "disconnectDevice":
       return isString(params.deviceId);
+    case "reacquireLegacyOwnership":
+      return true;
     case "startWSServer":
       return true;
     case "startWatchAllClients":
@@ -335,15 +340,7 @@ function isControlRpcResult(
   result: unknown,
 ): boolean {
   if (!method) {
-    return (
-      result === undefined ||
-      isString(result) ||
-      isResponseMessage(result) ||
-      (Array.isArray(result) &&
-        result.every(
-          (item) => isDeviceSnapshot(item) || isClientSnapshot(item),
-        ))
-    );
+    return true;
   }
 
   switch (method) {
@@ -362,6 +359,7 @@ function isControlRpcResult(
     case "startWatchClient":
     case "stopWatchClient":
     case "disconnectDevice":
+    case "reacquireLegacyOwnership":
     case "sendMessageToWeb":
     case "sendMessageToApp":
     case "sendMessage":
@@ -370,6 +368,23 @@ function isControlRpcResult(
     default:
       return false;
   }
+}
+
+function isLegacyOwnershipChangedEventData(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value.status === "attached" || value.status === "unattached") &&
+    isNumber(value.ownerPid) &&
+    isOptional(value.previousOwnerPid, isNumber) &&
+    (value.reason === "daemon-started" ||
+      value.reason === "legacy-preempted" ||
+      value.reason === "reacquire-requested" ||
+      value.reason === "stale-owner" ||
+      value.reason === "invalid-owner")
+  );
 }
 
 function isWebSocketServerInfo(value: unknown): boolean {

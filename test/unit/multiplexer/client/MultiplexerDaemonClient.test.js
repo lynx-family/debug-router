@@ -344,6 +344,29 @@ describe("MultiplexerDaemonClient", function () {
     assert.strictEqual(client.pendingRpc.size, 0);
   });
 
+  it("does not time out a long-poll RPC before its operation timeout can resolve", async function () {
+    const { client, WebSocketCtor } = createClient({ rpcTimeout: 5 });
+    const socket = await openClient(client, WebSocketCtor);
+
+    const result = client.call("connectDevices", {
+      timeout: 30,
+      serial: null,
+      isAutoListenClients: true,
+    });
+    await waitFor(() => socket.sent.length === 1);
+    const request = parseSent(socket);
+
+    setTimeout(() => {
+      sendRpcResponse(socket, request.id, {
+        ok: true,
+        result: [],
+      });
+    }, 15);
+
+    assert.deepStrictEqual(await result, []);
+    assert.strictEqual(client.pendingRpc.size, 0);
+  });
+
   it("dispatches events to the single active listener", async function () {
     const { client, WebSocketCtor } = createClient();
     const socket = await openClient(client, WebSocketCtor);
@@ -481,6 +504,25 @@ describe("MultiplexerDaemonClient", function () {
 
     assert.strictEqual(client.ready, true);
     assert.strictEqual(daemonManagerState.ensureCalls, 2);
+  });
+
+  it("notifies connection state listeners on connect, disconnect, and unsubscribe", async function () {
+    const { client, WebSocketCtor } = createClient();
+    const states = [];
+    const unsubscribe = client.subscribeConnectionState((state) =>
+      states.push(state.state)
+    );
+    const socket = await openClient(client, WebSocketCtor);
+
+    socket.emit("close");
+    await nextTick();
+    unsubscribe();
+    const reconnect = client.connect();
+    await waitFor(() => WebSocketCtor.instances.length === 2);
+    WebSocketCtor.instances[1].open();
+    await reconnect;
+
+    assert.deepStrictEqual(states, ["connected", "disconnected"]);
   });
 
   it("close clears the listener, closes the socket, and rejects pending RPCs", async function () {

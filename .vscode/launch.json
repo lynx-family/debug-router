@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug connector_test (TypeScript source)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/test/e2e_test/connector_test/index.js",
+      "cwd": "${workspaceFolder}/test/e2e_test/connector_test",
+      "console": "integratedTerminal",
+      "sourceMaps": true,
+      "smartStep": false,
+      "skipFiles": [
+        "<node_internals>/**",
+        "${workspaceFolder}/**/node_modules/**/*.js"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/debug_router_connector/dist/cjs/**/*.js",
+        "${workspaceFolder}/test/e2e_test/connector_test/node_modules/@lynx-js/debug-router-connector/dist/cjs/**/*.js"
+      ],
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/debug_router_connector/dist/cjs/**/*.js",
+        "${workspaceFolder}/test/e2e_test/connector_test/node_modules/@lynx-js/debug-router-connector/dist/cjs/**/*.js"
+      ],
+      "sourceMapPathOverrides": {
+        "../../../../src/*": "${workspaceFolder}/debug_router_connector/src/*"
+      },
+      "env": {
+        "DriverEnv": "dev"
+      },
+      "preLaunchTask": "build debug_router_connector"
+    }
+  ]
+}

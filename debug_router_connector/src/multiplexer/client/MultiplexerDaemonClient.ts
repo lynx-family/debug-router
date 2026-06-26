@@ -27,6 +27,7 @@ import {
 import { MultiplexerDaemonManager } from "./MultiplexerDaemonManager";
 
 export const DEFAULT_MULTIPLEXER_RPC_TIMEOUT = 5000;
+const RPC_TIMEOUT_BUFFER_MS = 1000;
 const UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT = 500;
 
 export type MultiplexerDaemonClientOption = {
@@ -48,6 +49,10 @@ type PendingRpc = {
   timer: NodeJS.Timeout;
 };
 
+export type MultiplexerDaemonConnectionState =
+  | { state: "connected" }
+  | { state: "disconnected"; error: Error };
+
 export class MultiplexerDaemonClient {
   readonly daemonManager: MultiplexerDaemonManager;
   readonly pendingRpc: Map<number, PendingRpc> = new Map();
@@ -58,6 +63,9 @@ export class MultiplexerDaemonClient {
   private readonly capabilities?: string[];
   private readonly WebSocketCtor: typeof WebSocket;
   private eventListener?: (event: ControlEvent) => void;
+  private readonly connectionListeners = new Set<
+    (state: MultiplexerDaemonConnectionState) => void
+  >();
   private controlSocket: WebSocket | null = null;
   private nextRpcId = 1;
   private connecting: Promise<void> | null = null;
@@ -123,7 +131,7 @@ export class MultiplexerDaemonClient {
             `Timed out waiting for multiplexer RPC ${method} response`,
           ),
         );
-      }, this.rpcTimeout);
+      }, this.getRpcTimeout(method, params));
 
       this.pendingRpc.set(id, {
         method,
@@ -155,6 +163,15 @@ export class MultiplexerDaemonClient {
       if (this.eventListener === listener) {
         this.eventListener = undefined;
       }
+    };
+  }
+
+  subscribeConnectionState(
+    listener: (state: MultiplexerDaemonConnectionState) => void,
+  ): () => void {
+    this.connectionListeners.add(listener);
+    return () => {
+      this.connectionListeners.delete(listener);
     };
   }
 
@@ -235,6 +252,7 @@ export class MultiplexerDaemonClient {
         socket.on("message", this.handleSocketMessage);
         socket.on("close", this.handleSocketClose);
         socket.on("error", this.handleSocketError);
+        this.emitConnectionState({ state: "connected" });
         resolve();
       };
       const onError = (error: Error) => {
@@ -324,6 +342,8 @@ export class MultiplexerDaemonClient {
       return;
     }
 
+    this.emitConnectionState({ state: "disconnected", error });
+
     socket.off("message", this.handleSocketMessage);
     socket.off("close", this.handleSocketClose);
     socket.off("error", this.handleSocketError);
@@ -338,12 +358,30 @@ export class MultiplexerDaemonClient {
     });
   }
 
+  private emitConnectionState(state: MultiplexerDaemonConnectionState): void {
+    for (const listener of Array.from(this.connectionListeners)) {
+      listener(state);
+    }
+  }
+
   private isSocketOpen(): boolean {
     return this.controlSocket?.readyState === WebSocket.OPEN;
   }
 
   private createRpcId(): number {
     return this.nextRpcId++;
+  }
+
+  private getRpcTimeout<M extends ControlRpcMethod>(
+    _method: M,
+    params: ControlRpcParams[M],
+  ): number {
+    const operationTimeout = getOperationTimeout(params);
+    if (operationTimeout === undefined) {
+      return this.rpcTimeout;
+    }
+
+    return Math.max(this.rpcTimeout, operationTimeout + RPC_TIMEOUT_BUFFER_MS);
   }
 
   private createMeta(): ControlMessageMeta {
@@ -379,6 +417,19 @@ export class MultiplexerDaemonClient {
       categories,
     );
   }
+}
+
+function getOperationTimeout(params: unknown): number | undefined {
+  if (!isRecord(params)) {
+    return undefined;
+  }
+
+  const timeout = params.timeout;
+  if (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 0) {
+    return undefined;
+  }
+
+  return timeout;
 }
 
 function createRpcError(error: ControlRpcError): Error {

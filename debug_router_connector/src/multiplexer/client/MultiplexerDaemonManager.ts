@@ -15,6 +15,7 @@ import {
   MULTIPLEXER_PROTOCOL_VERSION,
   MultiplexerDiscoveryInfo,
 } from "../protocol/discovery";
+import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
 import {
   isMultiplexerHealthResponse,
   parseJsonValue,
@@ -60,12 +61,14 @@ export type MultiplexerDaemonManagerOption = {
   minSupportedProtocolVersion?: number;
   daemonVersion?: string;
   capabilities?: string[];
+  legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
   enableWebSocket?: boolean;
   websocketOption?: {
     port?: number;
     roomId?: string;
   };
+  physicalConnectorOption?: PhysicalConnectorOption;
   readyPollInterval?: number;
   replacementTimeout?: number;
   healthCheckTimeout?: number;
@@ -90,12 +93,14 @@ export class MultiplexerDaemonManager {
   readonly minSupportedProtocolVersion: number;
   readonly daemonVersion?: string;
   readonly capabilities?: string[];
+  readonly legacyDriverDir?: string;
   readonly multiplexerDaemonIdleTimeout?: number;
   readonly enableWebSocket?: boolean;
   readonly websocketOption?: {
     port?: number;
     roomId?: string;
   };
+  readonly physicalConnectorOption?: PhysicalConnectorOption;
   private readonly readyPollInterval: number;
   private readonly replacementTimeout: number;
   private readonly healthCheckTimeout: number;
@@ -125,9 +130,11 @@ export class MultiplexerDaemonManager {
       MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
     this.daemonVersion = option.daemonVersion;
     this.capabilities = option.capabilities;
+    this.legacyDriverDir = option.legacyDriverDir;
     this.multiplexerDaemonIdleTimeout = option.multiplexerDaemonIdleTimeout;
     this.enableWebSocket = option.enableWebSocket;
     this.websocketOption = option.websocketOption;
+    this.physicalConnectorOption = option.physicalConnectorOption;
     this.readyPollInterval =
       option.readyPollInterval ?? DEFAULT_MULTIPLEXER_READY_POLL_INTERVAL;
     this.replacementTimeout =
@@ -152,7 +159,17 @@ export class MultiplexerDaemonManager {
     validation: MultiplexerDiscoveryValidation,
   ): Promise<MultiplexerDiscoveryInfo> {
     if (validation.status === "usable") {
-      return validation.info;
+      const healthCheck = await this.checkDaemonHealth(validation.info);
+      if (healthCheck.ok) {
+        return validation.info;
+      }
+
+      return this.ensureDaemonWithSpawnLock(async () => {
+        await this.waitUntilUnhealthyDaemonCanSpawn(
+          validation.info,
+          this.startupTimeout,
+        );
+      });
     }
 
     if (validation.status === "replace-required") {
@@ -169,7 +186,7 @@ export class MultiplexerDaemonManager {
     }
 
     return this.ensureDaemonWithSpawnLock(async () => {
-      this.cleanupStaleDaemon();
+      await this.waitUntilUnusableDaemonCanSpawn(this.startupTimeout);
     });
   }
 
@@ -329,7 +346,10 @@ export class MultiplexerDaemonManager {
     try {
       const validation = this.discovery.validateDiscovery();
       if (validation.status === "usable") {
-        return validation.info;
+        const healthCheck = await this.checkDaemonHealth(validation.info);
+        if (healthCheck.ok) {
+          return validation.info;
+        }
       }
 
       await beforeSpawn();
@@ -338,6 +358,67 @@ export class MultiplexerDaemonManager {
     } finally {
       this.releaseSpawnLock();
     }
+  }
+
+  private async waitUntilUnusableDaemonCanSpawn(
+    timeout: number,
+  ): Promise<void> {
+    const startedAt = this.now();
+
+    while (this.now() - startedAt <= timeout) {
+      const daemonLockExists = fs.existsSync(this.daemonLock.lockPath);
+      if (
+        !daemonLockExists ||
+        this.daemonLock.isStale(this.staleTimeout, this.now())
+      ) {
+        this.cleanupStaleDaemon();
+        return;
+      }
+
+      const validation = this.discovery.validateDiscovery();
+      if (validation.status !== "unusable") {
+        return;
+      }
+
+      await this.sleepFor(this.readyPollInterval);
+    }
+  }
+
+  private async waitUntilUnhealthyDaemonCanSpawn(
+    info: MultiplexerDiscoveryInfo,
+    timeout: number,
+  ): Promise<void> {
+    const startedAt = this.now();
+
+    while (this.now() - startedAt <= timeout) {
+      const daemonLockExists = fs.existsSync(this.daemonLock.lockPath);
+      if (
+        !daemonLockExists ||
+        this.daemonLock.isStale(this.staleTimeout, this.now())
+      ) {
+        this.cleanupKnownUnhealthyDaemon();
+        return;
+      }
+
+      const validation = this.discovery.validateDiscovery();
+      if (
+        validation.status !== "usable" ||
+        validation.info.pid !== info.pid ||
+        validation.info.controlPort !== info.controlPort
+      ) {
+        await this.waitUntilUnusableDaemonCanSpawn(
+          Math.max(0, timeout - (this.now() - startedAt)),
+        );
+        return;
+      }
+
+      await this.sleepFor(this.readyPollInterval);
+    }
+  }
+
+  private cleanupKnownUnhealthyDaemon(): void {
+    removeFileIfExists(this.discovery.discoveryPath);
+    fs.rmSync(this.daemonLock.lockPath, { recursive: true, force: true });
   }
 
   private createDaemonEntryArgs(): string[] {
@@ -366,6 +447,10 @@ export class MultiplexerDaemonManager {
       args.push("--capabilities", this.capabilities.join(","));
     }
 
+    if (this.legacyDriverDir) {
+      args.push("--legacy-driver-dir", this.legacyDriverDir);
+    }
+
     if (this.multiplexerDaemonIdleTimeout !== undefined) {
       args.push(
         "--multiplexer-daemon-idle-timeout",
@@ -383,6 +468,13 @@ export class MultiplexerDaemonManager {
 
     if (this.websocketOption?.roomId !== undefined) {
       args.push("--websocket-room-id", this.websocketOption.roomId);
+    }
+
+    if (this.physicalConnectorOption !== undefined) {
+      args.push(
+        "--physical-connector-option",
+        JSON.stringify(this.physicalConnectorOption),
+      );
     }
 
     return args;

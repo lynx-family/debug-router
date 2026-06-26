@@ -178,6 +178,7 @@ class FakePhysicalConnector extends EventEmitter {
     this.sendMessageCalls = [];
     this.closeClientCalls = [];
     this.closeCalls = 0;
+    this.disableAllClientsCalls = 0;
     this.nextClientId = option.nextClientId ?? 1;
     this.createClientIdCalls = 0;
     this.connectDevicesImpl = option.connectDevicesImpl;
@@ -224,8 +225,18 @@ class FakePhysicalConnector extends EventEmitter {
     return this.nextClientId++;
   }
 
-  startWatchClient(device) {
+  async startWatchClient(device, shouldStart = () => true) {
+    if (!shouldStart()) {
+      return;
+    }
     this.startWatchClientCalls.push(device.serial);
+    if (this.option.startWatchClientImpl) {
+      await this.option.startWatchClientImpl(device, shouldStart);
+      return;
+    }
+    if (!shouldStart()) {
+      return;
+    }
     device.startWatchClient();
   }
 
@@ -292,6 +303,12 @@ class FakePhysicalConnector extends EventEmitter {
 
   async close() {
     this.closeCalls++;
+  }
+
+  disableAllClients() {
+    this.disableAllClientsCalls++;
+    this.devices.forEach((device) => device.stopWatchClient());
+    this.getAllUsbClients().forEach((client) => client.close());
   }
 }
 
@@ -360,6 +377,42 @@ class FakeStartControlServer {
   }
 }
 
+class FakeLegacyOwnershipGuard {
+  static instances = [];
+
+  constructor(option = {}) {
+    this.option = option;
+    this.startCalls = 0;
+    this.stopCalls = 0;
+    this.reacquireCalls = 0;
+    FakeLegacyOwnershipGuard.instances.push(this);
+  }
+
+  start() {
+    this.startCalls++;
+    this.emitStatus("attached", "daemon-started");
+  }
+
+  stop() {
+    this.stopCalls++;
+  }
+
+  reacquire() {
+    this.reacquireCalls++;
+    this.emitStatus("attached", "reacquire-requested");
+    return true;
+  }
+
+  emitStatus(status, reason, previousOwnerPid) {
+    this.option.onStatusChanged?.({
+      status,
+      ownerPid: 100,
+      previousOwnerPid,
+      reason,
+    });
+  }
+}
+
 function createHost(options = {}) {
   const physical = options.physical ?? new FakePhysicalConnector(options);
   const host = new MultiplexerHost({
@@ -374,6 +427,9 @@ function createHost(options = {}) {
     websocketOption: options.websocketOption,
     now: options.now ?? (() => 1000),
   });
+  if (options.legacyOwnershipAttached !== false) {
+    host.legacyOwnershipAttached = true;
+  }
 
   return {
     host,
@@ -472,6 +528,26 @@ function readCustomizedInner(message) {
 }
 
 describe("MultiplexerHost", function () {
+  let restoreLegacyOwnershipGuard;
+
+  before(function () {
+    const legacyOwnershipImport = hostModule.__get__("LegacyOwnershipGuard_1");
+    const originalLegacyOwnershipGuard =
+      legacyOwnershipImport.LegacyOwnershipGuard;
+    legacyOwnershipImport.LegacyOwnershipGuard = FakeLegacyOwnershipGuard;
+    restoreLegacyOwnershipGuard = () => {
+      legacyOwnershipImport.LegacyOwnershipGuard = originalLegacyOwnershipGuard;
+    };
+  });
+
+  after(function () {
+    restoreLegacyOwnershipGuard?.();
+  });
+
+  beforeEach(function () {
+    FakeLegacyOwnershipGuard.instances = [];
+  });
+
   afterEach(function () {
     defaultLogger.setOutput(() => {});
   });
@@ -497,6 +573,9 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(calls[0].manualConnect, true);
     assert.deepStrictEqual(snapshot.devices, []);
     assert.deepStrictEqual(snapshot.clients, []);
+    assert.strictEqual("webSocketServerStarted" in snapshot, false);
+    assert.strictEqual("webSocketServerInfo" in snapshot, false);
+    assert.strictEqual("wss" in snapshot, false);
   });
 
   it("starts once, reports the listening port, and stops idempotently", async function () {
@@ -748,6 +827,189 @@ describe("MultiplexerHost", function () {
     });
   });
 
+  it("handles legacy ownership loss by stopping physical state and publishing an empty snapshot", async function () {
+    const { host, physical } = createHost({
+      now: () => 3000,
+    });
+    const controlServer = attachControlServer(host);
+    bindHostEvents(host);
+    const device = createDevice("device-1");
+    const client = createClient(7, {
+      deviceId: "device-1",
+    });
+    const webSocketController = {
+      sendDeviceListCalls: 0,
+      sendClientListCalls: 0,
+      sendMessageToWeb() {},
+      sendMessageToWebClient() {},
+      close() {},
+      sendDeviceList() {
+        this.sendDeviceListCalls++;
+      },
+      sendClientList() {
+        this.sendClientListCalls++;
+      },
+    };
+    physical.devices.set(device.serial, device);
+    physical.usbClients.set(client.clientId(), client);
+    host.webSocketController = webSocketController;
+
+    host.legacyOwnershipGuard.emitStatus(
+      "unattached",
+      "legacy-preempted",
+      200
+    );
+
+    assert.strictEqual(host.legacyOwnershipAttached, false);
+    assert.strictEqual(physical.disableAllClientsCalls, 1);
+    assert.strictEqual(device.state.stopWatchCalls, 1);
+    assert.strictEqual(client.state.closeCalls, 1);
+    assert.strictEqual(physical.devices.size, 0);
+    assert.strictEqual(physical.usbClients.size, 0);
+    assert.deepStrictEqual(await host.getDevices(), []);
+    assert.deepStrictEqual(host.getAllUsbClients(), []);
+    assert.deepStrictEqual(
+      controlServer.broadcasts.map((event) => event.event),
+      ["snapshot", "legacy-ownership-changed"]
+    );
+    assert.deepStrictEqual(controlServer.broadcasts[0].data, {
+      protocolVersion: 1,
+      generatedAt: 3000,
+      devices: [],
+      clients: [],
+      daemonVersion: undefined,
+      capabilities: undefined,
+    });
+    assert.deepStrictEqual(controlServer.broadcasts[1].data, {
+      status: "unattached",
+      ownerPid: 100,
+      previousOwnerPid: 200,
+      reason: "legacy-preempted",
+    });
+    assert.strictEqual(webSocketController.sendDeviceListCalls, 1);
+    assert.strictEqual(webSocketController.sendClientListCalls, 1);
+
+    physical.emit("device-connected", createDevice("late-device"));
+    physical.emit("client-connected", createClient(8));
+    physical.emit("usb-client-message", {
+      id: 8,
+      message: "late",
+    });
+    assert.deepStrictEqual(
+      controlServer.broadcasts.map((event) => event.event),
+      ["snapshot", "legacy-ownership-changed"]
+    );
+  });
+
+  it("invalidates in-flight device discovery when legacy ownership is lost", async function () {
+    const deferred = createDeferred();
+    const physical = new FakePhysicalConnector({
+      connectDevicesImpl: () => deferred.promise,
+    });
+    const device = createDevice("device-1");
+    physical.devices.set(device.serial, device);
+    const { host } = createHost({
+      physical,
+    });
+    attachControlServer(host);
+
+    const discovery = host.handleControlRpc(
+      1,
+      createRpcRequest("connectDevices", {
+        isAutoListenClients: true,
+      })
+    );
+    await nextTick();
+
+    host.legacyOwnershipGuard.emitStatus(
+      "unattached",
+      "legacy-preempted",
+      200
+    );
+    deferred.resolve([device]);
+
+    await assert.rejects(discovery, /legacy owner is not attached/);
+    assert.strictEqual(host.deviceDiscoveryStarted, false);
+    assert.strictEqual(host.deviceDiscoveryStarting, null);
+    assert.deepStrictEqual(host.clientDiscoveryStartingByDeviceId.size, 0);
+    assert.deepStrictEqual(host.clientDiscoveryStartedDeviceIds.size, 0);
+    assert.deepStrictEqual(physical.startWatchClientCalls, []);
+  });
+
+  it("invalidates in-flight client watcher startup when legacy ownership is lost", async function () {
+    const startDeferred = createDeferred();
+    const { host, physical } = createHost({
+      startWatchClientImpl: async (device, shouldStart) => {
+        await startDeferred.promise;
+        if (shouldStart()) {
+          device.startWatchClient();
+        }
+      },
+    });
+    const device = createDevice("device-1");
+    physical.devices.set(device.serial, device);
+    attachControlServer(host);
+
+    const discovery = host.handleControlRpc(
+      1,
+      createRpcRequest("connectUsbClients", {
+        deviceId: "device-1",
+      })
+    );
+    await nextTick();
+    assert.deepStrictEqual(physical.startWatchClientCalls, ["device-1"]);
+
+    host.legacyOwnershipGuard.emitStatus(
+      "unattached",
+      "legacy-preempted",
+      200
+    );
+    startDeferred.resolve();
+
+    await assert.rejects(discovery, /legacy owner is not attached/);
+    assert.strictEqual(device.state.startWatchCalls, 0);
+    assert.strictEqual(host.clientDiscoveryStartingByDeviceId.size, 0);
+    assert.strictEqual(host.clientDiscoveryStartedDeviceIds.size, 0);
+    assert.deepStrictEqual(physical.getDeviceUsbClientsCalls, []);
+  });
+
+  it("reacquireLegacyOwnership reattaches the host and allows watcher recovery", async function () {
+    const { host, physical } = createHost();
+    const controlServer = attachControlServer(host);
+    const device = createDevice("device-1");
+    physical.devices.set(device.serial, device);
+
+    host.legacyOwnershipGuard.emitStatus(
+      "unattached",
+      "legacy-preempted",
+      200
+    );
+    await host.handleControlRpc(
+      1,
+      createRpcRequest("reacquireLegacyOwnership", {})
+    );
+    physical.devices.set(device.serial, device);
+    await host.handleControlRpc(
+      1,
+      createRpcRequest("startWatchAllClients", {
+        force: true,
+      })
+    );
+
+    assert.strictEqual(host.legacyOwnershipAttached, true);
+    assert.strictEqual(host.legacyOwnershipGuard.reacquireCalls, 1);
+    assert.deepStrictEqual(
+      controlServer.broadcasts.map((event) => event.event),
+      [
+        "snapshot",
+        "legacy-ownership-changed",
+        "legacy-ownership-changed",
+      ]
+    );
+    assert.deepStrictEqual(physical.startWatchClientCalls, ["device-1"]);
+    assert.strictEqual(device.state.startWatchCalls, 1);
+  });
+
   it("connectDevices starts device discovery once and auto-starts client discovery", async function () {
     const { host, physical } = createHost();
     const device = createDevice("device-1");
@@ -848,8 +1110,8 @@ describe("MultiplexerHost", function () {
     });
     const device = createDevice("device-1");
     physical.devices.set(device.serial, device);
-    const host = new MultiplexerHost({
-      physicalConnector: physical,
+    const { host } = createHost({
+      physical,
     });
 
     const first = host.handleControlRpc(
@@ -1653,10 +1915,22 @@ describe("MultiplexerHost", function () {
     });
 
     try {
-      await host.handleControlRpc(1, createRpcRequest("startWSServer", {}));
-      await host.handleControlRpc(1, createRpcRequest("startWSServer", {}));
+      const first = await host.handleControlRpc(
+        1,
+        createRpcRequest("startWSServer", {})
+      );
+      const second = await host.handleControlRpc(
+        1,
+        createRpcRequest("startWSServer", {})
+      );
 
       assert.strictEqual(instances.length, 1);
+      assert.deepStrictEqual(first, {
+        port: 19001,
+        host: "10.0.0.5:19001",
+        roomId: "room-a",
+      });
+      assert.deepStrictEqual(second, first);
       assert.strictEqual(instances[0].controllerHost, host);
       assert.deepStrictEqual(instances[0].option, {
         port: 19001,
@@ -1693,9 +1967,20 @@ describe("MultiplexerHost", function () {
     await nextTick();
     assert.strictEqual(calls, 1);
 
-    deferred.resolve();
-    await Promise.all([first, second]);
-    await host.handleControlRpc(1, createRpcRequest("startWSServer", {}));
+    const serverInfo = {
+      port: 19783,
+      host: "127.0.0.1:19783",
+      roomId: "room-a",
+    };
+    deferred.resolve(serverInfo);
+    assert.deepStrictEqual(await Promise.all([first, second]), [
+      serverInfo,
+      serverInfo,
+    ]);
+    assert.deepStrictEqual(
+      await host.handleControlRpc(1, createRpcRequest("startWSServer", {})),
+      serverInfo
+    );
 
     assert.strictEqual(calls, 1);
   });

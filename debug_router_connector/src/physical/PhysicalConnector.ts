@@ -169,14 +169,20 @@ export class PhysicalConnector {
     }
   }
   
-  startWatchClient(device: BaseDevice) {
+  async startWatchClient(
+    device: BaseDevice,
+    shouldStart: () => boolean = () => true,
+  ): Promise<void> {
+    if (!shouldStart()) {
+      return;
+    }
     if (device instanceof AndroidDevice) {
-        (device as AndroidDevice).forwards().then(() => {
-          device.startWatchClient();
-        });
-      } else {
-        device.startWatchClient();
+      await (device as AndroidDevice).forwards();
+      if (!shouldStart()) {
+        return;
       }
+    }
+    device.startWatchClient();
   }
 
   startWatchAllClients(force: boolean = true) {
@@ -357,6 +363,15 @@ export class PhysicalConnector {
     const existing = this.usbClients.get(client.clientId());
     if (existing) {
       defaultLogger.debug("regiserUsbClient: has exist:" + client.clientId);
+      return;
+    }
+    const existingSameRuntime = this.findRegisteredUsbClientByIdentity(client);
+    if (existingSameRuntime) {
+      defaultLogger.debug(
+        "regiserUsbClient: has same runtime:" +
+          JSON.stringify(existingSameRuntime.info),
+      );
+      client.close();
       return;
     }
     // register new client
@@ -553,6 +568,19 @@ export class PhysicalConnector {
       .filter((client) => client.deviceId() === deviceId);
   }
 
+  private findRegisteredUsbClientByIdentity(
+    client: UsbClient,
+  ): UsbClient | undefined {
+    return this.getAllUsbClients().find((existing) => {
+      return (
+        existing.deviceId() === client.deviceId() &&
+        existing.info?.port === client.info?.port &&
+        stringifyStableJson(existing.info?.query?.raw_info ?? null) ===
+          stringifyStableJson(client.info?.query?.raw_info ?? null)
+      );
+    });
+  }
+
   handleUsbMessage(id: number, message: string) {
     this.emit("usb-client-message", { id, message });
   }
@@ -619,4 +647,23 @@ export class PhysicalConnector {
       defaultLogger.warn("set DriverEnableDesktop === false");
     }
   }
+}
+
+function stringifyStableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stringifyStableJson(item)).join(",")}]`;
+  }
+
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map(
+      (key) =>
+        `${JSON.stringify(key)}:${stringifyStableJson(record[key])}`,
+    )
+    .join(",")}}`;
 }

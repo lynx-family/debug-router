@@ -344,6 +344,36 @@ describe("PhysicalConnector", function () {
     );
   });
 
+  it("deduplicates USB clients with the same runtime identity", function () {
+    const connector = createConnector();
+    const connected = collect(connector, "client-connected");
+    const first = createClient(1, {
+      deviceId: "device-1",
+      port: 9222,
+      processName: "com.target",
+      appName: "TargetApp",
+    });
+    const duplicate = createClient(2, {
+      deviceId: "device-1",
+      port: 9222,
+      processName: "com.target",
+      appName: "TargetApp",
+    });
+
+    connector.regiserUsbClient(first);
+    connector.regiserUsbClient(duplicate);
+
+    assert.deepStrictEqual(
+      connector.getAllUsbClients().map((client) => client.clientId()),
+      [1],
+    );
+    assert.deepStrictEqual(
+      connected.map((client) => client.clientId()),
+      [1],
+    );
+    assert.strictEqual(duplicate.state.closeCalls, 1);
+  });
+
   it("waits for future clients and times out with the current device clients", async function () {
     const connector = createConnector();
     const device = createDevice("device-1");

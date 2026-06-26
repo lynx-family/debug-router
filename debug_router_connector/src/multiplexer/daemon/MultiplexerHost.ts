@@ -36,6 +36,10 @@ import {
   MultiplexerControlHost,
   MultiplexerControlServer,
 } from "./MultiplexerControlServer";
+import {
+  LegacyOwnershipChange,
+  LegacyOwnershipGuard,
+} from "./LegacyOwnershipGuard";
 import { PendingRoute, PendingRouteTable } from "./PendingRouteTable";
 
 const DEFAULT_DEV_SERVE_PORT = 19783;
@@ -69,6 +73,8 @@ type CustomizedPayload = {
 type WebSocketControllerLike = {
   sendMessageToWeb(message: string): void;
   sendMessageToWebClient(webClientId: number, message: string): void;
+  sendClientList(): void;
+  sendDeviceList(): void;
   close(): void;
 };
 
@@ -78,6 +84,7 @@ export type MultiplexerHostOption = PhysicalConnectorOption & {
   minSupportedProtocolVersion?: number;
   daemonVersion?: string;
   capabilities?: string[];
+  legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
   websocketOption?: {
     port?: number;
@@ -98,7 +105,7 @@ type MultiplexerHostStartOption = {
 
 export class MultiplexerHost
   implements MultiplexerDaemonHost, MultiplexerControlHost {
-  private readonly physicalConnector: PhysicalConnector;
+  private physicalConnector: PhysicalConnector;
   private readonly option: MultiplexerHostOption;
   private readonly protocolVersion: number;
   private readonly minSupportedProtocolVersion: number;
@@ -120,6 +127,9 @@ export class MultiplexerHost
   private webSocketServerStarting: Promise<void> | null = null;
   private readonly activeControlIds = new Set<number>();
   private readonly activeWebSocketDriverIds = new Set<number>();
+  private readonly legacyOwnershipGuard: LegacyOwnershipGuard;
+  private physicalDiscoveryGeneration = 0;
+  private legacyOwnershipAttached = false;
   private idleTimer: NodeJS.Timeout | null = null;
   private idleTimeoutHandler: (() => void | Promise<void>) | undefined;
   private runtimeIdleTimeout: number | undefined;
@@ -128,6 +138,10 @@ export class MultiplexerHost
   private started = false;
 
   private readonly handleDeviceConnected = (device: BaseDevice): void => {
+    if (!this.legacyOwnershipAttached) {
+      return;
+    }
+
     if (
       this.deviceDiscoveryAutoListensClients ||
       this.allClientWatchersRequested
@@ -140,10 +154,15 @@ export class MultiplexerHost
       event: "device-connected",
       data: this.serializeDevice(device),
     });
+    this.webSocketController?.sendDeviceList();
     this.publishSnapshot();
   };
 
   private readonly handleDeviceDisconnected = (device: BaseDevice): void => {
+    if (!this.legacyOwnershipAttached) {
+      return;
+    }
+
     this.clearClientDiscoveryForDevice(device.serial);
 
     this.broadcast({
@@ -153,19 +172,29 @@ export class MultiplexerHost
         serial: device.serial,
       },
     });
+    this.webSocketController?.sendDeviceList();
     this.publishSnapshot();
   };
 
   private readonly handleClientConnected = (client: UsbClient): void => {
+    if (!this.legacyOwnershipAttached) {
+      return;
+    }
+
     this.broadcast({
       kind: "event",
       event: "client-connected",
       data: this.serializeClient(client),
     });
+    this.webSocketController?.sendClientList();
     this.publishSnapshot();
   };
 
   private readonly handleClientDisconnected = (id: number): void => {
+    if (!this.legacyOwnershipAttached) {
+      return;
+    }
+
     this.broadcast({
       kind: "event",
       event: "client-disconnected",
@@ -173,13 +202,34 @@ export class MultiplexerHost
         id,
       },
     });
+    this.webSocketController?.sendClientList();
     this.publishSnapshot();
   };
 
   private readonly handleUsbClientMessage = (
     payload: PhysicalConnectorEvent["usb-client-message"],
   ): void => {
+    if (!this.legacyOwnershipAttached) {
+      return;
+    }
+
     this.handlePhysicalMessage(payload.id, payload.message);
+  };
+
+  private readonly handleLegacyOwnershipChanged = (
+    change: LegacyOwnershipChange,
+  ): void => {
+    if (change.status === "unattached") {
+      this.handleLegacyOwnershipLost();
+    } else {
+      this.legacyOwnershipAttached = true;
+    }
+
+    this.broadcast({
+      kind: "event",
+      event: "legacy-ownership-changed",
+      data: change,
+    });
   };
 
   constructor(option: MultiplexerHostOption = {}) {
@@ -194,10 +244,11 @@ export class MultiplexerHost
       now: this.now,
     });
 
-    const PhysicalConnectorCtor =
-      option.PhysicalConnectorCtor ?? PhysicalConnector;
-    this.physicalConnector =
-      option.physicalConnector ?? new PhysicalConnectorCtor(option);
+    this.physicalConnector = this.createPhysicalConnector();
+    this.legacyOwnershipGuard = new LegacyOwnershipGuard({
+      legacyDriverDir: option.legacyDriverDir,
+      onStatusChanged: this.handleLegacyOwnershipChanged,
+    });
   }
 
   async start(startOption?: unknown): Promise<void> {
@@ -228,6 +279,7 @@ export class MultiplexerHost
     try {
       await controlServer.start();
       this.started = true;
+      this.legacyOwnershipGuard.start();
       this.scheduleIdleTimeoutIfNeeded();
     } catch (error) {
       await this.stop();
@@ -243,6 +295,7 @@ export class MultiplexerHost
     const stopErrors: unknown[] = [];
     this.started = false;
     this.clearIdleTimeout();
+    this.legacyOwnershipGuard.stop();
     this.activeControlIds.clear();
     this.activeWebSocketDriverIds.clear();
     this.unbindPhysicalConnectorEvents();
@@ -336,6 +389,8 @@ export class MultiplexerHost
         return this.disconnectDevice(
           message.params as ControlRpcParams["disconnectDevice"],
         );
+      case "reacquireLegacyOwnership":
+        return this.reacquireLegacyOwnership();
       case "startWSServer":
         return this.startWSServer();
       case "startWatchAllClients":
@@ -393,11 +448,11 @@ export class MultiplexerHost
     this.controlServer?.sendToControl(controlId, event);
   }
 
-  publishSnapshot(): void {
+  publishSnapshot(snapshot: Snapshot = this.createSnapshot()): void {
     this.broadcast({
       kind: "event",
       event: "snapshot",
-      data: this.createSnapshot(),
+      data: snapshot,
     });
   }
 
@@ -409,6 +464,19 @@ export class MultiplexerHost
         Array.from(this.physicalConnector.devices.values()),
       ),
       clients: this.serializeClients(this.physicalConnector.getAllUsbClients()),
+      daemonVersion: this.option.daemonVersion,
+      capabilities: this.option.capabilities
+        ? [...this.option.capabilities]
+        : undefined,
+    };
+  }
+
+  createEmptySnapshot(): Snapshot {
+    return {
+      protocolVersion: this.protocolVersion,
+      generatedAt: this.now(),
+      devices: [],
+      clients: [],
       daemonVersion: this.option.daemonVersion,
       capabilities: this.option.capabilities
         ? [...this.option.capabilities]
@@ -429,6 +497,10 @@ export class MultiplexerHost
   }
 
   getAllUsbClients(): UsbClient[] {
+    if (!this.legacyOwnershipAttached) {
+      return [];
+    }
+
     return this.physicalConnector.getAllUsbClients();
   }
 
@@ -436,6 +508,10 @@ export class MultiplexerHost
     timeout: number = -1,
     serial: string | null = null,
   ): Promise<BaseDevice[]> {
+    if (!this.legacyOwnershipAttached) {
+      return Promise.resolve([]);
+    }
+
     return this.physicalConnector.getDevices(timeout, serial);
   }
 
@@ -600,7 +676,12 @@ export class MultiplexerHost
   private async connectDevices(
     params: ControlRpcParams["connectDevices"],
   ): Promise<DeviceSnapshot[]> {
-    await this.ensureDeviceDiscovery(params.isAutoListenClients ?? true);
+    const generation = this.physicalDiscoveryGeneration;
+    await this.ensureDeviceDiscovery(
+      params.isAutoListenClients ?? true,
+      generation,
+    );
+    this.assertPhysicalDiscoveryCurrent(generation);
     return this.getDeviceSnapshots({
       timeout: params.timeout,
       serial: params.serial,
@@ -610,6 +691,7 @@ export class MultiplexerHost
   private async getDeviceSnapshots(
     params: ControlRpcParams["getDevices"],
   ): Promise<DeviceSnapshot[]> {
+    this.assertPhysicalDiscoveryCurrent(this.physicalDiscoveryGeneration);
     const devices = await this.physicalConnector.getDevices(
       params.timeout ?? -1,
       params.serial ?? null,
@@ -620,8 +702,10 @@ export class MultiplexerHost
   private async connectUsbClients(
     params: ControlRpcParams["connectUsbClients"],
   ): Promise<ClientSnapshot[]> {
-    await this.ensureDeviceDiscovery(false);
-    await this.ensureClientDiscovery(params.deviceId);
+    const generation = this.physicalDiscoveryGeneration;
+    await this.ensureDeviceDiscovery(false, generation);
+    await this.ensureClientDiscovery(params.deviceId, generation);
+    this.assertPhysicalDiscoveryCurrent(generation);
 
     const clients = await this.getDeviceUsbClients(
       params.deviceId,
@@ -636,8 +720,9 @@ export class MultiplexerHost
   private async startWatchClient(
     params: ControlRpcParams["startWatchClient"],
   ): Promise<void> {
-    await this.ensureDeviceDiscovery(false);
-    await this.ensureClientDiscovery(params.deviceId);
+    const generation = this.physicalDiscoveryGeneration;
+    await this.ensureDeviceDiscovery(false, generation);
+    await this.ensureClientDiscovery(params.deviceId, generation);
   }
 
   private async stopWatchClient(
@@ -664,38 +749,56 @@ export class MultiplexerHost
     device.disConnect();
   }
 
+  private reacquireLegacyOwnership(): void {
+    this.legacyOwnershipGuard.reacquire();
+  }
+
   private async ensureDeviceDiscovery(
     isAutoListenClients: boolean = true,
+    generation: number = this.physicalDiscoveryGeneration,
   ): Promise<void> {
+    this.assertPhysicalDiscoveryCurrent(generation);
     if (!this.deviceDiscoveryStarted && !this.deviceDiscoveryStarting) {
       this.deviceDiscoveryStarting = this.physicalConnector
         .connectDevices(-1, null, false)
         .then(() => {
-          this.deviceDiscoveryStarted = true;
+          if (this.isPhysicalDiscoveryCurrent(generation)) {
+            this.deviceDiscoveryStarted = true;
+          }
         })
         .finally(() => {
-          this.deviceDiscoveryStarting = null;
+          if (this.isPhysicalDiscoveryCurrent(generation)) {
+            this.deviceDiscoveryStarting = null;
+          }
         });
     }
 
     if (this.deviceDiscoveryStarting) {
       await this.deviceDiscoveryStarting;
     }
+    this.assertPhysicalDiscoveryCurrent(generation);
     if (isAutoListenClients) {
-      await this.ensureAutoClientDiscovery();
+      await this.ensureAutoClientDiscovery(generation);
     }
   }
 
-  private async ensureAutoClientDiscovery(): Promise<void> {
+  private async ensureAutoClientDiscovery(
+    generation: number = this.physicalDiscoveryGeneration,
+  ): Promise<void> {
+    this.assertPhysicalDiscoveryCurrent(generation);
     if (this.option.manualConnect) {
       return;
     }
 
     this.deviceDiscoveryAutoListensClients = true;
-    await this.ensureClientDiscoveryForCurrentDevices();
+    await this.ensureClientDiscoveryForCurrentDevices(generation);
   }
 
-  private async ensureClientDiscovery(deviceId: string): Promise<void> {
+  private async ensureClientDiscovery(
+    deviceId: string,
+    generation: number = this.physicalDiscoveryGeneration,
+  ): Promise<void> {
+    this.assertPhysicalDiscoveryCurrent(generation);
     if (this.clientDiscoveryStartedDeviceIds.has(deviceId)) {
       return;
     }
@@ -707,17 +810,25 @@ export class MultiplexerHost
     }
 
     const starting = Promise.resolve()
-      .then(() => {
+      .then(async () => {
+        this.assertPhysicalDiscoveryCurrent(generation);
         const device = this.physicalConnector.devices.get(deviceId);
         if (!device) {
           return;
         }
 
-        this.physicalConnector.startWatchClient(device);
-        this.clientDiscoveryStartedDeviceIds.add(deviceId);
+        await this.physicalConnector.startWatchClient(device, () =>
+          this.isPhysicalDiscoveryCurrent(generation),
+        );
+        if (this.isPhysicalDiscoveryCurrent(generation)) {
+          this.clientDiscoveryStartedDeviceIds.add(deviceId);
+        }
       })
       .finally(() => {
-        if (this.clientDiscoveryStartingByDeviceId.get(deviceId) === starting) {
+        if (
+          this.isPhysicalDiscoveryCurrent(generation) &&
+          this.clientDiscoveryStartingByDeviceId.get(deviceId) === starting
+        ) {
           this.clientDiscoveryStartingByDeviceId.delete(deviceId);
         }
       });
@@ -746,9 +857,11 @@ export class MultiplexerHost
   private async startWatchAllClients(
     params: ControlRpcParams["startWatchAllClients"],
   ): Promise<void> {
+    const generation = this.physicalDiscoveryGeneration;
+    this.assertPhysicalDiscoveryCurrent(generation);
     this.allClientWatchersRequested = true;
-    await this.ensureDeviceDiscovery(false);
-    await this.ensureClientDiscoveryForCurrentDevices();
+    await this.ensureDeviceDiscovery(false, generation);
+    await this.ensureClientDiscoveryForCurrentDevices(generation);
   }
 
   private async startWSServer(): Promise<WebSocketServerInfo | undefined> {
@@ -928,10 +1041,32 @@ export class MultiplexerHost
     );
   }
 
-  private async ensureClientDiscoveryForCurrentDevices(): Promise<void> {
+  private createPhysicalConnector(): PhysicalConnector {
+    if (this.option.physicalConnector && !this.option.PhysicalConnectorCtor) {
+      return this.option.physicalConnector;
+    }
+
+    const PhysicalConnectorCtor =
+      this.option.PhysicalConnectorCtor ?? PhysicalConnector;
+    return new PhysicalConnectorCtor(this.option);
+  }
+
+  private canRecreatePhysicalConnector(): boolean {
+    return (
+      !this.option.physicalConnector ||
+      this.option.PhysicalConnectorCtor !== undefined
+    );
+  }
+
+  private async ensureClientDiscoveryForCurrentDevices(
+    generation: number = this.physicalDiscoveryGeneration,
+  ): Promise<void> {
+    this.assertPhysicalDiscoveryCurrent(generation);
     const deviceIds = Array.from(this.physicalConnector.devices.keys());
     await Promise.all(
-      deviceIds.map((deviceId) => this.ensureClientDiscovery(deviceId)),
+      deviceIds.map((deviceId) =>
+        this.ensureClientDiscovery(deviceId, generation),
+      ),
     );
   }
 
@@ -941,6 +1076,8 @@ export class MultiplexerHost
   }
 
   private resetDiscoveryState(): void {
+    this.physicalDiscoveryGeneration++;
+    this.legacyOwnershipAttached = false;
     this.deviceDiscoveryStarted = false;
     this.deviceDiscoveryStarting = null;
     this.deviceDiscoveryAutoListensClients = false;
@@ -956,6 +1093,57 @@ export class MultiplexerHost
       this.pendingRoutes.clear(),
       new Error("Multiplexer host route table was reset"),
     );
+  }
+
+  private handleLegacyOwnershipLost(): void {
+    this.legacyOwnershipAttached = false;
+    this.resetPhysicalDiscoveryState(
+      new Error("Multiplexer legacy owner was preempted"),
+    );
+    const oldPhysicalConnector = this.physicalConnector;
+    this.unbindPhysicalConnectorEvents();
+    oldPhysicalConnector.disableAllClients();
+    oldPhysicalConnector.devices.clear();
+    oldPhysicalConnector.usbClients.clear();
+    oldPhysicalConnector.selectedClient = undefined;
+    if (this.canRecreatePhysicalConnector()) {
+      this.physicalConnector = this.createPhysicalConnector();
+      this.bindPhysicalConnectorEvents();
+      void oldPhysicalConnector.close().catch((error: any) => {
+        defaultLogger.warn(
+          `Failed to close preempted physical connector: ${error?.message}`,
+        );
+      });
+    } else {
+      this.bindPhysicalConnectorEvents();
+    }
+    this.publishSnapshot(this.createEmptySnapshot());
+    this.webSocketController?.sendDeviceList();
+    this.webSocketController?.sendClientList();
+  }
+
+  private resetPhysicalDiscoveryState(error: Error): void {
+    this.physicalDiscoveryGeneration++;
+    this.deviceDiscoveryStarted = false;
+    this.deviceDiscoveryStarting = null;
+    this.deviceDiscoveryAutoListensClients = false;
+    this.clientDiscoveryStartedDeviceIds.clear();
+    this.clientDiscoveryStartingByDeviceId.clear();
+    this.allClientWatchersRequested = false;
+    this.rejectRoutes(this.pendingRoutes.clear(), error);
+  }
+
+  private isPhysicalDiscoveryCurrent(generation: number): boolean {
+    return (
+      this.legacyOwnershipAttached &&
+      this.physicalDiscoveryGeneration === generation
+    );
+  }
+
+  private assertPhysicalDiscoveryCurrent(generation: number): void {
+    if (!this.isPhysicalDiscoveryCurrent(generation)) {
+      throw new Error("Multiplexer legacy owner is not attached");
+    }
   }
 
   private sendMessageToRuntime(
