@@ -486,6 +486,17 @@ async function main() {
               entryOption.multiplexerDaemonIdleTimeout,
           },
     host,
+    onIdleTimeout(stopError) {
+      if (stopError) {
+        appendJsonLine(logPath, {
+          event: "daemon-idle-cleanup-error",
+          pid: process.pid,
+          at: Date.now(),
+          message: stopError?.message,
+        });
+      }
+      process.exit(stopError ? 1 : 0);
+    },
   });
 
   let cleaning = false;

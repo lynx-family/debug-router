@@ -134,6 +134,7 @@ function loadConnectorWithFakes(config = {}) {
     unsubscribeCalls: 0,
     unsubscribeConnectionCalls: 0,
     closeCalls: 0,
+    connectCalls: 0,
   };
 
   class FakeMultiplexerDiscovery {
@@ -156,8 +157,14 @@ function loadConnectorWithFakes(config = {}) {
     constructor(option) {
       this.option = option;
       this.calls = [];
+      this.connectCalls = 0;
       this.closeCalls = 0;
       state.clients.push(this);
+    }
+
+    async connect() {
+      this.connectCalls++;
+      state.connectCalls++;
     }
 
     async call(method, params) {
@@ -980,6 +987,48 @@ describe("DebugRouterConnector multiplexer facade", function () {
     }
   });
 
+  it("reconnects the daemon after disconnect even when there is no desired state", async function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+      });
+
+      state.clients[0].emitConnectionState({
+        state: "disconnected",
+        error: new Error("daemon lost"),
+      });
+
+      await delay(120);
+      assert.strictEqual(state.connectCalls, 1);
+      assert.deepStrictEqual(state.clients[0].calls, []);
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not run desired recovery on a plain connected event", async function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes({
+      results: [["connectDevices", [createDeviceSnapshot()]]],
+    });
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+      });
+
+      await connector.connectDevices(-1, null, true);
+      state.clients[0].calls = [];
+      state.clients[0].emitConnectionState({
+        state: "connected",
+      });
+
+      await delay(120);
+      assert.deepStrictEqual(state.clients[0].calls, []);
+    } finally {
+      restore();
+    }
+  });
+
   it("schedules desired recovery with a fixed 100ms delay", function () {
     const { DebugRouterConnector, restore } = loadConnectorWithFakes();
     const originalSetTimeout = global.setTimeout;
@@ -1129,6 +1178,87 @@ describe("DebugRouterConnector multiplexer facade", function () {
           .map((call) => call.params),
         [{ force: false }, { force: false }]
       );
+    } finally {
+      restore();
+    }
+  });
+
+  it("restores desired device discovery before other desired RPCs after daemon reconnect", async function () {
+    let starts = 0;
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes({
+      results: [
+        ["connectDevices", [createDeviceSnapshot()]],
+        [
+          "startWSServer",
+          () => {
+            starts++;
+            return {
+              port: 8800 + starts,
+              host: `127.0.0.1:${8800 + starts}`,
+              roomId: `room-${starts}`,
+            };
+          },
+        ],
+      ],
+    });
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: true,
+      });
+
+      await connector.connectDevices(12, "device-1", false);
+      assert.strictEqual(connector.desiredDeviceDiscoveryStarted, true);
+      assert.strictEqual(
+        connector.desiredDeviceDiscoveryAutoListenClients,
+        false
+      );
+      await connector.connectDevices(13, "device-2", true);
+      assert.strictEqual(
+        connector.desiredDeviceDiscoveryAutoListenClients,
+        true
+      );
+      await connector.connectDevices(14, "device-3", false);
+      assert.strictEqual(
+        connector.desiredDeviceDiscoveryAutoListenClients,
+        true
+      );
+      connector.startWatchAllClients(false);
+      await nextTick();
+      await connector.startWSServer();
+      state.clients[0].calls = [];
+
+      state.clients[0].emitConnectionState({
+        state: "disconnected",
+        error: new Error("daemon lost"),
+      });
+
+      await delay(120);
+      assert.strictEqual(state.connectCalls, 1);
+      assert.deepStrictEqual(state.clients[0].calls, [
+        {
+          method: "reacquireLegacyOwnership",
+          params: {},
+        },
+        {
+          method: "connectDevices",
+          params: {
+            timeout: -1,
+            serial: null,
+            isAutoListenClients: true,
+          },
+        },
+        {
+          method: "startWatchAllClients",
+          params: {
+            force: false,
+          },
+        },
+        {
+          method: "startWSServer",
+          params: {},
+        },
+      ]);
     } finally {
       restore();
     }

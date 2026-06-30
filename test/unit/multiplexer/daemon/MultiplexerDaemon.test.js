@@ -26,6 +26,7 @@ function createHost(overrides = {}) {
     started: 0,
     stopped: 0,
     startOptions: [],
+    idleTimeoutHandler: null,
   };
 
   return {
@@ -46,6 +47,9 @@ function createHost(overrides = {}) {
       },
       getControlPort: () => {
         return overrides.controlPort ?? 9100;
+      },
+      setIdleTimeoutHandler: (handler) => {
+        state.idleTimeoutHandler = handler;
       },
     },
   };
@@ -209,6 +213,51 @@ describe("MultiplexerDaemon", function () {
       /Invalid multiplexer daemon control port/
     );
 
+    assert.strictEqual(fs.existsSync(discoveryPath), false);
+    assert.strictEqual(fs.existsSync(daemonLockPath), false);
+  });
+
+  it("stops daemon resources and invokes idle callback when host idles", async function () {
+    const idleCalls = [];
+    const { host, state } = createHost();
+    createDaemon(host, {
+      onIdleTimeout: (stopError) => {
+        idleCalls.push(stopError);
+      },
+    });
+
+    await daemon.start();
+    assert.strictEqual(typeof state.idleTimeoutHandler, "function");
+
+    await state.idleTimeoutHandler();
+
+    assert.strictEqual(state.stopped, 1);
+    assert.deepStrictEqual(idleCalls, [undefined]);
+    assert.strictEqual(daemon.heartbeatTimer, undefined);
+    assert.strictEqual(daemon.discoveryInfo, null);
+    assert.strictEqual(fs.existsSync(discoveryPath), false);
+    assert.strictEqual(fs.existsSync(daemonLockPath), false);
+  });
+
+  it("still invokes idle callback when stop reports an error", async function () {
+    const stopError = new Error("host stop failed");
+    const idleCalls = [];
+    const { host, state } = createHost({
+      stop: async () => {
+        throw stopError;
+      },
+    });
+    createDaemon(host, {
+      onIdleTimeout: (error) => {
+        idleCalls.push(error);
+      },
+    });
+
+    await daemon.start();
+    await state.idleTimeoutHandler();
+
+    assert.strictEqual(state.stopped, 1);
+    assert.deepStrictEqual(idleCalls, [stopError]);
     assert.strictEqual(fs.existsSync(discoveryPath), false);
     assert.strictEqual(fs.existsSync(daemonLockPath), false);
   });

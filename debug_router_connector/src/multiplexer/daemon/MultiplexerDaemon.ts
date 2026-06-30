@@ -32,6 +32,7 @@ export type MultiplexerDaemonOption = {
   // only used for testing
   heartbeatInterval?: number;
   now?: () => number;
+  onIdleTimeout?: (stopError?: unknown) => void | Promise<void>;
 };
 
 export class MultiplexerDaemon {
@@ -197,9 +198,18 @@ export class MultiplexerDaemon {
     return this.option?.now?.() ?? this.defaultNow();
   }
 
-  private readonly handleHostIdleTimeout = (): void => {
-    void this.stop().catch(() => {
+  private readonly handleHostIdleTimeout = async (): Promise<void> => {
+    let stopError: unknown;
+    try {
+      await this.stop();
+    } catch (error) {
+      stopError = error;
+    }
+
+    try {
+      await this.option.onIdleTimeout?.(stopError);
+    } catch (_error) {
       // Process-level cleanup handlers will retry stop on exit paths.
-    });
+    }
   };
 }

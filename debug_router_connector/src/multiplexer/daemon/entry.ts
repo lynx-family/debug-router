@@ -102,6 +102,16 @@ export function createMultiplexerDaemon(
     capabilities: entryOption.capabilities,
     heartbeatInterval: entryOption.heartbeatInterval,
     host,
+    onIdleTimeout: (stopError) => {
+      if (stopError) {
+        defaultLogger.error(
+          `Multiplexer daemon idle cleanup failed: ${
+            (stopError as any)?.message
+          }`,
+        );
+      }
+      process.exit(stopError ? 1 : 0);
+    },
   };
   if (entryOption.multiplexerDaemonIdleTimeout !== undefined) {
     daemonOption.hostOption = {

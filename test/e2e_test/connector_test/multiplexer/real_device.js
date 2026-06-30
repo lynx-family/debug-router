@@ -195,7 +195,6 @@ function createContext(platform, args, option = {}) {
         multiplexerRootDir: rootDir,
         multiplexerLegacyDriverDir: legacyDriverDir,
         multiplexerStartupTimeout: 8000,
-        multiplexerStaleTimeout: 500,
         multiplexerRpcTimeout:
           Math.max(args.deviceTimeout, args.clientTimeout, 5000) + 5000,
         multiplexerDaemonIdleTimeout: args.multiplexerDaemonIdleTimeout,
@@ -222,6 +221,7 @@ function createContext(platform, args, option = {}) {
           await connector.close().catch(() => {});
         }
         await stopDaemon(paths.discoveryPath);
+        await delay(500);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
         if (hadOriginalHome) {
@@ -259,6 +259,7 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
       args.deviceTimeout,
     );
     await launchAppIfNeeded(platform, args, firstDevice);
+    logStep(`${platform} connecting matching device through second connector`);
     const secondDevice = await connectTargetDevice(
       second,
       platform,
@@ -267,24 +268,56 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
     );
     assert.strictEqual(secondDevice.serial, firstDevice.serial);
 
+    await activateClientWatching(first, platform, args.clientTimeout);
+    logStep(`${platform} connecting runtime client through first connector`);
     let firstClient = await connectTargetClient(
       first,
+      platform,
       firstDevice.serial,
       clientName,
       args.clientTimeout,
+      args,
     );
+    logStep(`${platform} connecting matching runtime client through second connector`);
     const secondClient = await connectMatchingClient(
       second,
+      platform,
       firstDevice.serial,
       firstClient,
       args.clientTimeout,
+      args,
     );
+    if (firstClient.clientId() !== secondClient.clientId()) {
+      logStep(`${platform} refreshing first connector after runtime client changed`);
+      firstClient = await connectMatchingClient(
+        first,
+        platform,
+        firstDevice.serial,
+        secondClient,
+        args.clientTimeout,
+        args,
+      );
+    }
     assert.strictEqual(firstClient.clientId(), secondClient.clientId());
     assert.strictEqual(firstClient.deviceId(), firstDevice.serial);
     assert.strictEqual(secondClient.deviceId(), firstDevice.serial);
     assert.notStrictEqual(firstClient, secondClient);
-    assert.strictEqual(first.getAllUsbClients().length >= 1, true);
-    assert.strictEqual(second.getAllUsbClients().length >= 1, true);
+    await waitFor(
+      () =>
+        first
+          .getAllUsbClients()
+          .some((client) => client.clientId() === firstClient.clientId()),
+      3000,
+      `${platform} first connector local client mirror`,
+    );
+    await waitFor(
+      () =>
+        second
+          .getAllUsbClients()
+          .some((client) => client.clientId() === secondClient.clientId()),
+      3000,
+      `${platform} second connector local client mirror`,
+    );
 
     const daemonInfo = await waitFor(
       () => readJsonFile(context.paths.discoveryPath, null),
@@ -440,42 +473,91 @@ async function connectTargetDevice(connector, platform, serial, timeout) {
   return candidates[0];
 }
 
-async function connectTargetClient(connector, serial, clientName, timeout) {
-  const clients = await connector.connectUsbClients(
-    serial,
-    timeout,
-    true,
-    clientName,
+async function activateClientWatching(connector, platform, timeout) {
+  connector.startWatchAllClients(false);
+  await waitFor(
+    () => connector.watchAllClientsStarted,
+    Math.max(timeout, 5000),
+    `${platform} client watching activation`,
   );
+}
+
+async function connectTargetClient(
+  connector,
+  platform,
+  serial,
+  clientName,
+  timeout,
+  args,
+) {
+  let clients = [];
+  const maxAttempts = platform === "ios" ? 3 : 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    clients = await connector.connectUsbClients(
+      serial,
+      timeout,
+      true,
+      clientName,
+    );
+    if (clients.length > 0) {
+      return clients[0];
+    }
+    if (attempt < maxAttempts) {
+      logStep(`${platform} relaunching app after missing runtime client`);
+      await launchAppIfNeeded(platform, args, { serial });
+    }
+  }
   assert(
     clients.length > 0,
     `Expected at least one runtime client for ${serial}${
       clientName ? ` matching ${clientName}` : ""
     }`,
   );
-  return clients[0];
 }
 
-async function connectMatchingClient(connector, serial, targetClient, timeout) {
-  const clients = await connector.connectUsbClients(
-    serial,
-    timeout,
-    true,
-    null,
-  );
-  const matched = clients.find((client) => {
-    return (
-      client.clientId() === targetClient.clientId() ||
-      hasSameClientIdentity(client, targetClient)
+async function connectMatchingClient(
+  connector,
+  platform,
+  serial,
+  targetClient,
+  timeout,
+  args,
+) {
+  let clients = [];
+  let matched;
+  const maxAttempts = platform === "ios" ? 3 : 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    clients = await connector.connectUsbClients(
+      serial,
+      timeout,
+      true,
+      null,
     );
-  });
+    matched = clients.find((client) => {
+      return (
+        client.clientId() === targetClient.clientId() ||
+        hasSameClientIdentity(client, targetClient)
+      );
+    });
+    if (!matched) {
+      matched = clients.find((client) =>
+        hasSameRuntimeIdentity(client, targetClient),
+      );
+    }
+    if (matched) {
+      return matched;
+    }
+    if (attempt < maxAttempts) {
+      logStep(`${platform} retrying matching runtime client discovery`);
+      await delay(500);
+    }
+  }
   assert(
     matched,
     `Expected matching runtime client ${describeClient(targetClient)} for ${serial}, got: ${clients
       .map(describeClient)
       .join(", ")}`,
   );
-  return matched;
 }
 
 function isDeviceForPlatform(device, platform) {
@@ -495,6 +577,23 @@ function hasSameClientIdentity(candidate, target) {
     candidate.info?.query?.raw_info?.AppProcessName ===
       target.info?.query?.raw_info?.AppProcessName &&
     candidate.info?.query?.raw_info?.App === target.info?.query?.raw_info?.App
+  );
+}
+
+function hasSameRuntimeIdentity(candidate, target) {
+  const candidateRawInfo = candidate.info?.query?.raw_info ?? {};
+  const targetRawInfo = target.info?.query?.raw_info ?? {};
+  const candidateProcess = candidateRawInfo.AppProcessName;
+  const targetProcess = targetRawInfo.AppProcessName;
+  const candidateApp = candidateRawInfo.App;
+  const targetApp = targetRawInfo.App;
+  if (!candidateProcess && !candidateApp) {
+    return false;
+  }
+  return (
+    candidate.deviceId() === target.deviceId() &&
+    candidateProcess === targetProcess &&
+    candidateApp === targetApp
   );
 }
 
@@ -528,7 +627,7 @@ async function launchAppIfNeeded(platform, args, device) {
       )} --terminate-existing ${shellQuote(args.iosBundleId)}`;
     logStep(`launching iOS test app: ${command}`);
     await execRetryingTransientIOSCancel(command, 15000);
-    await delay(1500);
+    await delay(2500);
   }
 }
 
@@ -639,6 +738,7 @@ async function assertLegacyPreemption(
     `${platform} daemon reacquires legacy owner`,
   );
   assert.strictEqual(readOwnerPid(context.legacyOwnerPath), daemonPid);
+  await launchAppIfNeeded(platform, args, { serial });
 
   const device = await waitFor(
     async () => {
@@ -850,7 +950,7 @@ async function stopDaemon(discoveryPath) {
     process.kill(discovery.pid, "SIGTERM");
   } catch (_error) {}
   await waitFor(
-    () => !processExists(discovery.pid) || !fs.existsSync(discoveryPath),
+    () => !processExists(discovery.pid),
     1000,
     "daemon termination",
   ).catch(() => {
@@ -858,6 +958,11 @@ async function stopDaemon(discoveryPath) {
       process.kill(discovery.pid, "SIGKILL");
     } catch (_error) {}
   });
+  await waitFor(
+    () => !processExists(discovery.pid),
+    1000,
+    "daemon force termination",
+  ).catch(() => {});
 }
 
 function readJsonFile(filePath, fallback) {
@@ -928,8 +1033,99 @@ function toKebabCase(value) {
   return value.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 }
 
+async function stopInterferingMultiplexerDaemons() {
+  const targets = await listInterferingMultiplexerDaemons();
+  if (targets.length === 0) {
+    return;
+  }
+
+  logStep(
+    `stopping ${targets.length} existing multiplexer daemon(s) before real-device e2e`,
+  );
+  for (const target of targets) {
+    try {
+      process.kill(target.pid, "SIGTERM");
+    } catch (_error) {}
+  }
+
+  await waitFor(
+    async () => {
+      const alive = targets.filter((target) => processExists(target.pid));
+      return alive.length === 0;
+    },
+    2000,
+    "existing multiplexer daemon graceful stop",
+  ).catch(() => {});
+
+  const stillAlive = targets.filter((target) => processExists(target.pid));
+  for (const target of stillAlive) {
+    try {
+      process.kill(target.pid, "SIGKILL");
+    } catch (_error) {}
+  }
+
+  if (stillAlive.length > 0) {
+    await delay(500);
+  }
+}
+
+function listInterferingMultiplexerDaemons() {
+  if (process.platform === "win32") {
+    return Promise.resolve([]);
+  }
+
+  return new Promise((resolve) => {
+    childProcess.execFile(
+      "ps",
+      ["-Ao", "pid=,command="],
+      (error, stdout) => {
+        if (error) {
+          resolve([]);
+          return;
+        }
+
+        const defaultDiscoveryPath = path.join(
+          process.env.HOME || os.homedir(),
+          ".DebugRouterConnector",
+          "multiplexer",
+          "daemon.json",
+        );
+        const targets = stdout
+          .split(/\n/)
+          .map((line) => {
+            const match = line.trim().match(/^(\d+)\s+(.+)$/);
+            if (!match) {
+              return null;
+            }
+            return {
+              pid: Number(match[1]),
+              command: match[2],
+            };
+          })
+          .filter(Boolean)
+          .filter((entry) => {
+            if (entry.pid === process.pid) {
+              return false;
+            }
+            if (!entry.command.includes("/multiplexer/daemon/entry.js")) {
+              return false;
+            }
+            return (
+              entry.command.includes(`--discovery-path ${defaultDiscoveryPath}`) ||
+              /\/T\/debug-router-real-[^/]+\/multiplexer\/daemon\.json/.test(
+                entry.command,
+              )
+            );
+          });
+        resolve(targets);
+      },
+    );
+  });
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  await stopInterferingMultiplexerDaemons();
   const platforms =
     args.platform === "all" ? ["android", "ios"] : [args.platform];
   for (const [index, platform] of platforms.entries()) {

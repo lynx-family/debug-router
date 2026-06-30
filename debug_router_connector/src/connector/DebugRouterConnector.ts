@@ -96,6 +96,8 @@ export class DebugRouterConnector {
   private webSocketServerStarted = false;
   private desiredWSServerStarted = false;
   private startingWSServer: Promise<void> | null = null;
+  private desiredDeviceDiscoveryStarted = false;
+  private desiredDeviceDiscoveryAutoListenClients = false;
   private desiredWatchAllClientsForce: boolean | undefined;
   private watchAllClientsStarted = false;
   private desiredRecoveryTimer: NodeJS.Timeout | null = null;
@@ -181,10 +183,6 @@ export class DebugRouterConnector {
           this.handleDaemonDisconnected();
           return;
         }
-        if (state.state === "connected") {
-          this.handleDaemonConnected();
-          return;
-        }
       });
 
     this.driverClient = new DriverClient(this.createClientId());
@@ -249,6 +247,10 @@ export class DebugRouterConnector {
     serial: string | null = null,
     isAutoListenClients: boolean = true,
   ): Promise<MultiplexerDevice[]> {
+    this.desiredDeviceDiscoveryStarted = true;
+    if (isAutoListenClients) {
+      this.desiredDeviceDiscoveryAutoListenClients = true;
+    }
     await this.reacquireLegacyOwnership();
     const snapshots = await this.daemonClient.call("connectDevices", {
       timeout,
@@ -623,12 +625,8 @@ export class DebugRouterConnector {
     this.scheduleDesiredRecovery();
   }
 
-  private handleDaemonConnected(): void {
-    this.scheduleDesiredRecovery();
-  }
-
   private scheduleDesiredRecovery(): void {
-    if (!this.hasDesiredStateToRestore() || this.closed) {
+    if (this.closed) {
       return;
     }
     if (this.desiredRecoveryTimer) {
@@ -648,24 +646,30 @@ export class DebugRouterConnector {
   }
 
   private async restoreDesiredState(): Promise<void> {
-    const tasks: Promise<void>[] = [];
+    await this.daemonClient.connect();
+    await this.restoreDesiredDeviceDiscovery();
+
     const watchAllClients = this.restoreDesiredWatchAllClients();
     if (watchAllClients) {
-      tasks.push(watchAllClients);
+      await watchAllClients;
     }
     if (this.desiredWSServerStarted && !this.webSocketServerStarted) {
-      tasks.push(this.ensureWSServerStarted());
+      await this.ensureWSServerStarted();
     }
-
-    await Promise.all(tasks);
   }
 
-  private hasDesiredStateToRestore(): boolean {
-    return (
-      (this.desiredWatchAllClientsForce !== undefined &&
-        !this.watchAllClientsStarted) ||
-      (this.desiredWSServerStarted && !this.webSocketServerStarted)
-    );
+  private async restoreDesiredDeviceDiscovery(): Promise<void> {
+    if (!this.desiredDeviceDiscoveryStarted) {
+      return;
+    }
+
+    await this.reacquireLegacyOwnership();
+    const snapshots = await this.daemonClient.call("connectDevices", {
+      timeout: -1,
+      serial: null,
+      isAutoListenClients: this.desiredDeviceDiscoveryAutoListenClients,
+    });
+    this.upsertDeviceSnapshots(snapshots);
   }
 
   private clearDesiredRecoveryTimer(): void {
