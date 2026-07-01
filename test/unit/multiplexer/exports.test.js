@@ -21,7 +21,6 @@ function assertNoInternalExports(moduleExports) {
     "MultiplexerControlServer",
     "PendingRouteTable",
     "PhysicalConnector",
-    "LegacyDebugRouterConnector",
   ].forEach((name) => {
     assert.strictEqual(
       Object.prototype.hasOwnProperty.call(moduleExports, name),

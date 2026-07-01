@@ -60,3 +60,5 @@ tools/android_tools/
 
 ## my own docs
 dev_docs/
+test/e2e_test/connector_test/reports
+.vscode/

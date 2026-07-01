@@ -5,12 +5,38 @@
 #import "DebugRouterAppDelegate.h"
 #import "DebugRouter.h"
 
+@interface DebugRouterE2EPingHandler : NSObject <DebugRouterMessageHandler>
+@end
+
+@implementation DebugRouterE2EPingHandler
+
+- (nonnull NSString *)getName {
+  return @"ConnectorRealDeviceE2E.Ping";
+}
+
+- (nonnull DebugRouterMessageHandleResult *)handleMessageWithParams:
+    (NSMutableDictionary<NSString *, NSString *> *)params {
+  NSMutableDictionary<NSString *, id> *data = [[NSMutableDictionary alloc] init];
+  [data setObject:@YES forKey:@"ok"];
+  [data setObject:[self getName] forKey:@"method"];
+  [data setObject:(params ? [params copy] : @{}) forKey:@"params"];
+  return [[DebugRouterMessageHandleResult alloc] init:data];
+}
+
+@end
+
+@interface DebugRouterAppDelegate ()
+@property(nonatomic, strong) DebugRouterE2EPingHandler *e2ePingHandler;
+@end
+
 @implementation DebugRouterAppDelegate
 
 - (BOOL)application:(UIApplication *)application
     didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
   // Override point for customization after application launch.
   [[DebugRouter instance] enableAllSessions];
+  self.e2ePingHandler = [[DebugRouterE2EPingHandler alloc] init];
+  [[DebugRouter instance] addMessageHandler:self.e2ePingHandler];
   return YES;
 }
 
