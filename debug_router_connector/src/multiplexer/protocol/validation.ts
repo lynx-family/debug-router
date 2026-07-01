@@ -7,6 +7,9 @@ import type {
   ControlRpcMethod,
   ControlRpcRequest,
   ControlRpcResponse,
+  MultiplexerHandshakeErrorResponse,
+  MultiplexerHealthRequest,
+  MultiplexerHealthResponse,
 } from "./control";
 import type { MultiplexerDebugInfo } from "./debuginfo";
 import type { ControlEvent } from "./event";
@@ -159,6 +162,39 @@ export function isSnapshot(value: unknown): value is Snapshot {
     isOptional(value.websocketAppClients, isWebSocketClientSnapshotArray) &&
     isOptional(value.websocketWebClients, isWebSocketClientSnapshotArray) &&
     isOptional(value.debugInfo, isMultiplexerDebugInfo)
+  );
+}
+
+export function isMultiplexerHealthRequest(
+  value: unknown,
+): value is MultiplexerHealthRequest {
+  return (
+    isRecord(value) &&
+    value.kind === "health" &&
+    isOptional(value.debugInfo, isMultiplexerDebugInfo)
+  );
+}
+
+export function isMultiplexerHealthResponse(
+  value: unknown,
+): value is MultiplexerHealthResponse {
+  return (
+    isRecord(value) &&
+    value.kind === "health-response" &&
+    value.ok === true &&
+    isNumber(value.protocolVersion) &&
+    isNumber(value.minSupportedProtocolVersion) &&
+    isOptional(value.debugInfo, isMultiplexerDebugInfo)
+  );
+}
+
+export function isMultiplexerHandshakeErrorResponse(
+  value: unknown,
+): value is MultiplexerHandshakeErrorResponse {
+  return (
+    isRecord(value) &&
+    value.kind === "handshake-error-response" &&
+    isControlRpcError(value.error)
   );
 }
 

@@ -6,6 +6,24 @@ import type { ClientSnapshot, DeviceSnapshot } from "./snapshot";
 import type { RequireMessageType, ResponseMessageType } from "../../utils/type";
 import type { MultiplexerDebugInfo } from "./debuginfo";
 
+export const MULTIPLEXER_PROTOCOL_VERSION = 1;
+export const MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION = 1;
+
+export type MultiplexerHealthRequest = {
+  kind: "health";
+  debugInfo?: MultiplexerDebugInfo;
+};
+
+// protocolVersion is used for version arbitration when connecting to the Multiplexer daemon.
+// minSupportedProtocolVersion is used to check if the Multiplexer daemon supports the protocol version.
+export type MultiplexerHealthResponse = {
+  kind: "health-response";
+  ok: true;
+  protocolVersion: number;
+  minSupportedProtocolVersion: number;
+  debugInfo?: MultiplexerDebugInfo;
+};
+
 export type ControlRpcRequest<M extends ControlRpcMethod = ControlRpcMethod> = {
   kind: "rpc";
   id: number;
@@ -34,6 +52,11 @@ export type ControlRpcError = {
   code: string;
   message: string;
   details?: unknown;
+};
+
+export type MultiplexerHandshakeErrorResponse = {
+  kind: "handshake-error-response";
+  error: ControlRpcError;
 };
 
 export type WebSocketServerInfo = {

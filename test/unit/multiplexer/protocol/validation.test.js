@@ -12,6 +12,9 @@ const {
   isControlRpcRequest,
   isControlRpcResponse,
   isDeviceSnapshot,
+  isMultiplexerHealthRequest,
+  isMultiplexerHealthResponse,
+  isMultiplexerHandshakeErrorResponse,
   isNumberArray,
   isSnapshot,
   isStringArray,
@@ -288,6 +291,84 @@ describe("multiplexer protocol validation", function () {
     );
   });
 
+  it("validates Health DTOs without PID or versioned requests", function () {
+    assert.strictEqual(
+      isMultiplexerHealthRequest({
+        kind: "health",
+      }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerHealthRequest({
+        kind: "health",
+        debugInfo: {
+          daemonVersion: "0.0.1",
+          processId: 123,
+          timestamp: 1000,
+        },
+        extraFutureField: "ignored",
+      }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerHealthRequest({ kind: "health", debugInfo: "bad" }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerHealthResponse({
+        kind: "health-response",
+        ok: true,
+        protocolVersion: 1,
+        minSupportedProtocolVersion: 1,
+        debugInfo: {
+          daemonVersion: "0.0.1",
+          processId: 123,
+          timestamp: 1000,
+        },
+      }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerHealthResponse({
+        kind: "health-response",
+        ok: true,
+        protocolVersion: 1,
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerHealthResponse({
+        kind: "health-response",
+        ok: true,
+        protocolVersion: 1,
+        minSupportedProtocolVersion: "1",
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerHealthResponse({
+        kind: "health-response",
+        ok: false,
+        protocolVersion: 1,
+        minSupportedProtocolVersion: 1,
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerHandshakeErrorResponse({
+        kind: "handshake-error-response",
+        error: { code: "bad", message: "bad handshake" },
+      }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerHandshakeErrorResponse({
+        kind: "handshake-error-response",
+      }),
+      false
+    );
+  });
+
   it("validates every control RPC request method branch", function () {
     const validCases = [
       [
@@ -330,10 +411,22 @@ describe("multiplexer protocol validation", function () {
           message: createCustomizedRequestMessage(),
         },
       ],
-      ["sendMessageWithoutReply", { target: "app", clientId: 1, message: null }],
-      ["sendMessageWithoutReply", { target: "app", clientId: 1, message: undefined }],
-      ["sendMessageWithoutReply", { target: "web", clientId: -1, message: "broadcast" }],
-      ["sendMessageWithoutReply", { target: "web", clientId: 2, message: "targeted" }],
+      [
+        "sendMessageWithoutReply",
+        { target: "app", clientId: 1, message: null },
+      ],
+      [
+        "sendMessageWithoutReply",
+        { target: "app", clientId: 1, message: undefined },
+      ],
+      [
+        "sendMessageWithoutReply",
+        { target: "web", clientId: -1, message: "broadcast" },
+      ],
+      [
+        "sendMessageWithoutReply",
+        { target: "web", clientId: 2, message: "targeted" },
+      ],
       [
         "sendMessageWithoutReply",
         { target: "web", clientId: -1, message: { event: "broadcast" } },
