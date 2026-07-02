@@ -65,7 +65,6 @@ export class WebSocketClient extends Client {
     const wsClients = this.server.getAllWebsocketAppClients();
     const data = new Array();
     wsClients.forEach((client) => {
-      if (client.clientId() === this.clientId()) return;
       data.push({
         id: client.clientId(),
         type: client.info.type,
@@ -78,7 +77,6 @@ export class WebSocketClient extends Client {
 
     const usbClients = this.server.getAllUsbClients();
     usbClients.forEach((client) => {
-      if (client.clientId() === this.clientId()) return;
       data.push({
         id: client.clientId(),
         type: "runtime",

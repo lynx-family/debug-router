@@ -714,6 +714,7 @@ export class MultiplexerHost
       params.clientName ?? null,
     );
     const snapshots = this.serializeClients(clients);
+    this.publishClientSnapshot();
     return snapshots;
   }
 
@@ -862,6 +863,7 @@ export class MultiplexerHost
     this.allClientWatchersRequested = true;
     await this.ensureDeviceDiscovery(false, generation);
     await this.ensureClientDiscoveryForCurrentDevices(generation);
+    this.publishClientSnapshot();
   }
 
   private async startWSServer(): Promise<WebSocketServerInfo | undefined> {
@@ -1093,6 +1095,11 @@ export class MultiplexerHost
       this.pendingRoutes.clear(),
       new Error("Multiplexer host route table was reset"),
     );
+  }
+
+  private publishClientSnapshot(): void {
+    this.webSocketController?.sendClientList();
+    this.publishSnapshot();
   }
 
   private handleLegacyOwnershipLost(): void {

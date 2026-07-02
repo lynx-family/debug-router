@@ -443,6 +443,22 @@ function attachControlServer(host, port = 7777) {
   return controlServer;
 }
 
+function createWebSocketControllerProbe() {
+  return {
+    sendDeviceListCalls: 0,
+    sendClientListCalls: 0,
+    sendMessageToWeb() {},
+    sendMessageToWebClient() {},
+    close() {},
+    sendDeviceList() {
+      this.sendDeviceListCalls++;
+    },
+    sendClientList() {
+      this.sendClientListCalls++;
+    },
+  };
+}
+
 function assertControlError(error, code, messagePattern) {
   assert.strictEqual(error.code, code);
   assert.match(error.message, messagePattern);
@@ -837,19 +853,7 @@ describe("MultiplexerHost", function () {
     const client = createClient(7, {
       deviceId: "device-1",
     });
-    const webSocketController = {
-      sendDeviceListCalls: 0,
-      sendClientListCalls: 0,
-      sendMessageToWeb() {},
-      sendMessageToWebClient() {},
-      close() {},
-      sendDeviceList() {
-        this.sendDeviceListCalls++;
-      },
-      sendClientList() {
-        this.sendClientListCalls++;
-      },
-    };
+    const webSocketController = createWebSocketControllerProbe();
     physical.devices.set(device.serial, device);
     physical.usbClients.set(client.clientId(), client);
     host.webSocketController = webSocketController;
@@ -977,6 +981,8 @@ describe("MultiplexerHost", function () {
     const { host, physical } = createHost();
     const controlServer = attachControlServer(host);
     const device = createDevice("device-1");
+    const webSocketController = createWebSocketControllerProbe();
+    host.webSocketController = webSocketController;
     physical.devices.set(device.serial, device);
 
     host.legacyOwnershipGuard.emitStatus(
@@ -1004,10 +1010,13 @@ describe("MultiplexerHost", function () {
         "snapshot",
         "legacy-ownership-changed",
         "legacy-ownership-changed",
+        "snapshot",
       ]
     );
     assert.deepStrictEqual(physical.startWatchClientCalls, ["device-1"]);
     assert.strictEqual(device.state.startWatchCalls, 1);
+    assert.strictEqual(webSocketController.sendDeviceListCalls, 1);
+    assert.strictEqual(webSocketController.sendClientListCalls, 2);
   });
 
   it("connectDevices starts device discovery once and auto-starts client discovery", async function () {
@@ -1227,6 +1236,32 @@ describe("MultiplexerHost", function () {
       second.map((item) => item.id),
       [8]
     );
+  });
+
+  it("connectUsbClients refreshes WebSocket ClientList after client discovery", async function () {
+    const { host, physical } = createHost();
+    const webSocketController = createWebSocketControllerProbe();
+    const device = createDevice("device-1");
+    const client = createClient(8, {
+      deviceId: "device-1",
+    });
+    host.webSocketController = webSocketController;
+    physical.devices.set(device.serial, device);
+    physical.usbClients.set(client.clientId(), client);
+
+    const result = await host.handleControlRpc(
+      1,
+      createRpcRequest("connectUsbClients", {
+        deviceId: "device-1",
+      })
+    );
+
+    assert.deepStrictEqual(
+      result.map((item) => item.id),
+      [8]
+    );
+    assert.strictEqual(webSocketController.sendClientListCalls, 1);
+    assert.strictEqual(webSocketController.sendDeviceListCalls, 0);
   });
 
   it("connectUsbClients uses waitDeviceUsbClients when waitTimeout is false", async function () {

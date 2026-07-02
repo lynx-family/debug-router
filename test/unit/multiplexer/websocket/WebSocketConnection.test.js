@@ -293,6 +293,20 @@ describe("WebSocketClient", function () {
     });
   });
 
+  it("does not hide USB runtime clients whose id matches the Driver client id", function () {
+    const server = createServer();
+    const socket = createSocket();
+    server.usbClients.push(createUsbClient(301));
+    new WebSocketClient(server, createInfo(301, "Driver"), socket);
+
+    socket.emit("message", JSON.stringify({ event: "ListClients" }));
+
+    assert.deepStrictEqual(
+      JSON.parse(socket.sent[0]).data.map((client) => client.id),
+      [7, 301]
+    );
+  });
+
   it("ignores ListClients and Ping replies for runtime clients", function () {
     const server = createServer();
     const socket = createSocket();
