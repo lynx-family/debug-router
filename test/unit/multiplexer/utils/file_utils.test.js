@@ -204,7 +204,7 @@ describe("multiplexer FileLock", function () {
     fs.writeFileSync(
       path.join(freshLockPath, "owner.json"),
       JSON.stringify({
-        pid: 1,
+        pid: process.pid,
         createdAt: now,
       })
     );
@@ -230,6 +230,21 @@ describe("multiplexer FileLock", function () {
 
     assert.strictEqual(new FileLock(staleLockPath).isStale(1000, now), true);
     assert.strictEqual(new FileLock(freshLockPath).isStale(1000, now), false);
+  });
+
+  it("treats a lock with a dead owner process as stale", function () {
+    const now = Date.now();
+    const lockPath = path.join(tempDir, "dead-owner.lock");
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(
+      path.join(lockPath, "owner.json"),
+      JSON.stringify({
+        pid: 987654321,
+        createdAt: now,
+      })
+    );
+
+    assert.strictEqual(new FileLock(lockPath).isStale(1000, now), true);
   });
 
   it("clears local locked state when cleaning a stale lock it owns", function () {

@@ -7,12 +7,13 @@ const fs = require("fs");
 
 const {
   createIntegrationContext,
+  platformTimeout,
   processExists,
   waitFor,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration reconnect and snapshot", function () {
-  this.timeout(12000);
+  this.timeout(platformTimeout(12000));
 
   let context;
 

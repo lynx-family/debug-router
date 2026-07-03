@@ -132,10 +132,12 @@ export class MultiplexerHost
   private legacyOwnershipAttached = false;
   private idleTimer: NodeJS.Timeout | null = null;
   private idleTimeoutHandler: (() => void | Promise<void>) | undefined;
+  private shutdownHandler: (() => void | Promise<void>) | undefined;
   private runtimeIdleTimeout: number | undefined;
   private nextGlobalMessageId = 1;
   private nextControlMessageId = 1;
   private started = false;
+  private shutdownRequested = false;
 
   private readonly handleDeviceConnected = (device: BaseDevice): void => {
     if (!this.legacyOwnershipAttached) {
@@ -256,6 +258,7 @@ export class MultiplexerHost
       return;
     }
 
+    this.shutdownRequested = false;
     if (
       isMultiplexerHostStartOption(startOption) &&
       startOption.multiplexerDaemonIdleTimeout !== undefined
@@ -294,6 +297,7 @@ export class MultiplexerHost
 
     const stopErrors: unknown[] = [];
     this.started = false;
+    this.shutdownRequested = false;
     this.clearIdleTimeout();
     this.legacyOwnershipGuard.stop();
     this.activeControlIds.clear();
@@ -339,6 +343,10 @@ export class MultiplexerHost
   setIdleTimeoutHandler(handler: () => void | Promise<void>): void {
     this.idleTimeoutHandler = handler;
     this.scheduleIdleTimeoutIfNeeded();
+  }
+
+  setShutdownHandler(handler: () => void | Promise<void>): void {
+    this.shutdownHandler = handler;
   }
 
   handleControlConnected(controlId: number): void {
@@ -391,6 +399,9 @@ export class MultiplexerHost
         );
       case "reacquireLegacyOwnership":
         return this.reacquireLegacyOwnership();
+      case "shutdownDaemon":
+        this.requestDaemonShutdown();
+        return undefined;
       case "startWSServer":
         return this.startWSServer();
       case "startWatchAllClients":
@@ -1223,6 +1234,25 @@ export class MultiplexerHost
         route.reject?.(error);
       }
     }
+  }
+
+  private requestDaemonShutdown(): void {
+    if (!this.shutdownHandler) {
+      throw createControlError(
+        "daemon-shutdown-unavailable",
+        "Multiplexer daemon shutdown handler is not configured",
+      );
+    }
+    if (this.shutdownRequested) {
+      return;
+    }
+
+    this.shutdownRequested = true;
+    this.clearIdleTimeout();
+    const shutdownHandler = this.shutdownHandler;
+    setImmediate(() => {
+      void shutdownHandler();
+    });
   }
 
   private scheduleIdleTimeoutIfNeeded(): void {

@@ -8,11 +8,12 @@ const {
   collectConnectorEvents,
   createIntegrationContext,
   parseCustomizedEnvelope,
+  platformTimeout,
   waitFor,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration multi connector", function () {
-  this.timeout(10000);
+  this.timeout(platformTimeout(10000));
 
   let context;
 

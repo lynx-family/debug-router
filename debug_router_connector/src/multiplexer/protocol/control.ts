@@ -56,6 +56,7 @@ export type ControlRpcMethod =
   | "stopWatchClient"
   | "disconnectDevice"
   | "reacquireLegacyOwnership"
+  | "shutdownDaemon"
   | "startWSServer"
   | "startWatchAllClients"
   | "sendMessageToWeb"
@@ -91,6 +92,9 @@ export type ControlRpcParams = {
     deviceId: string;
   };
   reacquireLegacyOwnership: Record<string, never>;
+  shutdownDaemon: {
+    reason?: string;
+  };
   startWSServer: Record<string, never>;
   startWatchAllClients: {
     force?: boolean;
@@ -131,6 +135,7 @@ export type ControlRpcResult = {
   stopWatchClient: void;
   disconnectDevice: void;
   reacquireLegacyOwnership: void;
+  shutdownDaemon: void;
   startWSServer: WebSocketServerInfo | undefined;
   startWatchAllClients: void;
   sendMessageToWeb: void;

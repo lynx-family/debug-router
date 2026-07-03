@@ -463,6 +463,7 @@ async function main() {
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
     daemonVersion: entryOption.daemonVersion,
     capabilities: entryOption.capabilities,
+    legacyDriverDir: entryOption.legacyDriverDir,
     multiplexerDaemonIdleTimeout: entryOption.multiplexerDaemonIdleTimeout,
     enableWebSocket: entryOption.enableWebSocket,
     websocketOption: entryOption.websocketOption,

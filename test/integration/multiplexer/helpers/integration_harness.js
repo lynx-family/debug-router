@@ -62,6 +62,7 @@ const DEFAULT_STATE = {
     },
   ],
 };
+const WINDOWS_TIMEOUT_MULTIPLIER = 4;
 
 function createIntegrationContext(name, option = {}) {
   const rootDir = fs.mkdtempSync(
@@ -70,13 +71,10 @@ function createIntegrationContext(name, option = {}) {
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
   const legacyOwnerPath = path.join(legacyDriverDir, "LatestDriverProcess");
-  const hadOriginalHome = Object.prototype.hasOwnProperty.call(
-    process.env,
-    "HOME",
-  );
-  const originalHome = process.env.HOME;
+  const originalEnv = captureEnv(["HOME", "USERPROFILE"]);
   fs.mkdirSync(homeDir, { recursive: true });
   process.env.HOME = homeDir;
+  process.env.USERPROFILE = homeDir;
 
   const paths = createMultiplexerPaths({ rootDir });
   fs.mkdirSync(paths.dataDir, { recursive: true });
@@ -100,6 +98,7 @@ function createIntegrationContext(name, option = {}) {
     minSupportedProtocolVersion: option.minSupportedProtocolVersion,
     daemonVersion: option.daemonVersion,
     capabilities: option.capabilities,
+    legacyDriverDir,
     multiplexerDaemonIdleTimeout: option.multiplexerDaemonIdleTimeout,
     enableWebSocket: option.enableWebSocket,
     websocketOption: option.websocketOption,
@@ -145,6 +144,7 @@ function createIntegrationContext(name, option = {}) {
           option.minSupportedProtocolVersion,
         daemonVersion: extra.daemonVersion ?? option.daemonVersion,
         capabilities: extra.capabilities ?? option.capabilities,
+        legacyDriverDir: extra.legacyDriverDir ?? legacyDriverDir,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??
           option.multiplexerDaemonIdleTimeout,
@@ -225,11 +225,7 @@ function createIntegrationContext(name, option = {}) {
         await stopDiscoveredDaemon(paths.discoveryPath);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
-        if (hadOriginalHome) {
-          process.env.HOME = originalHome;
-        } else {
-          delete process.env.HOME;
-        }
+        restoreEnv(originalEnv);
       }
     },
   };
@@ -250,6 +246,7 @@ function createManager(option) {
     minSupportedProtocolVersion: option.minSupportedProtocolVersion,
     daemonVersion: option.daemonVersion,
     capabilities: option.capabilities,
+    legacyDriverDir: option.legacyDriverDir,
     controlPort: 0,
     multiplexerDaemonIdleTimeout: option.multiplexerDaemonIdleTimeout,
     enableWebSocket: option.enableWebSocket,
@@ -294,14 +291,19 @@ async function stopDiscoveredDaemon(discoveryPath) {
     try {
       process.kill(info.pid, "SIGTERM");
     } catch (_error) {}
-    await waitFor(
-      () => !processExists(info.pid) || !fs.existsSync(discoveryPath),
-      1000,
-    ).catch(() => {
+    await waitFor(() => !processExists(info.pid), 1000).catch(async () => {
       try {
         process.kill(info.pid, "SIGKILL");
       } catch (_error) {}
+      await waitFor(() => !processExists(info.pid), 1000).catch(() => {});
     });
+    if (!processExists(info.pid)) {
+      fs.rmSync(discoveryPath, { force: true });
+      fs.rmSync(path.join(path.dirname(discoveryPath), "daemon.lock"), {
+        recursive: true,
+        force: true,
+      });
+    }
   }
 }
 
@@ -324,8 +326,9 @@ function processExists(pid) {
 
 async function waitFor(predicate, timeout = 2000, interval = 20) {
   const startedAt = Date.now();
+  const effectiveTimeout = platformTimeout(timeout);
   let lastError;
-  while (Date.now() - startedAt <= timeout) {
+  while (Date.now() - startedAt <= effectiveTimeout) {
     try {
       const value = await predicate();
       if (value) {
@@ -339,7 +342,7 @@ async function waitFor(predicate, timeout = 2000, interval = 20) {
   if (lastError) {
     throw lastError;
   }
-  throw new Error(`Timed out after ${timeout}ms waiting for condition`);
+  throw new Error(`Timed out after ${effectiveTimeout}ms waiting for condition`);
 }
 
 function delay(ms) {
@@ -437,10 +440,11 @@ function parseCustomizedEnvelope(message) {
 
 function waitForSocketMessage(socket, predicate, timeout = 1500) {
   return new Promise((resolve, reject) => {
+    const effectiveTimeout = platformTimeout(timeout);
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("Timed out waiting for WebSocket message"));
-    }, timeout);
+    }, effectiveTimeout);
     const onMessage = (data) => {
       const text = data.toString();
       let value;
@@ -466,6 +470,33 @@ function waitForSocketMessage(socket, predicate, timeout = 1500) {
     socket.on("message", onMessage);
     socket.on("close", onClose);
   });
+}
+
+function platformTimeout(timeout) {
+  return process.platform === "win32"
+    ? timeout * WINDOWS_TIMEOUT_MULTIPLIER
+    : timeout;
+}
+
+function captureEnv(keys) {
+  const snapshot = {};
+  for (const key of keys) {
+    snapshot[key] = {
+      hadValue: Object.prototype.hasOwnProperty.call(process.env, key),
+      value: process.env[key],
+    };
+  }
+  return snapshot;
+}
+
+function restoreEnv(snapshot) {
+  for (const [key, entry] of Object.entries(snapshot)) {
+    if (entry.hadValue) {
+      process.env[key] = entry.value;
+    } else {
+      delete process.env[key];
+    }
+  }
 }
 
 async function connectDriverWebSocket(url, option = {}) {
@@ -537,6 +568,7 @@ module.exports = {
   delay,
   getHealth,
   parseCustomizedEnvelope,
+  platformTimeout,
   processExists,
   readJsonFile,
   waitFor,

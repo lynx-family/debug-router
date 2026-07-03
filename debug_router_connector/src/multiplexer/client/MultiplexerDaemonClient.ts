@@ -24,7 +24,7 @@ import {
   isRecord,
   parseJsonValue,
 } from "../protocol";
-import { MultiplexerDaemonManager } from "./MultiplexerDaemonManager";
+import type { MultiplexerDaemonManager } from "./MultiplexerDaemonManager";
 
 export const DEFAULT_MULTIPLEXER_RPC_TIMEOUT = 5000;
 const RPC_TIMEOUT_BUFFER_MS = 1000;
@@ -80,6 +80,7 @@ export class MultiplexerDaemonClient {
     this.clientVersion = option.clientVersion;
     this.capabilities = option.capabilities;
     this.WebSocketCtor = option.WebSocketCtor ?? WebSocket;
+    this.daemonManager.setDaemonClient?.(this);
   }
 
   get ready(): boolean {
@@ -108,7 +109,33 @@ export class MultiplexerDaemonClient {
     params: ControlRpcParams[M],
   ): Promise<ControlRpcResult[M]> {
     await this.connect();
+    return this.callConnected(method, params);
+  }
 
+  async callOnDiscovery<M extends ControlRpcMethod>(
+    discovery: MultiplexerDiscoveryInfo,
+    method: M,
+    params: ControlRpcParams[M],
+  ): Promise<ControlRpcResult[M]> {
+    await this.connectToDiscovery(discovery);
+    return this.callConnected(method, params);
+  }
+
+  async connectToDiscovery(
+    discovery: MultiplexerDiscoveryInfo,
+  ): Promise<void> {
+    this.closed = false;
+    this.connecting = this.connectInternal(discovery).finally(() => {
+      this.connecting = null;
+    });
+
+    return this.connecting;
+  }
+
+  private callConnected<M extends ControlRpcMethod>(
+    method: M,
+    params: ControlRpcParams[M],
+  ): Promise<ControlRpcResult[M]> {
     const socket = this.controlSocket;
     if (!socket || !this.ready) {
       throw new Error("Multiplexer control socket is not connected");
@@ -208,7 +235,9 @@ export class MultiplexerDaemonClient {
     }
   }
 
-  private async connectInternal(): Promise<void> {
+  private async connectInternal(
+    discovery?: MultiplexerDiscoveryInfo,
+  ): Promise<void> {
     if (this.controlSocket) {
       await this.closeSocket(
         new Error("Replacing multiplexer control socket"),
@@ -217,8 +246,11 @@ export class MultiplexerDaemonClient {
       );
     }
 
-    const discovery = await this.daemonManager.ensureDaemon();
-    const socket = new this.WebSocketCtor(this.createControlUrl(discovery));
+    const resolvedDiscovery =
+      discovery ?? (await this.daemonManager.ensureDaemon());
+    const socket = new this.WebSocketCtor(
+      this.createControlUrl(resolvedDiscovery),
+    );
 
     this.controlSocket = socket;
 

@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 const assert = require("assert");
+const path = require("path");
 
 require("../register_ts");
 
@@ -302,7 +303,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.strictEqual(state.discoveries[0].option.staleTimeout, 222);
       assert.strictEqual(
         state.discoveries[0].option.discoveryPath,
-        "/tmp/mux-data/daemon.json"
+        path.join("/tmp/mux-data", "daemon.json")
       );
       assert.strictEqual(state.managers.length, 1);
       assert.strictEqual(

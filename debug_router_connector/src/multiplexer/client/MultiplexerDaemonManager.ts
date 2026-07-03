@@ -20,6 +20,7 @@ import {
   isMultiplexerHealthResponse,
   parseJsonValue,
 } from "../protocol/validation";
+import type { MultiplexerDaemonClient } from "./MultiplexerDaemonClient";
 import {
   MultiplexerDiscovery,
   MultiplexerDiscoveryValidation,
@@ -47,6 +48,11 @@ export type MultiplexerDaemonSpawn = (
   args: string[],
   options: SpawnOptions,
 ) => SpawnedDaemonProcess;
+
+type MultiplexerDaemonControlClient = Pick<
+  MultiplexerDaemonClient,
+  "callOnDiscovery"
+>;
 
 export type MultiplexerDaemonManagerOption = {
   discovery: MultiplexerDiscovery;
@@ -76,6 +82,7 @@ export type MultiplexerDaemonManagerOption = {
   // only used for testing
   spawn?: MultiplexerDaemonSpawn;
   kill?: (pid: number, signal: NodeJS.Signals) => void;
+  isProcessAlive?: (pid: number) => boolean;
   sleep?: (duration: number) => Promise<void>;
   now?: () => number;
 };
@@ -107,8 +114,10 @@ export class MultiplexerDaemonManager {
   private readonly spawnLockStaleTimeout: number;
   private readonly spawnProcess: MultiplexerDaemonSpawn;
   private readonly killProcess: (pid: number, signal: NodeJS.Signals) => void;
+  private readonly isProcessAlive: (pid: number) => boolean;
   private readonly sleepFor: (duration: number) => Promise<void>;
   private readonly now: () => number;
+  private daemonClient?: MultiplexerDaemonControlClient;
 
   constructor(option: MultiplexerDaemonManagerOption) {
     this.discovery = option.discovery;
@@ -147,8 +156,13 @@ export class MultiplexerDaemonManager {
       DEFAULT_MULTIPLEXER_SPAWN_LOCK_STALE_BUFFER;
     this.spawnProcess = option.spawn ?? spawnChildProcess;
     this.killProcess = option.kill ?? process.kill;
+    this.isProcessAlive = option.isProcessAlive ?? isProcessAlive;
     this.sleepFor = option.sleep ?? defaultSleep;
     this.now = option.now ?? Date.now;
+  }
+
+  setDaemonClient(daemonClient: MultiplexerDaemonControlClient): void {
+    this.daemonClient = daemonClient;
   }
 
   async ensureDaemon(): Promise<MultiplexerDiscoveryInfo> {
@@ -280,60 +294,49 @@ export class MultiplexerDaemonManager {
   ): Promise<void> {
     const yielded = await this.requestDaemonYield(info, reason);
     if (!yielded) {
-      await this.forceStopDaemon(info, true);
+      await this.forceStopDaemon(info);
     }
+    this.removeDaemonArtifacts();
   }
 
   async requestDaemonYield(
     info: MultiplexerDiscoveryInfo,
-    _reason: MultiplexerDaemonReplaceReason,
+    reason: MultiplexerDaemonReplaceReason,
   ): Promise<boolean> {
-    try {
-      this.killProcess(info.pid, "SIGTERM");
-    } catch (error: any) {
-      if (error?.code === "ESRCH") {
-        return true;
-      }
+    const requested = await this.sendDaemonShutdownRpc(info, reason);
+    if (!requested) {
       return false;
     }
 
-    const startedAt = this.now();
-    while (this.now() - startedAt <= this.replacementTimeout) {
-      if (await this.hasDaemonYielded(info)) {
-        return true;
-      }
-      await this.sleepFor(this.readyPollInterval);
-    }
-
-    return this.hasDaemonYielded(info);
+    return this.waitUntilProcessExits(info.pid, this.replacementTimeout);
   }
 
-  async forceStopDaemon(
-    info: MultiplexerDiscoveryInfo,
-    skipSigterm: boolean = false,
-  ): Promise<void> {
-    if (!skipSigterm) {
-      try {
-        this.killProcess(info.pid, "SIGTERM");
-      } catch (error: any) {
-        if (error?.code !== "ESRCH") {
-          throw error;
-        }
-      }
+  async forceStopDaemon(info: MultiplexerDiscoveryInfo): Promise<void> {
+    const sigtermError = this.tryKillProcess(info.pid, "SIGTERM");
+    await this.waitUntilProcessExits(info.pid, this.replacementTimeout);
+
+    let sigkillError: unknown = null;
+    if (this.isProcessAlive(info.pid)) {
+      sigkillError = this.tryKillProcess(info.pid, "SIGKILL");
+      await this.waitUntilProcessExits(info.pid, this.replacementTimeout);
     }
 
-    await this.sleepFor(this.replacementTimeout);
-
-    try {
-      this.killProcess(info.pid, "SIGKILL");
-    } catch (error: any) {
-      if (error?.code !== "ESRCH") {
-        throw error;
-      }
+    const processAlive = this.isProcessAlive(info.pid);
+    if (!processAlive) {
+      this.removeDaemonArtifacts();
+      return;
     }
 
-    removeFileIfExists(this.discovery.discoveryPath);
-    fs.rmSync(this.daemonLock.lockPath, { recursive: true, force: true });
+    const unexpectedSigkillError = getUnexpectedKillError(sigkillError);
+    if (unexpectedSigkillError) {
+      throw unexpectedSigkillError;
+    }
+
+    const unexpectedSigtermError = getUnexpectedKillError(sigtermError);
+    if (unexpectedSigtermError) {
+      throw unexpectedSigtermError;
+    }
+    throw new Error(`Failed to stop multiplexer daemon ${info.pid}`);
   }
 
   private async ensureDaemonWithSpawnLock(
@@ -419,6 +422,60 @@ export class MultiplexerDaemonManager {
   private cleanupKnownUnhealthyDaemon(): void {
     removeFileIfExists(this.discovery.discoveryPath);
     fs.rmSync(this.daemonLock.lockPath, { recursive: true, force: true });
+  }
+
+  private removeDaemonArtifacts(): void {
+    removeFileIfExists(this.discovery.discoveryPath);
+    fs.rmSync(this.daemonLock.lockPath, { recursive: true, force: true });
+  }
+
+  private tryKillProcess(pid: number, signal: NodeJS.Signals): unknown {
+    try {
+      this.killProcess(pid, signal);
+      return null;
+    } catch (error: any) {
+      return error;
+    }
+  }
+
+  private async waitUntilProcessExits(
+    pid: number,
+    timeout: number,
+  ): Promise<boolean> {
+    const startedAt = this.now();
+
+    while (this.now() - startedAt <= timeout) {
+      if (!this.isProcessAlive(pid)) {
+        return true;
+      }
+      await this.sleepFor(this.readyPollInterval);
+    }
+
+    return !this.isProcessAlive(pid);
+  }
+
+  private sendDaemonShutdownRpc(
+    info: MultiplexerDiscoveryInfo,
+    reason: MultiplexerDaemonReplaceReason,
+  ): Promise<boolean> {
+    if (
+      !Number.isInteger(info.controlPort) ||
+      info.controlPort <= 0 ||
+      info.controlPort > 65535
+    ) {
+      return Promise.resolve(false);
+    }
+
+    if (!this.daemonClient) {
+      return Promise.resolve(false);
+    }
+
+    return this.daemonClient
+      .callOnDiscovery(info, "shutdownDaemon", { reason })
+      .then(
+        () => true,
+        () => false,
+      );
   }
 
   private createDaemonEntryArgs(): string[] {
@@ -583,6 +640,27 @@ function getDaemonLockPathFromSpawnLock(spawnLockPath: string): string {
 
 function defaultSleep(duration: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, duration));
+}
+
+function getUnexpectedKillError(error: unknown): Error | null {
+  if (!error || (error as any)?.code === "ESRCH") {
+    return null;
+  }
+
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    return error?.code === "EPERM";
+  }
 }
 
 function formatValidation(

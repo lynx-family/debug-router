@@ -31,6 +31,7 @@ const CONTROL_RPC_METHODS: ControlRpcMethod[] = [
   "stopWatchClient",
   "disconnectDevice",
   "reacquireLegacyOwnership",
+  "shutdownDaemon",
   "startWSServer",
   "startWatchAllClients",
   "sendMessageToWeb",
@@ -304,6 +305,8 @@ function isControlRpcParams(
       return isString(params.deviceId);
     case "reacquireLegacyOwnership":
       return true;
+    case "shutdownDaemon":
+      return isOptional(params.reason, isString);
     case "startWSServer":
       return true;
     case "startWatchAllClients":
@@ -360,6 +363,7 @@ function isControlRpcResult(
     case "stopWatchClient":
     case "disconnectDevice":
     case "reacquireLegacyOwnership":
+    case "shutdownDaemon":
     case "sendMessageToWeb":
     case "sendMessageToApp":
     case "sendMessage":

@@ -8,11 +8,12 @@ const fs = require("fs");
 const {
   createIntegrationContext,
   delay,
+  platformTimeout,
   waitFor,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration daemon idle", function () {
-  this.timeout(10000);
+  this.timeout(platformTimeout(10000));
 
   let context;
 

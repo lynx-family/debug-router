@@ -7,6 +7,7 @@ const fs = require("fs");
 
 const {
   createIntegrationContext,
+  platformTimeout,
   processExists,
   waitFor,
 } = require("./helpers/integration_harness");
@@ -15,7 +16,7 @@ const {
 } = require("../../../debug_router_connector/src/connector/MultiOpenCallBack");
 
 describe("multiplexer integration legacy preemption", function () {
-  this.timeout(12000);
+  this.timeout(platformTimeout(12000));
 
   let context;
 

@@ -9,13 +9,14 @@ const {
   createCustomizedEnvelope,
   createIntegrationContext,
   parseCustomizedEnvelope,
+  platformTimeout,
   processExists,
   waitFor,
   waitForSocketMessage,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration compatibility upgrade", function () {
-  this.timeout(15000);
+  this.timeout(platformTimeout(15000));
 
   let context;
 
@@ -30,8 +31,8 @@ describe("multiplexer integration compatibility upgrade", function () {
     context = createIntegrationContext("compat-staged-upgrade", {
       heartbeatInterval: 25,
       readyPollInterval: 10,
-      replacementTimeout: 50,
-      staleTimeout: 500,
+      replacementTimeout: platformTimeout(50),
+      staleTimeout: platformTimeout(500),
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -98,8 +99,8 @@ describe("multiplexer integration compatibility upgrade", function () {
     context = createIntegrationContext("compat-websocket-upgrade", {
       heartbeatInterval: 25,
       readyPollInterval: 10,
-      replacementTimeout: 50,
-      staleTimeout: 500,
+      replacementTimeout: platformTimeout(50),
+      staleTimeout: platformTimeout(500),
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -168,7 +169,7 @@ describe("multiplexer integration compatibility upgrade", function () {
       minSupportedProtocolVersion: minSupportedVersion,
       daemonVersion: name,
       readyPollInterval: 10,
-      replacementTimeout: 50,
+      replacementTimeout: platformTimeout(50),
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -179,7 +180,7 @@ describe("multiplexer integration compatibility upgrade", function () {
       manager,
       protocolVersion,
       clientVersion: name,
-      rpcTimeout: 2000,
+      rpcTimeout: platformTimeout(2000),
     });
     return { manager, client };
   }

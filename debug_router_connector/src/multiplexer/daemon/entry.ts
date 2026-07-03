@@ -93,6 +93,19 @@ export function createMultiplexerDaemon(
   entryOption: MultiplexerDaemonEntryOption,
 ): MultiplexerDaemon {
   const host = createEntryHost(entryOption);
+  const exitAfterHostRequestedStop = (
+    source: "idle" | "shutdown",
+    stopError?: unknown,
+  ) => {
+    if (stopError) {
+      defaultLogger.error(
+        `Multiplexer daemon ${source} cleanup failed: ${
+          (stopError as any)?.message
+        }`,
+      );
+    }
+    process.exit(stopError ? 1 : 0);
+  };
   const daemonOption: MultiplexerDaemonOption = {
     discoveryPath: entryOption.discoveryPath,
     daemonLockPath: entryOption.daemonLockPath,
@@ -103,14 +116,10 @@ export function createMultiplexerDaemon(
     heartbeatInterval: entryOption.heartbeatInterval,
     host,
     onIdleTimeout: (stopError) => {
-      if (stopError) {
-        defaultLogger.error(
-          `Multiplexer daemon idle cleanup failed: ${
-            (stopError as any)?.message
-          }`,
-        );
-      }
-      process.exit(stopError ? 1 : 0);
+      exitAfterHostRequestedStop("idle", stopError);
+    },
+    onShutdownRequest: (stopError) => {
+      exitAfterHostRequestedStop("shutdown", stopError);
     },
   };
   if (entryOption.multiplexerDaemonIdleTimeout !== undefined) {

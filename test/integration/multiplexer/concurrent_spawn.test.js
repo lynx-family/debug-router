@@ -8,10 +8,11 @@ const fs = require("fs");
 const {
   assertSamePid,
   createIntegrationContext,
+  platformTimeout,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration concurrent spawn", function () {
-  this.timeout(10000);
+  this.timeout(platformTimeout(10000));
 
   let context;
 

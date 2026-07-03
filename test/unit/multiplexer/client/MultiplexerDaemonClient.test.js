@@ -77,10 +77,14 @@ function createWebSocketCtor() {
 function createDaemonManager(info = {}) {
   const state = {
     ensureCalls: 0,
+    daemonClient: null,
   };
   return {
     state,
     daemonManager: {
+      setDaemonClient(client) {
+        state.daemonClient = client;
+      },
       async ensureDaemon() {
         state.ensureCalls++;
         return {
@@ -238,6 +242,43 @@ describe("MultiplexerDaemonClient", function () {
 
     assert.strictEqual(await result, "done");
     assert.strictEqual(client.pendingRpc.size, 0);
+  });
+
+  it("calls a specific discovery without asking the manager to resolve a daemon", async function () {
+    const { client, WebSocketCtor, daemonManagerState } = createClient();
+    const promise = client.callOnDiscovery(
+      {
+        pid: 999,
+        protocolVersion: 1,
+        controlPort: 45678,
+        heartbeat: 1000,
+      },
+      "shutdownDaemon",
+      { reason: "stale-daemon" }
+    );
+    await waitFor(() => WebSocketCtor.instances.length === 1);
+    const socket = WebSocketCtor.instances[0];
+    socket.open();
+    await waitFor(() => socket.sent.length === 1);
+    const request = parseSent(socket);
+
+    assert.strictEqual(daemonManagerState.ensureCalls, 0);
+    assert.strictEqual(
+      socket.url,
+      "ws://127.0.0.1:45678/debug-router-multiplexer/control"
+    );
+    assert.strictEqual(request.method, "shutdownDaemon");
+    assert.deepStrictEqual(request.params, { reason: "stale-daemon" });
+
+    sendRpcResponse(socket, request.id, {
+      ok: true,
+      result: undefined,
+    });
+
+    assert.strictEqual(await promise, undefined);
+    assert.strictEqual(socket.closeCalls, 0);
+    assert.strictEqual(client.ready, true);
+    assert.strictEqual(daemonManagerState.daemonClient, client);
   });
 
   it("rejects RPC responses carrying daemon errors", async function () {

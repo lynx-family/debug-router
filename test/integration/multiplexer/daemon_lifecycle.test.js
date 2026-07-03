@@ -8,13 +8,14 @@ const fs = require("fs");
 const {
   createIntegrationContext,
   getHealth,
+  platformTimeout,
   processExists,
   readJsonFile,
   waitFor,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration daemon lifecycle", function () {
-  this.timeout(10000);
+  this.timeout(platformTimeout(10000));
 
   let context;
 
@@ -97,7 +98,7 @@ describe("multiplexer integration daemon lifecycle", function () {
       [1],
     );
 
-    process.kill(info.pid, "SIGTERM");
+    await stopDaemonForPlatform(context, info);
     await waitFor(() => !fs.existsSync(context.paths.discoveryPath), 2000);
     await waitFor(() => !fs.existsSync(context.paths.daemonLockPath), 2000);
   });
@@ -122,3 +123,12 @@ describe("multiplexer integration daemon lifecycle", function () {
     );
   });
 });
+
+async function stopDaemonForPlatform(context, info) {
+  if (process.platform === "win32") {
+    await context.manager.forceStopDaemon(info);
+    return;
+  }
+
+  process.kill(info.pid, "SIGTERM");
+}

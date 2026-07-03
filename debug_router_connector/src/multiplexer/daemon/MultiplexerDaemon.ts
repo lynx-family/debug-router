@@ -17,6 +17,7 @@ export type MultiplexerDaemonHost = {
   stop: () => void | Promise<void>;
   getControlPort: () => number;
   setIdleTimeoutHandler?: (handler: () => void | Promise<void>) => void;
+  setShutdownHandler?: (handler: () => void | Promise<void>) => void;
 };
 
 export type MultiplexerDaemonOption = {
@@ -33,6 +34,7 @@ export type MultiplexerDaemonOption = {
   heartbeatInterval?: number;
   now?: () => number;
   onIdleTimeout?: (stopError?: unknown) => void | Promise<void>;
+  onShutdownRequest?: (stopError?: unknown) => void | Promise<void>;
 };
 
 export class MultiplexerDaemon {
@@ -166,6 +168,7 @@ export class MultiplexerDaemon {
     }
 
     this.host.setIdleTimeoutHandler?.(this.handleHostIdleTimeout);
+    this.host.setShutdownHandler?.(this.handleHostShutdownRequest);
     await this.host.start(this.option?.hostOption);
     this.hostStarted = true;
   }
@@ -198,7 +201,9 @@ export class MultiplexerDaemon {
     return this.option?.now?.() ?? this.defaultNow();
   }
 
-  private readonly handleHostIdleTimeout = async (): Promise<void> => {
+  private async stopForHostRequest(
+    onStopped?: (stopError?: unknown) => void | Promise<void>,
+  ): Promise<void> {
     let stopError: unknown;
     try {
       await this.stop();
@@ -207,9 +212,17 @@ export class MultiplexerDaemon {
     }
 
     try {
-      await this.option.onIdleTimeout?.(stopError);
+      await onStopped?.(stopError);
     } catch (_error) {
       // Process-level cleanup handlers will retry stop on exit paths.
     }
+  }
+
+  private readonly handleHostIdleTimeout = async (): Promise<void> => {
+    await this.stopForHostRequest(this.option.onIdleTimeout);
+  };
+
+  private readonly handleHostShutdownRequest = async (): Promise<void> => {
+    await this.stopForHostRequest(this.option.onShutdownRequest);
   };
 }

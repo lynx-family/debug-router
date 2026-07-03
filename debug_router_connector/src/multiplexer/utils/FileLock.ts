@@ -78,6 +78,9 @@ export class FileLock {
 
     const owner = this.readOwner();
     if (owner) {
+      if (!isProcessAlive(owner.pid)) {
+        return true;
+      }
       return now - owner.createdAt > timeout;
     }
 
@@ -118,5 +121,14 @@ export class FileLock {
 
       throw error;
     }
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    return error?.code === "EPERM";
   }
 }

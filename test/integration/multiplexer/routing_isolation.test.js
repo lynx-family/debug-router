@@ -12,12 +12,13 @@ const {
   createIntegrationContext,
   delay,
   parseCustomizedEnvelope,
+  platformTimeout,
   waitFor,
   waitForSocketMessage,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration routing isolation", function () {
-  this.timeout(12000);
+  this.timeout(platformTimeout(12000));
 
   let context;
 

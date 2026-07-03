@@ -1019,6 +1019,53 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(webSocketController.sendClientListCalls, 2);
   });
 
+  it("shutdownDaemon schedules the explicit daemon shutdown handler", async function () {
+    const { host } = createHost();
+    let idleCalls = 0;
+    let shutdownCalls = 0;
+    host.setIdleTimeoutHandler(() => {
+      idleCalls++;
+    });
+    host.setShutdownHandler(() => {
+      shutdownCalls++;
+    });
+
+    const result = await host.handleControlRpc(
+      1,
+      createRpcRequest("shutdownDaemon", { reason: "stale-daemon" })
+    );
+
+    assert.strictEqual(result, undefined);
+    assert.strictEqual(idleCalls, 0);
+    assert.strictEqual(shutdownCalls, 0);
+    await nextTick();
+    assert.strictEqual(idleCalls, 0);
+    assert.strictEqual(shutdownCalls, 1);
+
+    await host.handleControlRpc(
+      1,
+      createRpcRequest("shutdownDaemon", { reason: "stale-daemon" })
+    );
+    await nextTick();
+    assert.strictEqual(shutdownCalls, 1);
+  });
+
+  it("rejects shutdownDaemon when no daemon shutdown handler is configured", async function () {
+    const { host } = createHost();
+
+    await assert.rejects(
+      () =>
+        host.handleControlRpc(
+          1,
+          createRpcRequest("shutdownDaemon", { reason: "stale-daemon" })
+        ),
+      (error) =>
+        error.code === "daemon-shutdown-unavailable" &&
+        error.message ===
+          "Multiplexer daemon shutdown handler is not configured"
+    );
+  });
+
   it("connectDevices starts device discovery once and auto-starts client discovery", async function () {
     const { host, physical } = createHost();
     const device = createDevice("device-1");

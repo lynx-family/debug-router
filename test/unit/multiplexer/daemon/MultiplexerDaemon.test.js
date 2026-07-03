@@ -27,6 +27,7 @@ function createHost(overrides = {}) {
     stopped: 0,
     startOptions: [],
     idleTimeoutHandler: null,
+    shutdownHandler: null,
   };
 
   return {
@@ -50,6 +51,9 @@ function createHost(overrides = {}) {
       },
       setIdleTimeoutHandler: (handler) => {
         state.idleTimeoutHandler = handler;
+      },
+      setShutdownHandler: (handler) => {
+        state.shutdownHandler = handler;
       },
     },
   };
@@ -233,6 +237,28 @@ describe("MultiplexerDaemon", function () {
 
     assert.strictEqual(state.stopped, 1);
     assert.deepStrictEqual(idleCalls, [undefined]);
+    assert.strictEqual(daemon.heartbeatTimer, undefined);
+    assert.strictEqual(daemon.discoveryInfo, null);
+    assert.strictEqual(fs.existsSync(discoveryPath), false);
+    assert.strictEqual(fs.existsSync(daemonLockPath), false);
+  });
+
+  it("stops daemon resources and invokes shutdown callback when host requests shutdown", async function () {
+    const shutdownCalls = [];
+    const { host, state } = createHost();
+    createDaemon(host, {
+      onShutdownRequest: (stopError) => {
+        shutdownCalls.push(stopError);
+      },
+    });
+
+    await daemon.start();
+    assert.strictEqual(typeof state.shutdownHandler, "function");
+
+    await state.shutdownHandler();
+
+    assert.strictEqual(state.stopped, 1);
+    assert.deepStrictEqual(shutdownCalls, [undefined]);
     assert.strictEqual(daemon.heartbeatTimer, undefined);
     assert.strictEqual(daemon.discoveryInfo, null);
     assert.strictEqual(fs.existsSync(discoveryPath), false);
