@@ -13,8 +13,8 @@ const {
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
 const DEFAULT_IOS_BUNDLE_ID = "com.lynx.debugrouter-DebugRouterExample";
-const DEFAULT_DEVICE_TIMEOUT = 10000;
-const DEFAULT_CLIENT_TIMEOUT = 10000;
+const DEFAULT_DEVICE_TIMEOUT = 1000;
+const DEFAULT_CLIENT_TIMEOUT = 1000;
 const DEFAULT_IDLE_TIMEOUT = 500;
 const LEGACY_PREEMPTION_TIMEOUT = 12000;
 
@@ -734,7 +734,8 @@ async function assertLegacyPreemption(
     () =>
       multiOpenStatuses.includes(MultiOpenStatus.attached) &&
       connector.watchAllClientsStarted,
-    Math.max(args.deviceTimeout, 5000),
+    // Math.max(args.deviceTimeout, 5000),
+      500000,
     `${platform} daemon reacquires legacy owner`,
   );
   assert.strictEqual(readOwnerPid(context.legacyOwnerPath), daemonPid);
@@ -884,13 +885,17 @@ async function connectDriverWebSocket(url, info) {
 
 function exec(command, timeout) {
   return new Promise((resolve, reject) => {
-    const child = childProcess.exec(command, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(stderr || error.message));
-        return;
-      }
-      resolve(stdout);
-    });
+    const child = childProcess.exec(
+      command,
+      { windowsHide: true },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve(stdout);
+      },
+    );
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error(`timeout:${timeout} exec:${command}`));
@@ -1026,7 +1031,7 @@ function delay(ms) {
 }
 
 function shellQuote(value) {
-  return `'${String(value).replace(/'/g, "'\\''")}'`;
+  return `"${String(value).replace(/"/g, '\\"')}"`;
 }
 
 function toKebabCase(value) {

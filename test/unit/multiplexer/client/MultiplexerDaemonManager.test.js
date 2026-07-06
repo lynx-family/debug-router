@@ -307,6 +307,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.deepStrictEqual(spawnRecorder.calls[0].options, {
       detached: true,
       stdio: "ignore",
+      windowsHide: true,
     });
     assert.strictEqual(spawnRecorder.calls[0].unrefCalled, true);
     assert.strictEqual(fs.existsSync(spawnLockPath), false);

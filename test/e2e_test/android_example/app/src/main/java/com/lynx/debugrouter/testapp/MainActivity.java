@@ -17,10 +17,35 @@ import com.lynx.debugrouter.DebugRouterSessionHandler;
 import com.lynx.debugrouter.DebugRouterSlot;
 import com.lynx.debugrouter.DebugRouterSlotDelegate;
 import com.lynx.debugrouter.StateListener;
+import com.lynx.debugrouter.app.MessageHandleResult;
+import com.lynx.debugrouter.app.MessageHandler;
 import com.lynx.debugrouter.log.LLog;
+import java.util.HashMap;
+import java.util.Map;
+import org.json.JSONObject;
 
 public class MainActivity extends AppCompatActivity implements StateListener {
   private static final String TAG = "MainActivity";
+  private static final String E2E_PING_METHOD = "ConnectorRealDeviceE2E.Ping";
+  private static boolean sE2EPingHandlerRegistered = false;
+
+  private static final MessageHandler E2E_PING_HANDLER = new MessageHandler() {
+    @Override
+    public MessageHandleResult handle(Map<String, String> params) {
+      Map<String, Object> data = new HashMap<>();
+      data.put("ok", true);
+      data.put("method", getName());
+      data.put(
+          "params",
+          params == null ? new JSONObject() : new JSONObject(params));
+      return new MessageHandleResult(data);
+    }
+
+    @Override
+    public String getName() {
+      return E2E_PING_METHOD;
+    }
+  };
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -29,6 +54,7 @@ public class MainActivity extends AppCompatActivity implements StateListener {
     StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
     StrictMode.setThreadPolicy(policy);
     DebugRouter.getInstance().enableAllSessions();
+    registerE2EPingHandler();
 
     testAddSessionHandlerJNI();
 
@@ -52,6 +78,14 @@ public class MainActivity extends AppCompatActivity implements StateListener {
         LLog.e(TAG, errorMsg);
         Toast.makeText(this, errorMsg, Toast.LENGTH_LONG).show();
     }
+  }
+
+  private static void registerE2EPingHandler() {
+    if (sE2EPingHandlerRegistered) {
+      return;
+    }
+    DebugRouter.getInstance().addMessageHandler(E2E_PING_HANDLER);
+    sE2EPingHandlerRegistered = true;
   }
 
   private void testAddSessionHandlerJNI() {

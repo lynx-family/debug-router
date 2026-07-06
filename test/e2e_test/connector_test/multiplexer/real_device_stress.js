@@ -296,6 +296,7 @@ async function runPlatformStressScenario(platform, args) {
     );
     state.serial = firstDevice.serial;
     await launchAppIfNeeded(platform, args, firstDevice);
+    await createAdditionalConnectors(context, state, args);
     await activateClientWatching(primary, platform, args.clientTimeout);
     state.targetClient = await connectTargetClient(
       primary,
@@ -311,7 +312,7 @@ async function runPlatformStressScenario(platform, args) {
       state.websocketUrl = getWebSocketUrl(primary);
     }
 
-    await createAdditionalConnectors(context, state, args);
+    await prepareAdditionalConnectors(state, args);
     if (args.websocket) {
       await createFrontends(context, state, args.frontends, platform);
     }
@@ -460,7 +461,19 @@ async function createAdditionalConnectors(context, state, args) {
       closed: false,
       primary: false,
     });
-    await prepareConnector(connector, state, args);
+    const device = await connectTargetDevice(
+      connector,
+      state.platform,
+      state.serial,
+      args.deviceTimeout,
+    );
+    state.serial = device.serial;
+  }
+}
+
+async function prepareAdditionalConnectors(state, args) {
+  for (const entry of activeConnectors(state).filter((entry) => !entry.primary)) {
+    await prepareConnector(entry.connector, state, args);
   }
 }
 
@@ -780,14 +793,21 @@ async function runRecoveryProbe(context, state, args, report) {
   if (!primary) {
     throw new StressError("daemon_recovery_failed", "primary connector missing");
   }
-  await primary.connector.connectDevices(args.deviceTimeout, state.serial, true);
-  state.targetClient = await connectTargetClient(
-    primary.connector,
-    state.platform,
-    state.serial,
-    state.clientName,
-    args.clientTimeout,
-    args,
+  await retryTransientDaemonReconnect(
+    () => primary.connector.connectDevices(args.deviceTimeout, state.serial, true),
+    `${state.platform} recovery connectDevices`,
+  );
+  state.targetClient = await retryTransientDaemonReconnect(
+    () =>
+      connectTargetClient(
+        primary.connector,
+        state.platform,
+        state.serial,
+        state.clientName,
+        args.clientTimeout,
+        args,
+      ),
+    `${state.platform} recovery connectTargetClient`,
   );
   if (args.websocket) {
     await primary.connector.startWSServer();
@@ -891,16 +911,31 @@ async function cleanupContext(context, state, args, report) {
   if (!context) {
     return;
   }
-  const lastPid = state?.lastDaemonPid;
+  const observedPids = new Set();
+  if (state?.lastDaemonPid) {
+    observedPids.add(state.lastDaemonPid);
+  }
   try {
     await context.cleanup();
+    const discoveryAfterClose = readJsonFile(context.paths.discoveryPath, null);
+    if (discoveryAfterClose?.pid) {
+      observedPids.add(discoveryAfterClose.pid);
+    }
+
     let cleanupError = null;
-    if (lastPid) {
+    if (observedPids.size > 0 || discoveryAfterClose?.pid) {
       await waitFor(
-        () =>
-          !processExists(lastPid) &&
-          !fs.existsSync(context.paths.discoveryPath) &&
-          !fs.existsSync(context.paths.daemonLockPath),
+        () => {
+          const discovery = readJsonFile(context.paths.discoveryPath, null);
+          if (discovery?.pid) {
+            observedPids.add(discovery.pid);
+          }
+          return (
+            Array.from(observedPids).every((pid) => !processExists(pid)) &&
+            !fs.existsSync(context.paths.discoveryPath) &&
+            !fs.existsSync(context.paths.daemonLockPath)
+          );
+        },
         args.multiplexerDaemonIdleTimeout + 5000,
         "daemon idle cleanup",
         250,
@@ -908,24 +943,35 @@ async function cleanupContext(context, state, args, report) {
         cleanupError = error;
       });
     }
-    if (cleanupError) {
-      recordFailure(report, "cleanup_leftover_daemon", cleanupError);
-    }
-    if (lastPid && processExists(lastPid)) {
-      report.daemon.leftoverPids.push(lastPid);
-      try {
-        process.kill(lastPid, "SIGKILL");
-      } catch (_error) {}
-    }
+
     const discovery = readJsonFile(context.paths.discoveryPath, null);
-    if (discovery?.pid && processExists(discovery.pid)) {
-      report.daemon.leftoverPids.push(discovery.pid);
+    if (discovery?.pid) {
+      observedPids.add(discovery.pid);
+      await stopDaemon(context.paths.discoveryPath);
+    }
+    for (const pid of observedPids) {
+      if (processExists(pid)) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch (_error) {}
+      }
+    }
+
+    const leftoverPids = Array.from(observedPids).filter((pid) =>
+      processExists(pid),
+    );
+    if (leftoverPids.length > 0) {
+      for (const pid of leftoverPids) {
+        report.daemon.leftoverPids.push(pid);
+      }
       recordFailure(
         report,
         "cleanup_leftover_daemon",
-        new Error(`leftover daemon pid=${discovery.pid}`),
+        cleanupError ??
+          new Error(
+            `leftover daemon pid=${leftoverPids.join(",")}`,
+          ),
       );
-      await stopDaemon(context.paths.discoveryPath);
     }
   } finally {
     fs.rmSync(context.rootDir, { recursive: true, force: true });
@@ -1165,6 +1211,14 @@ function describeClient(client) {
 async function launchAppIfNeeded(platform, args, device) {
   if (platform === "android" && args.launchAndroidApp) {
     const serialPrefix = device.serial ? `-s ${shellQuote(device.serial)} ` : "";
+    const packageName = getAndroidPackageName(args.androidActivity);
+    if (packageName) {
+      await exec(
+        `adb ${serialPrefix}shell am force-stop ${shellQuote(packageName)}`,
+        10000,
+      );
+      await delay(500);
+    }
     const command = `adb ${serialPrefix}shell am start -n ${shellQuote(
       args.androidActivity,
     )} --es connection_type usb`;
@@ -1494,6 +1548,7 @@ function spawnLegacyOwnerProcess() {
     ["-e", "setInterval(() => {}, 1000);"],
     {
       stdio: "ignore",
+      windowsHide: true,
     },
   );
   assert(child.pid, "legacy owner helper process should have a pid");
@@ -1511,13 +1566,17 @@ function stopLegacyOwnerProcess(child) {
 
 function exec(command, timeout) {
   return new Promise((resolve, reject) => {
-    const child = childProcess.exec(command, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(stderr || error.message));
-        return;
-      }
-      resolve(stdout);
-    });
+    const child = childProcess.exec(
+      command,
+      { windowsHide: true },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve(stdout);
+      },
+    );
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error(`timeout:${timeout} exec:${command}`));
@@ -1653,7 +1712,38 @@ function delay(ms) {
 }
 
 function shellQuote(value) {
-  return `'${String(value).replace(/'/g, "'\\''")}'`;
+  return `"${String(value).replace(/"/g, '\\"')}"`;
+}
+
+async function retryTransientDaemonReconnect(operation, label) {
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDaemonReconnectError(error) || attempt === 3) {
+        throw error;
+      }
+      await delay(500 * attempt);
+    }
+  }
+  throw lastError ?? new Error(`${label} failed`);
+}
+
+function isTransientDaemonReconnectError(error) {
+  const message = error?.message ?? String(error);
+  return (
+    message.includes("Multiplexer control socket closed") ||
+    message.includes("closed before open") ||
+    message.includes("ECONNREFUSED") ||
+    message.includes("ECONNRESET")
+  );
+}
+
+function getAndroidPackageName(activity) {
+  const [packageName] = String(activity).split("/");
+  return packageName || "";
 }
 
 function toKebabCase(value) {

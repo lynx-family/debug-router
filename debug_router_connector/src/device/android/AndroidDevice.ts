@@ -140,9 +140,17 @@ export default class AndroidDevice extends BaseDevice {
           if (adbToolPath === null) {
             adbPath = process.platform !== "win32" ? "adb" : "adb.exe";
           }
-          const shellCmd = `${adbPath} -H ${this.adb.options.host} -P ${this.adb.options.port} forward --remove ${local}`;
-          defaultLogger.debug(shellCmd);
-          const result = await this.exeCmd(shellCmd);
+          const adbArgs = [
+            "-H",
+            String(this.adb.options.host),
+            "-P",
+            String(this.adb.options.port),
+            "forward",
+            "--remove",
+            local,
+          ];
+          defaultLogger.debug(`${adbPath} ${adbArgs.join(" ")}`);
+          const result = await this.exeFile(adbPath, adbArgs);
           defaultLogger.debug(result);
         } else {
           defaultLogger.debug(
@@ -154,10 +162,12 @@ export default class AndroidDevice extends BaseDevice {
     });
   }
 
-  async exeCmd(cmd: string) {
+  async exeFile(file: string, args: string[]) {
     return new Promise((resolve, reject) => {
-      child_process.exec(
-        cmd,
+      child_process.execFile(
+        file,
+        args,
+        { windowsHide: true },
         (error: ExecException | null, stdout: string, stderr: string) => {
           resolve(
             "exeCmd result: " +

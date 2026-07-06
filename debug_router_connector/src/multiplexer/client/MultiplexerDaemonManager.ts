@@ -211,6 +211,7 @@ export class MultiplexerDaemonManager {
       {
         detached: true,
         stdio: "ignore",
+        windowsHide: true,
       },
     );
 

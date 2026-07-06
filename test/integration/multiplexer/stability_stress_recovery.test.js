@@ -255,7 +255,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
 
     const connectors = Array.from(
       { length: HIGH_PRESSURE_CONNECTOR_FRONTENDS },
-      () => context.createConnector({ enableWebSocket: true }),
+      () => context.createConnector({ enableWebSocket: true,rpcTimeout: 5000, }),
     );
     await runInBatches(connectors, HIGH_PRESSURE_SETUP_BATCH_SIZE, (connector) =>
       connector.connectDevices(-1, null, true),
