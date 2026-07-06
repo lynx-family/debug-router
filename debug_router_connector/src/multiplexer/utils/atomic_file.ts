@@ -5,6 +5,12 @@
 import fs from "fs";
 import path from "path";
 
+type WriteFileAtomicPackage = {
+  sync: (filename: string, data: string | Buffer) => void;
+};
+
+const writeFileAtomicPackage = require("write-file-atomic") as WriteFileAtomicPackage;
+
 export type AtomicWriteJsonOptions = {
   space?: number;
 };
@@ -14,15 +20,7 @@ export function writeFileAtomic(
   content: string | Buffer,
 ): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-
-  const tempPath = createTempPath(filePath);
-  try {
-    fs.writeFileSync(tempPath, content);
-    fs.renameSync(tempPath, filePath);
-  } catch (error) {
-    removeTempFile(tempPath);
-    throw error;
-  }
+  writeFileAtomicPackage.sync(filePath, content);
 }
 
 export function writeJsonAtomic(
@@ -52,20 +50,4 @@ export function removeFileIfExists(filePath: string): boolean {
 
     throw error;
   }
-}
-
-function createTempPath(filePath: string): string {
-  const directory = path.dirname(filePath);
-  const basename = path.basename(filePath);
-  const suffix = `${process.pid}.${Date.now()}.${Math.random()
-    .toString(16)
-    .slice(2)}`;
-
-  return path.join(directory, `.${basename}.${suffix}.tmp`);
-}
-
-function removeTempFile(tempPath: string): void {
-  try {
-    fs.unlinkSync(tempPath);
-  } catch (_error) {}
 }
