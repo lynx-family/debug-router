@@ -609,6 +609,12 @@ describe("multiplexer integration routing isolation", function () {
       return frontend;
     };
 
+    const getCurrentWebSocketUrl = () => {
+      const connector = openConnectors(connectors).at(-1)?.connector;
+      assert(connector?.wssPort > 0, "websocket server should be started");
+      return `ws://127.0.0.1:${connector.wssPort}/mdevices/page/android`;
+    };
+
     const addDevice = (index) => {
       const serial = `device-${index}`;
       context.appendCommand({
@@ -643,12 +649,12 @@ describe("multiplexer integration routing isolation", function () {
       activeDevices.delete(deviceId);
     };
 
-    const baseConnector = await openConnector("connector-base");
-    const url = `ws://127.0.0.1:${baseConnector.wssPort}/mdevices/page/android`;
+    await openConnector("connector-base");
 
     for (let index = 1; index <= 11; index++) {
       await openConnector(`connector-${index}`);
     }
+    const url = getCurrentWebSocketUrl();
     for (let index = 1; index <= 12; index++) {
       await openFrontend(`frontend-${index}`, url);
     }
@@ -709,8 +715,14 @@ describe("multiplexer integration routing isolation", function () {
     for (let index = 12; index <= 15; index++) {
       await openConnector(`connector-reconnect-${index}`);
     }
-    for (let index = 12; index <= 16; index++) {
-      await openFrontend(`frontend-reconnect-${index}`, url);
+    const reconnectUrl = getCurrentWebSocketUrl();
+    let reconnectFrontendIndex = 12;
+    while (openFrontends(frontends).length < 12) {
+      await openFrontend(
+        `frontend-reconnect-${reconnectFrontendIndex}`,
+        reconnectUrl,
+      );
+      reconnectFrontendIndex++;
     }
     assert.strictEqual(openConnectors(connectors).length >= 12, true);
     assert.strictEqual(openFrontends(frontends).length >= 12, true);

@@ -17,6 +17,7 @@ const DATA_DIR_NAME = "multiplexer";
 const STATE_FILE_NAME = "fake_physical_state.json";
 const COMMAND_FILE_NAME = "fake_physical_commands.jsonl";
 const LOG_FILE_NAME = "fake_daemon_log.jsonl";
+const PACKAGE_ENTRY_STALE_TIMEOUT = 2000;
 
 function logStep(message) {
   console.log(`[multiplexer-websocket-e2e] ${message}`);
@@ -102,7 +103,7 @@ function createContext(name, state = defaultState()) {
         multiplexerLegacyDriverDir: path.join(homeDir, ".DebugRouterConnector"),
         multiplexerDaemonEntry: fakeDaemonEntry,
         multiplexerStartupTimeout: 3000,
-        multiplexerStaleTimeout: 500,
+        multiplexerStaleTimeout: PACKAGE_ENTRY_STALE_TIMEOUT,
         multiplexerRpcTimeout: 1200,
         multiplexerDaemonIdleTimeout: 150,
         reportService: null,
@@ -503,6 +504,7 @@ async function runLargeRandomFrontendChurnFlow() {
     for (let index = 1; index <= 11; index++) {
       await openConnector(`connector-${index}`);
     }
+    assertSameWebSocketPort(connectors, baseConnector.wssPort);
     for (let index = 1; index <= 12; index++) {
       await openFrontend(`frontend-${index}`, url);
     }
@@ -562,8 +564,15 @@ async function runLargeRandomFrontendChurnFlow() {
     for (let index = 12; index <= 15; index++) {
       await openConnector(`connector-reconnect-${index}`);
     }
-    for (let index = 12; index <= 16; index++) {
-      await openFrontend(`frontend-reconnect-${index}`, url);
+    assertSameWebSocketPort(connectors, baseConnector.wssPort);
+    assertSingleStartedDaemon(context);
+    let reconnectFrontendIndex = 12;
+    while (openFrontends(frontends).length < 12) {
+      await openFrontend(
+        `frontend-reconnect-${reconnectFrontendIndex}`,
+        url,
+      );
+      reconnectFrontendIndex++;
     }
     assert.strictEqual(openConnectors(connectors).length >= 12, true);
     assert.strictEqual(openFrontends(frontends).length >= 12, true);
@@ -845,6 +854,33 @@ async function waitForFrontendAndConnectorState(
 
 function openConnectors(entries) {
   return entries.filter((entry) => !entry.closed);
+}
+
+function assertSameWebSocketPort(entries, expectedPort) {
+  assert(expectedPort > 0, "base websocket server should expose a port");
+  for (const entry of openConnectors(entries)) {
+    assert.strictEqual(
+      entry.connector.wssPort,
+      expectedPort,
+      `${entry.label} should still point at the shared websocket daemon port`,
+    );
+  }
+}
+
+function assertSingleStartedDaemon(context) {
+  const startedPids = new Set(
+    context
+      .readLog()
+      .filter((entry) => entry.event === "daemon-started")
+      .map((entry) => entry.pid),
+  );
+  assert.strictEqual(
+    startedPids.size,
+    1,
+    `large churn flow should keep using a single daemon process, got ${[
+      ...startedPids,
+    ].join(",")}`,
+  );
 }
 
 function openFrontends(entries) {

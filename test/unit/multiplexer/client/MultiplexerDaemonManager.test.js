@@ -30,6 +30,16 @@ function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-manager-"));
 }
 
+function writeLockOwner(lockPath, owner) {
+  fs.writeFileSync(
+    path.join(lockPath, "owner.json"),
+    JSON.stringify({
+      token: `${owner.pid}-${owner.createdAt}-test`,
+      ...owner,
+    })
+  );
+}
+
 function createInfo(overrides = {}) {
   return {
     pid: 200,
@@ -257,10 +267,15 @@ describe("MultiplexerDaemonManager", function () {
   });
 
   it("spawns a daemon and waits until discovery becomes usable", async function () {
+    let now = 0;
     const readyInfo = createInfo({ pid: 201 });
     const discovery = createSequenceDiscovery(
       path.join(tempDir, "daemon.json"),
       [
+        unusable("missing"),
+        unusable("missing"),
+        unusable("missing"),
+        unusable("missing"),
         unusable("missing"),
         unusable("missing"),
         unusable("missing"),
@@ -278,6 +293,12 @@ describe("MultiplexerDaemonManager", function () {
       daemonVersion: "0.0.1",
       capabilities: ["daemon", "manager"],
       legacyDriverDir: "/tmp/legacy-driver",
+      startupTimeout: 30,
+      readyPollInterval: 10,
+      now: () => now,
+      sleep: async (duration) => {
+        now += duration;
+      },
     });
 
     assert.deepStrictEqual(await manager.ensureDaemon(), readyInfo);
@@ -314,10 +335,20 @@ describe("MultiplexerDaemonManager", function () {
   });
 
   it("passes serialized physical connector options to the daemon entry", async function () {
+    let now = 0;
     const readyInfo = createInfo({ pid: 203 });
     const discovery = createSequenceDiscovery(
       path.join(tempDir, "daemon.json"),
-      [unusable("missing"), unusable("missing"), usable(readyInfo)]
+      [
+        unusable("missing"),
+        unusable("missing"),
+        unusable("missing"),
+        unusable("missing"),
+        unusable("missing"),
+        unusable("missing"),
+        unusable("missing"),
+        usable(readyInfo),
+      ]
     );
     const physicalConnectorOption = {
       manualConnect: true,
@@ -337,6 +368,12 @@ describe("MultiplexerDaemonManager", function () {
     const { manager, spawnRecorder } = createManager(tempDir, {
       discovery,
       physicalConnectorOption,
+      startupTimeout: 30,
+      readyPollInterval: 10,
+      now: () => now,
+      sleep: async (duration) => {
+        now += duration;
+      },
     });
 
     assert.deepStrictEqual(await manager.ensureDaemon(), readyInfo);
@@ -378,10 +415,7 @@ describe("MultiplexerDaemonManager", function () {
       now: () => now,
     });
     fs.mkdirSync(spawnLockPath, { recursive: true });
-    fs.writeFileSync(
-      path.join(spawnLockPath, "owner.json"),
-      JSON.stringify({ pid: process.pid, createdAt: 0 })
-    );
+    writeLockOwner(spawnLockPath, { pid: process.pid, createdAt: 0 });
 
     assert.strictEqual(manager.acquireSpawnLock(), false);
     assert.strictEqual(fs.existsSync(spawnLockPath), true);
@@ -395,10 +429,7 @@ describe("MultiplexerDaemonManager", function () {
       now: () => now,
     });
     fs.mkdirSync(spawnLockPath, { recursive: true });
-    fs.writeFileSync(
-      path.join(spawnLockPath, "owner.json"),
-      JSON.stringify({ pid: process.pid, createdAt: 0 })
-    );
+    writeLockOwner(spawnLockPath, { pid: process.pid, createdAt: 0 });
 
     assert.strictEqual(manager.acquireSpawnLock(), true);
     assert.strictEqual(manager.spawnLock.isLocked(), true);
@@ -441,7 +472,12 @@ describe("MultiplexerDaemonManager", function () {
     let killed = false;
     const discovery = createSequenceDiscovery(
       path.join(tempDir, "daemon.json"),
-      [replaceRequired(oldInfo), replaceRequired(oldInfo), usable(readyInfo)]
+      [
+        replaceRequired(oldInfo),
+        replaceRequired(oldInfo),
+        unusable("missing"),
+        usable(readyInfo),
+      ]
     );
     const { manager, spawnRecorder } = createManager(tempDir, {
       ManagerClass: YieldUnavailableManager,
@@ -479,7 +515,12 @@ describe("MultiplexerDaemonManager", function () {
     const killCalls = [];
     const discovery = createSequenceDiscovery(
       path.join(tempDir, "daemon.json"),
-      [replaceRequired(oldInfo), replaceRequired(oldInfo), usable(readyInfo)]
+      [
+        replaceRequired(oldInfo),
+        replaceRequired(oldInfo),
+        unusable("missing"),
+        usable(readyInfo),
+      ]
     );
     const { manager, spawnRecorder } = createManager(tempDir, {
       ManagerClass: YieldingManager,
@@ -553,6 +594,7 @@ describe("MultiplexerDaemonManager", function () {
     const discovery = createSequenceDiscovery(discoveryPath, [
       replaceRequired(oldInfo),
       replaceRequired(oldInfo),
+      unusable("missing"),
       usable(readyInfo),
     ]);
 
@@ -953,57 +995,24 @@ describe("MultiplexerDaemonManager", function () {
     }
   });
 
-  it("does not cleanup stale discovery when daemon lock is still fresh", function () {
+  it("stops stale daemon lock owner before spawning a replacement", async function () {
     let now = 1000;
     const discoveryPath = path.join(tempDir, "daemon.json");
     const daemonLockPath = path.join(tempDir, "daemon.lock");
-    fs.writeFileSync(
-      discoveryPath,
-      JSON.stringify(createInfo({ heartbeat: 0 }))
-    );
-    fs.mkdirSync(daemonLockPath);
-    fs.writeFileSync(
-      path.join(daemonLockPath, "owner.json"),
-      JSON.stringify({ pid: process.pid, createdAt: now })
-    );
-
-    const discovery = new MultiplexerDiscovery({
-      discoveryPath,
-      staleTimeout: 500,
-      localProtocolVersion: 1,
-      now: () => now,
-    });
-    const { manager } = createManager(tempDir, {
-      discovery,
-      daemonLockPath,
-      staleTimeout: 500,
-      now: () => now,
-    });
-
-    assert.strictEqual(manager.cleanupStaleDaemon(), false);
-    assert.strictEqual(fs.existsSync(discoveryPath), true);
-    assert.strictEqual(fs.existsSync(daemonLockPath), true);
-  });
-
-  it("waits for a fresh daemon lock to become stale before spawning a replacement", async function () {
-    let now = 1000;
-    const discoveryPath = path.join(tempDir, "daemon.json");
-    const daemonLockPath = path.join(tempDir, "daemon.lock");
-    const readyInfo = createInfo({
-      pid: 301,
-      heartbeat: 1060,
-      startedAt: 1060,
-    });
     const spawnCalls = [];
+    const killCalls = [];
+    const livePids = new Set([301]);
+    const readyInfo = createInfo({
+      pid: 302,
+      heartbeat: now,
+      startedAt: now,
+    });
     fs.writeFileSync(
       discoveryPath,
       JSON.stringify(createInfo({ heartbeat: 0 }))
     );
     fs.mkdirSync(daemonLockPath);
-    fs.writeFileSync(
-      path.join(daemonLockPath, "owner.json"),
-      JSON.stringify({ pid: process.pid, createdAt: now })
-    );
+    writeLockOwner(daemonLockPath, { pid: 301, createdAt: 0 });
 
     const discovery = new MultiplexerDiscovery({
       discoveryPath,
@@ -1014,9 +1023,15 @@ describe("MultiplexerDaemonManager", function () {
     const { manager } = createManager(tempDir, {
       discovery,
       daemonLockPath,
+      startupTimeout: 30,
       staleTimeout: 50,
       readyPollInterval: 10,
       now: () => now,
+      isProcessAlive: (pid) => livePids.has(pid),
+      kill: (pid, signal) => {
+        killCalls.push([pid, signal]);
+        livePids.delete(pid);
+      },
       sleep: async (duration) => {
         now += duration;
       },
@@ -1028,6 +1043,8 @@ describe("MultiplexerDaemonManager", function () {
             args,
             options,
             now,
+            oldDiscoveryExists: fs.existsSync(discoveryPath),
+            oldDaemonLockExists: fs.existsSync(daemonLockPath),
           });
           fs.writeFileSync(
             discoveryPath,
@@ -1048,9 +1065,11 @@ describe("MultiplexerDaemonManager", function () {
     const info = await manager.ensureDaemon();
 
     assert.strictEqual(info.pid, readyInfo.pid);
+    assert.deepStrictEqual(killCalls, [[301, "SIGTERM"]]);
     assert.strictEqual(spawnCalls.length, 1);
-    assert.strictEqual(spawnCalls[0].now, 1060);
-    assert.strictEqual(fs.existsSync(daemonLockPath), false);
+    assert.strictEqual(spawnCalls[0].now, 1000);
+    assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
+    assert.strictEqual(spawnCalls[0].oldDaemonLockExists, false);
   });
 
   it("does not reuse a fresh discovery when its daemon health check fails", async function () {
@@ -1079,10 +1098,7 @@ describe("MultiplexerDaemonManager", function () {
     const spawnCalls = [];
     fs.writeFileSync(discoveryPath, JSON.stringify(oldInfo));
     fs.mkdirSync(daemonLockPath);
-    fs.writeFileSync(
-      path.join(daemonLockPath, "owner.json"),
-      JSON.stringify({ pid: process.pid, createdAt: now })
-    );
+    writeLockOwner(daemonLockPath, { pid: 987654321, createdAt: now });
 
     const discovery = new MultiplexerDiscovery({
       discoveryPath,
@@ -1094,9 +1110,11 @@ describe("MultiplexerDaemonManager", function () {
       ManagerClass: FailingThenReadyHealthManager,
       discovery,
       daemonLockPath,
-      staleTimeout: 50,
+      startupTimeout: 30,
+      staleTimeout: 1000,
       readyPollInterval: 10,
       now: () => now,
+      isProcessAlive: () => false,
       sleep: async (duration) => {
         now += duration;
       },
@@ -1131,24 +1149,161 @@ describe("MultiplexerDaemonManager", function () {
 
     assert.strictEqual(info.pid, readyInfo.pid);
     assert.strictEqual(spawnCalls.length, 1);
-    assert.strictEqual(spawnCalls[0].now, 1060);
+    assert.strictEqual(spawnCalls[0].now, 1000);
     assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
     assert.strictEqual(spawnCalls[0].oldDaemonLockExists, false);
   });
 
-  it("cleans stale daemon lock and stale discovery", function () {
-    const now = 5000;
+  it("reuses a healthy daemon that recovers before spawn cleanup", async function () {
+    class RecoveringHealthManager extends MultiplexerDaemonManager {
+      async checkDaemonHealth(info) {
+        if (info.pid === 301) {
+          return { ok: true };
+        }
+        return { ok: false, reason: "connect ECONNREFUSED" };
+      }
+    }
+
+    let now = 1000;
+    const discoveryPath = path.join(tempDir, "daemon.json");
+    const oldInfo = createInfo({
+      pid: 200,
+      heartbeat: now,
+      startedAt: now,
+    });
+    const readyInfo = createInfo({
+      pid: 301,
+      heartbeat: 1010,
+      startedAt: 1010,
+    });
+    const discovery = createSequenceDiscovery(discoveryPath, [
+      usable(oldInfo),
+      usable(oldInfo),
+      usable(readyInfo),
+      usable(readyInfo),
+    ]);
+    const { manager, spawnRecorder } = createManager(tempDir, {
+      ManagerClass: RecoveringHealthManager,
+      discovery,
+      startupTimeout: 30,
+      readyPollInterval: 10,
+      now: () => now,
+      sleep: async (duration) => {
+        now += duration;
+      },
+    });
+
+    const info = await manager.ensureDaemon();
+
+    assert.strictEqual(info.pid, readyInfo.pid);
+    assert.deepStrictEqual(spawnRecorder.calls, []);
+  });
+
+  it("stops an unhealthy daemon before spawning a replacement", async function () {
+    class FailingHealthManager extends MultiplexerDaemonManager {
+      async checkDaemonHealth(info) {
+        if (info.pid === 301) {
+          return { ok: true };
+        }
+        return { ok: false, reason: "connect ECONNREFUSED" };
+      }
+    }
+
+    let now = 1000;
     const discoveryPath = path.join(tempDir, "daemon.json");
     const daemonLockPath = path.join(tempDir, "daemon.lock");
+    const killCalls = [];
+    const livePids = new Set([200]);
+    const oldInfo = createInfo({
+      pid: 200,
+      heartbeat: now,
+      startedAt: now,
+    });
+    const readyInfo = createInfo({
+      pid: 301,
+      heartbeat: 1010,
+      startedAt: 1010,
+    });
+    fs.writeFileSync(discoveryPath, JSON.stringify(oldInfo));
+    fs.mkdirSync(daemonLockPath);
+    writeLockOwner(daemonLockPath, { pid: oldInfo.pid, createdAt: now });
+    const spawnCalls = [];
+
+    const discovery = new MultiplexerDiscovery({
+      discoveryPath,
+      staleTimeout: 1000,
+      localProtocolVersion: 1,
+      now: () => now,
+    });
+    const { manager } = createManager(tempDir, {
+      ManagerClass: FailingHealthManager,
+      discovery,
+      daemonLockPath,
+      startupTimeout: 30,
+      staleTimeout: 1000,
+      readyPollInterval: 10,
+      now: () => now,
+      isProcessAlive: (pid) => livePids.has(pid),
+      kill: (pid, signal) => {
+        killCalls.push([pid, signal]);
+        livePids.delete(pid);
+      },
+      sleep: async (duration) => {
+        now += duration;
+      },
+      spawnRecorder: {
+        calls: spawnCalls,
+        spawn(command, args, options) {
+          spawnCalls.push({
+            command,
+            args,
+            options,
+            now,
+            oldDiscoveryExists: fs.existsSync(discoveryPath),
+            oldDaemonLockExists: fs.existsSync(daemonLockPath),
+          });
+          fs.writeFileSync(
+            discoveryPath,
+            JSON.stringify({
+              ...readyInfo,
+              heartbeat: now,
+              startedAt: now,
+            })
+          );
+          return {
+            pid: readyInfo.pid,
+            unref() {},
+          };
+        },
+      },
+    });
+
+    const info = await manager.ensureDaemon();
+
+    assert.strictEqual(info.pid, readyInfo.pid);
+    assert.deepStrictEqual(killCalls, [[oldInfo.pid, "SIGTERM"]]);
+    assert.strictEqual(spawnCalls.length, 1);
+    assert.strictEqual(spawnCalls[0].now, 1030);
+    assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
+    assert.strictEqual(spawnCalls[0].oldDaemonLockExists, false);
+  });
+
+  it("removes unusable discovery and inactive daemon lock before spawning", async function () {
+    let now = 5000;
+    const discoveryPath = path.join(tempDir, "daemon.json");
+    const daemonLockPath = path.join(tempDir, "daemon.lock");
+    const readyInfo = createInfo({
+      pid: 301,
+      heartbeat: now,
+      startedAt: now,
+    });
+    const spawnCalls = [];
     fs.writeFileSync(
       discoveryPath,
       JSON.stringify(createInfo({ heartbeat: 0 }))
     );
     fs.mkdirSync(daemonLockPath);
-    fs.writeFileSync(
-      path.join(daemonLockPath, "owner.json"),
-      JSON.stringify({ pid: 1, createdAt: 0 })
-    );
+    writeLockOwner(daemonLockPath, { pid: 987654321, createdAt: 0 });
 
     const discovery = new MultiplexerDiscovery({
       discoveryPath,
@@ -1159,27 +1314,104 @@ describe("MultiplexerDaemonManager", function () {
     const { manager } = createManager(tempDir, {
       discovery,
       daemonLockPath,
+      startupTimeout: 30,
       staleTimeout: 500,
       now: () => now,
+      isProcessAlive: () => false,
+      sleep: async (duration) => {
+        now += duration;
+      },
+      spawnRecorder: {
+        calls: spawnCalls,
+        spawn(command, args, options) {
+          spawnCalls.push({
+            command,
+            args,
+            options,
+            now,
+            oldDiscoveryExists: fs.existsSync(discoveryPath),
+            oldDaemonLockExists: fs.existsSync(daemonLockPath),
+          });
+          fs.writeFileSync(
+            discoveryPath,
+            JSON.stringify({
+              ...readyInfo,
+              heartbeat: now,
+              startedAt: now,
+            })
+          );
+          return {
+            pid: readyInfo.pid,
+            unref() {},
+          };
+        },
+      },
     });
 
-    assert.strictEqual(manager.cleanupStaleDaemon(), true);
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
-    assert.strictEqual(fs.existsSync(daemonLockPath), false);
+    const info = await manager.ensureDaemon();
+
+    assert.strictEqual(info.pid, readyInfo.pid);
+    assert.strictEqual(spawnCalls.length, 1);
+    assert.strictEqual(spawnCalls[0].now, 5000);
+    assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
+    assert.strictEqual(spawnCalls[0].oldDaemonLockExists, false);
   });
 
-  it("removes invalid discovery when no daemon lock exists", function () {
+  it("removes invalid discovery without daemon lock before spawning", async function () {
+    let now = 5000;
     const discoveryPath = path.join(tempDir, "daemon.json");
+    const readyInfo = createInfo({
+      pid: 302,
+      heartbeat: now,
+      startedAt: now,
+    });
+    const spawnCalls = [];
     fs.writeFileSync(discoveryPath, "{bad");
     const discovery = new MultiplexerDiscovery({
       discoveryPath,
       staleTimeout: 500,
       localProtocolVersion: 1,
+      now: () => now,
     });
-    const { manager } = createManager(tempDir, { discovery });
+    const { manager } = createManager(tempDir, {
+      discovery,
+      startupTimeout: 30,
+      now: () => now,
+      sleep: async (duration) => {
+        now += duration;
+      },
+      spawnRecorder: {
+        calls: spawnCalls,
+        spawn(command, args, options) {
+          spawnCalls.push({
+            command,
+            args,
+            options,
+            now,
+            oldDiscoveryExists: fs.existsSync(discoveryPath),
+          });
+          fs.writeFileSync(
+            discoveryPath,
+            JSON.stringify({
+              ...readyInfo,
+              heartbeat: now,
+              startedAt: now,
+            })
+          );
+          return {
+            pid: readyInfo.pid,
+            unref() {},
+          };
+        },
+      },
+    });
 
-    assert.strictEqual(manager.cleanupStaleDaemon(), true);
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
+    const info = await manager.ensureDaemon();
+
+    assert.strictEqual(info.pid, readyInfo.pid);
+    assert.strictEqual(spawnCalls.length, 1);
+    assert.strictEqual(spawnCalls[0].now, 5000);
+    assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
   });
 
   it("ignores ESRCH when force stopping an already exited daemon", async function () {
@@ -1197,7 +1429,7 @@ describe("MultiplexerDaemonManager", function () {
       },
     });
 
-    await manager.forceStopDaemon(createInfo({ pid: 404 }));
+    await manager.stopDaemonForReplacement(createInfo({ pid: 404 }), "stale-daemon");
 
     assert.strictEqual(fs.existsSync(discoveryPath), false);
     assert.strictEqual(fs.existsSync(daemonLockPath), false);
@@ -1221,7 +1453,11 @@ describe("MultiplexerDaemonManager", function () {
     });
 
     await assert.rejects(
-      () => manager.forceStopDaemon(createInfo({ pid: 405 })),
+      () =>
+        manager.stopDaemonForReplacement(
+          createInfo({ pid: 405 }),
+          "stale-daemon"
+        ),
       /permission denied/
     );
     assert.deepStrictEqual(killCalls, [

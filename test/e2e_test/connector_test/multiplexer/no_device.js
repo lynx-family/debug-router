@@ -26,6 +26,7 @@ const DATA_DIR_NAME = "multiplexer";
 const STATE_FILE_NAME = "fake_physical_state.json";
 const COMMAND_FILE_NAME = "fake_physical_commands.jsonl";
 const LOG_FILE_NAME = "fake_daemon_log.jsonl";
+const PACKAGE_ENTRY_STALE_TIMEOUT = 2000;
 
 function logStep(message) {
   console.log(`[multiplexer-no-device-e2e] ${message}`);
@@ -85,7 +86,8 @@ function createContext(name, state, option = {}) {
         multiplexerLegacyDriverDir: legacyDriverDir,
         multiplexerDaemonEntry: fakeDaemonEntry,
         multiplexerStartupTimeout: extra.startupTimeout ?? 3000,
-        multiplexerStaleTimeout: extra.staleTimeout ?? 500,
+        multiplexerStaleTimeout:
+          extra.staleTimeout ?? PACKAGE_ENTRY_STALE_TIMEOUT,
         multiplexerRpcTimeout: extra.rpcTimeout ?? 1200,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??

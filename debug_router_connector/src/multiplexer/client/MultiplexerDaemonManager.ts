@@ -7,7 +7,7 @@ import path from "path";
 import { spawn as spawnChildProcess, SpawnOptions } from "child_process";
 import { get as httpGet } from "http";
 import { MULTIPLEXER_DAEMON_LOCK_NAME } from "../utils/paths";
-import { FileLock } from "../utils/FileLock";
+import { FileLock, FileLockOwner } from "../utils/FileLock";
 import { removeFileIfExists } from "../utils/atomic_file";
 import {
   MULTIPLEXER_HEALTH_PATH,
@@ -32,9 +32,11 @@ export const DEFAULT_MULTIPLEXER_REPLACEMENT_TIMEOUT = 1000;
 export const DEFAULT_MULTIPLEXER_HEALTH_CHECK_TIMEOUT = 500;
 const DEFAULT_MULTIPLEXER_SPAWN_LOCK_STALE_BUFFER = 1000;
 const MULTIPLEXER_HEALTH_RESPONSE_LIMIT = 4096;
+const MULTIPLEXER_HEALTH_RECOVERY_RETRY_COUNT = 3;
 
 export type MultiplexerDaemonReplaceReason =
   | "daemon-protocol-older-than-connector"
+  | "unhealthy-daemon"
   | "stale-daemon"
   | "invalid-discovery";
 
@@ -178,12 +180,10 @@ export class MultiplexerDaemonManager {
         return validation.info;
       }
 
-      return this.ensureDaemonWithSpawnLock(async () => {
-        await this.waitUntilUnhealthyDaemonCanSpawn(
-          validation.info,
-          this.startupTimeout,
-        );
-      });
+      const recoveredInfo = await this.retryHealthyDiscovery(validation.info);
+      if (recoveredInfo) {
+        return recoveredInfo;
+      }
     }
 
     if (validation.status === "replace-required") {
@@ -200,7 +200,7 @@ export class MultiplexerDaemonManager {
     }
 
     return this.ensureDaemonWithSpawnLock(async () => {
-      await this.waitUntilUnusableDaemonCanSpawn(this.startupTimeout);
+      await this.cleanupDaemonBeforeSpawn();
     });
   }
 
@@ -246,33 +246,6 @@ export class MultiplexerDaemonManager {
     );
   }
 
-  cleanupStaleDaemon(): boolean {
-    const validation = this.discovery.validateDiscovery();
-    if (validation.status !== "unusable") {
-      return false;
-    }
-
-    const daemonLockExists = fs.existsSync(this.daemonLock.lockPath);
-    if (
-      daemonLockExists &&
-      !this.daemonLock.isStale(this.staleTimeout, this.now())
-    ) {
-      return false;
-    }
-
-    let cleaned = false;
-    if (daemonLockExists) {
-      fs.rmSync(this.daemonLock.lockPath, { recursive: true, force: true });
-      cleaned = true;
-    }
-
-    if (validation.reason !== "missing") {
-      cleaned = removeFileIfExists(this.discovery.discoveryPath) || cleaned;
-    }
-
-    return cleaned;
-  }
-
   async replaceOutdatedDaemon(
     info: MultiplexerDiscoveryInfo,
     reason: MultiplexerDaemonReplaceReason,
@@ -293,10 +266,7 @@ export class MultiplexerDaemonManager {
     info: MultiplexerDiscoveryInfo,
     reason: MultiplexerDaemonReplaceReason,
   ): Promise<void> {
-    const yielded = await this.requestDaemonYield(info, reason);
-    if (!yielded) {
-      await this.forceStopDaemon(info);
-    }
+    await this.stopDaemonProcessForCleanup(info, reason);
     this.removeDaemonArtifacts();
   }
 
@@ -312,7 +282,9 @@ export class MultiplexerDaemonManager {
     return this.waitUntilProcessExits(info.pid, this.replacementTimeout);
   }
 
-  async forceStopDaemon(info: MultiplexerDiscoveryInfo): Promise<void> {
+  private async forceStopDaemonProcess(
+    info: MultiplexerDiscoveryInfo,
+  ): Promise<void> {
     const sigtermError = this.tryKillProcess(info.pid, "SIGTERM");
     await this.waitUntilProcessExits(info.pid, this.replacementTimeout);
 
@@ -324,7 +296,6 @@ export class MultiplexerDaemonManager {
 
     const processAlive = this.isProcessAlive(info.pid);
     if (!processAlive) {
-      this.removeDaemonArtifacts();
       return;
     }
 
@@ -348,15 +319,18 @@ export class MultiplexerDaemonManager {
     }
 
     try {
-      const validation = this.discovery.validateDiscovery();
-      if (validation.status === "usable") {
-        const healthCheck = await this.checkDaemonHealth(validation.info);
-        if (healthCheck.ok) {
-          return validation.info;
-        }
+      const healthyInfoBeforeSpawn = await this.getHealthyDiscovery();
+      if (healthyInfoBeforeSpawn) {
+        return healthyInfoBeforeSpawn;
       }
 
       await beforeSpawn();
+
+      const healthyInfoAfterBeforeSpawn = await this.getHealthyDiscovery();
+      if (healthyInfoAfterBeforeSpawn) {
+        return healthyInfoAfterBeforeSpawn;
+      }
+
       await this.spawnDaemon();
       return this.waitUntilReady(this.startupTimeout);
     } finally {
@@ -364,70 +338,92 @@ export class MultiplexerDaemonManager {
     }
   }
 
-  private async waitUntilUnusableDaemonCanSpawn(
-    timeout: number,
-  ): Promise<void> {
-    const startedAt = this.now();
-
-    while (this.now() - startedAt <= timeout) {
-      const daemonLockExists = fs.existsSync(this.daemonLock.lockPath);
-      if (
-        !daemonLockExists ||
-        this.daemonLock.isStale(this.staleTimeout, this.now())
-      ) {
-        this.cleanupStaleDaemon();
-        return;
-      }
-
-      const validation = this.discovery.validateDiscovery();
-      if (validation.status !== "unusable") {
-        return;
-      }
-
-      await this.sleepFor(this.readyPollInterval);
+  private async getHealthyDiscovery(): Promise<MultiplexerDiscoveryInfo | null> {
+    const validation = this.discovery.validateDiscovery();
+    if (validation.status !== "usable") {
+      return null;
     }
+
+    const healthCheck = await this.checkDaemonHealth(validation.info);
+    return healthCheck.ok ? validation.info : null;
   }
 
-  private async waitUntilUnhealthyDaemonCanSpawn(
+  private async retryHealthyDiscovery(
     info: MultiplexerDiscoveryInfo,
-    timeout: number,
-  ): Promise<void> {
-    const startedAt = this.now();
+  ): Promise<MultiplexerDiscoveryInfo | null> {
+    if (!this.isProcessAlive(info.pid)) {
+      return null;
+    }
 
-    while (this.now() - startedAt <= timeout) {
-      const daemonLockExists = fs.existsSync(this.daemonLock.lockPath);
-      if (
-        !daemonLockExists ||
-        this.daemonLock.isStale(this.staleTimeout, this.now())
-      ) {
-        this.cleanupKnownUnhealthyDaemon();
-        return;
-      }
-
-      const validation = this.discovery.validateDiscovery();
-      if (
-        validation.status !== "usable" ||
-        validation.info.pid !== info.pid ||
-        validation.info.controlPort !== info.controlPort
-      ) {
-        await this.waitUntilUnusableDaemonCanSpawn(
-          Math.max(0, timeout - (this.now() - startedAt)),
-        );
-        return;
-      }
-
+    for (
+      let attempt = 0;
+      attempt < MULTIPLEXER_HEALTH_RECOVERY_RETRY_COUNT;
+      attempt++
+    ) {
       await this.sleepFor(this.readyPollInterval);
+      const healthyInfo = await this.getHealthyDiscovery();
+      if (healthyInfo) {
+        return healthyInfo;
+      }
+    }
+
+    return null;
+  }
+
+  private async cleanupDaemonBeforeSpawn(): Promise<void> {
+    const validation = this.discovery.validateDiscovery();
+    const info = "info" in validation ? validation.info ?? null : null;
+    let stoppedPid: number | null = null;
+
+    if (info && this.isProcessAlive(info.pid)) {
+      await this.forceStopDaemonProcess(info);
+      stoppedPid = info.pid;
+    }
+
+    const owner = this.daemonLock.readOwner();
+    if (
+      owner &&
+      this.isDaemonLockOwnerAlive(owner) &&
+      owner.pid !== stoppedPid
+    ) {
+      await this.forceStopDaemonProcess(this.createDaemonInfoFromLockOwner(owner));
+    }
+
+    this.removeDaemonArtifacts();
+  }
+
+  private async stopDaemonProcessForCleanup(
+    info: MultiplexerDiscoveryInfo,
+    reason: MultiplexerDaemonReplaceReason,
+  ): Promise<void> {
+    const yielded = await this.requestDaemonYield(info, reason);
+    if (!yielded) {
+      await this.forceStopDaemonProcess(info);
     }
   }
 
-  private cleanupKnownUnhealthyDaemon(): void {
-    removeFileIfExists(this.discovery.discoveryPath);
-    fs.rmSync(this.daemonLock.lockPath, { recursive: true, force: true });
+  private createDaemonInfoFromLockOwner(
+    owner: FileLockOwner,
+  ): MultiplexerDiscoveryInfo {
+    return {
+      pid: owner.pid,
+      protocolVersion: this.localProtocolVersion,
+      minSupportedProtocolVersion: this.minSupportedProtocolVersion,
+      controlPort: 0,
+      heartbeat: owner.createdAt,
+      startedAt: owner.createdAt,
+    };
+  }
+
+  private isDaemonLockOwnerAlive(
+    owner: FileLockOwner | null = this.daemonLock.readOwner(),
+  ): boolean {
+    return !!owner && this.isProcessAlive(owner.pid);
   }
 
   private removeDaemonArtifacts(): void {
+    this.daemonLock.cleanup();
     removeFileIfExists(this.discovery.discoveryPath);
-    fs.rmSync(this.daemonLock.lockPath, { recursive: true, force: true });
   }
 
   private tryKillProcess(pid: number, signal: NodeJS.Signals): unknown {

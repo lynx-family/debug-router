@@ -22,6 +22,7 @@ const HIGH_PRESSURE_WEBSOCKET_FRONTENDS = 100;
 const HIGH_PRESSURE_CONNECTOR_MESSAGES = 500;
 const HIGH_PRESSURE_WEBSOCKET_MESSAGES = 500;
 const HIGH_PRESSURE_SETUP_BATCH_SIZE = 20;
+const RECOVERY_STALE_TIMEOUT = 200;
 
 describe("multiplexer integration stability, stress, and recovery", function () {
   this.timeout(120000);
@@ -370,7 +371,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
       heartbeatInterval: 25,
       readyPollInterval: 10,
       replacementTimeout: 20,
-      staleTimeout: 80,
+      staleTimeout: RECOVERY_STALE_TIMEOUT,
       state: {
         ...createState({
           deviceCount: 1,

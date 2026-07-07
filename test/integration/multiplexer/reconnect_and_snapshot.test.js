@@ -12,6 +12,8 @@ const {
   waitFor,
 } = require("./helpers/integration_harness");
 
+const RECOVERY_STALE_TIMEOUT = 200;
+
 describe("multiplexer integration reconnect and snapshot", function () {
   this.timeout(platformTimeout(12000));
 
@@ -29,7 +31,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
       heartbeatInterval: 25,
       readyPollInterval: 10,
       replacementTimeout: 20,
-      staleTimeout: 80,
+      staleTimeout: RECOVERY_STALE_TIMEOUT,
       state: {
         responseDelayMs: 1000,
         devices: [
@@ -164,7 +166,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
     const managers = Array.from({ length: 3 }, () =>
       context.createManager({
         readyPollInterval: 10,
-        staleTimeout: 80,
+        staleTimeout: RECOVERY_STALE_TIMEOUT,
       }),
     );
     const infos = await Promise.all(
@@ -196,7 +198,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
       heartbeatInterval: 25,
       readyPollInterval: 10,
       replacementTimeout: 20,
-      staleTimeout: 80,
+      staleTimeout: RECOVERY_STALE_TIMEOUT,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
