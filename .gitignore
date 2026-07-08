@@ -24,6 +24,7 @@ out/
 ### debug_router_connector part
 debug_router_connector/node_modules
 debug_router_connector/dist
+debug_router_connector/*.tsbuildinfo
 
 ### test part
 test/e2e_test/android_/*.iml
@@ -56,3 +57,14 @@ tools/android_tools/
 **/.idea
 **/.cxx
 **/.jsonl
+
+## my own docs
+dev_docs/
+test/message/
+test/e2e_test/connector_test/reports
+.vscode/
+
+# Python tooling artifacts
+.venv-ci-py312/
+check_style.xml
+test/unit_test/**/__pycache__/

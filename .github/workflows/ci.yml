@@ -291,6 +291,21 @@ jobs:
           ls -al
           popd
 
+  multiplexer-unit-tests:
+    runs-on: lynx-ubuntu-22.04-medium
+    steps:
+      - name: Download Source
+        uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Install debug-router-connector dependencies
+        working-directory: debug_router_connector
+        run: npm ci
+      - name: Run multiplexer unit tests
+        working-directory: debug_router_connector
+        run: npm run test:multiplexer
+
   debug-router-connector-npm-package-build:
     runs-on: lynx-ubuntu-22.04-medium
     steps:
