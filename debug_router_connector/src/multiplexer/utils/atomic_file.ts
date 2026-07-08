@@ -21,6 +21,10 @@ export type AtomicWriteJsonOptions = {
   space?: number;
 };
 
+// Using `write-file-atomic` write file on Windows can sometimes fail because 
+// the file is in use or cannot be replaced. Adding a limited retry for those
+// specific errors here should address these intermittent failures.
+
 export function writeFileAtomic(
   filePath: string,
   content: string | Buffer,

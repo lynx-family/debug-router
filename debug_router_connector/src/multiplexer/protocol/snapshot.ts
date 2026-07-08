@@ -4,6 +4,10 @@
 
 import type { ClientDescription, DeviceDescription } from "../../utils/type";
 
+// protocolVersion is used for version arbitration when connecting to the Multiplexer daemon.
+// minSupportedProtocolVersion is used to check if the Multiplexer daemon supports the protocol version.
+// daemonVersion and clientVersion is only injected for testing or debugging purposes and is not used in version arbitration.
+
 export type Snapshot = {
   protocolVersion: number;
   generatedAt: number;

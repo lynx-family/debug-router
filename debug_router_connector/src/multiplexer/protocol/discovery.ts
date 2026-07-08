@@ -9,7 +9,7 @@ export const MULTIPLEXER_CONTROL_PATH = "/debug-router-multiplexer/control";
 
 // protocolVersion is used for version arbitration when connecting to the Multiplexer daemon.
 // minSupportedProtocolVersion is used to check if the Multiplexer daemon supports the protocol version.
-// daemonVersion is only injected for testing or debugging purposes and is not used in version arbitration.
+// daemonVersion and clientVersion is only injected for testing or debugging purposes and is not used in version arbitration.
 
 export type MultiplexerDiscoveryInfo = {
   pid: number;
