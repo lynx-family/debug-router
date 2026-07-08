@@ -10,6 +10,12 @@ type WriteFileAtomicPackage = {
 };
 
 const writeFileAtomicPackage = require("write-file-atomic") as WriteFileAtomicPackage;
+const RETRIABLE_ATOMIC_WRITE_ERROR_CODES = new Set([
+  "EACCES",
+  "EBUSY",
+  "EPERM",
+]);
+const ATOMIC_WRITE_RETRY_DELAYS_MS = [10, 20, 40];
 
 export type AtomicWriteJsonOptions = {
   space?: number;
@@ -20,7 +26,24 @@ export function writeFileAtomic(
   content: string | Buffer,
 ): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileAtomicPackage.sync(filePath, content);
+  for (
+    let attempt = 0;
+    attempt <= ATOMIC_WRITE_RETRY_DELAYS_MS.length;
+    attempt++
+  ) {
+    try {
+      writeFileAtomicPackage.sync(filePath, content);
+      return;
+    } catch (error) {
+      if (
+        !isRetriableAtomicWriteError(error) ||
+        attempt === ATOMIC_WRITE_RETRY_DELAYS_MS.length
+      ) {
+        throw error;
+      }
+      sleepSync(ATOMIC_WRITE_RETRY_DELAYS_MS[attempt]);
+    }
+  }
 }
 
 export function writeJsonAtomic(
@@ -50,4 +73,19 @@ export function removeFileIfExists(filePath: string): boolean {
 
     throw error;
   }
+}
+
+function isRetriableAtomicWriteError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    RETRIABLE_ATOMIC_WRITE_ERROR_CODES.has(
+      (error as { code?: string }).code ?? "",
+    )
+  );
+}
+
+function sleepSync(durationMs: number): void {
+  const deadline = Date.now() + durationMs;
+  while (Date.now() < deadline) {}
 }

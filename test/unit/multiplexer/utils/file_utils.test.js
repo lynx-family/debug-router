@@ -72,6 +72,32 @@ describe("multiplexer atomic file utilities", function () {
     assert.strictEqual(fs.readFileSync(filePath, "utf8"), "hello");
   });
 
+  it("retries transient atomic rename failures", function () {
+    const filePath = path.join(tempDir, "daemon.json");
+    fs.writeFileSync(filePath, "old");
+
+    const originalRenameSync = fs.renameSync;
+    let attempts = 0;
+    fs.renameSync = function retryRename(oldPath, newPath) {
+      attempts++;
+      if (attempts <= 3) {
+        const error = new Error("temporarily busy");
+        error.code = "EPERM";
+        throw error;
+      }
+      return originalRenameSync.call(fs, oldPath, newPath);
+    };
+
+    try {
+      writeFileAtomic(filePath, "new");
+    } finally {
+      fs.renameSync = originalRenameSync;
+    }
+
+    assert.strictEqual(attempts, 4);
+    assert.strictEqual(fs.readFileSync(filePath, "utf8"), "new");
+  });
+
   it("keeps the previous file when rename fails", function () {
     const filePath = path.join(tempDir, "daemon.json");
     fs.writeFileSync(filePath, "old");

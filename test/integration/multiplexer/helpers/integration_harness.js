@@ -63,6 +63,7 @@ const DEFAULT_STATE = {
   ],
 };
 const WINDOWS_TIMEOUT_MULTIPLIER = 4;
+const DEFAULT_STARTUP_TIMEOUT = 3000;
 
 function createIntegrationContext(name, option = {}) {
   const rootDir = fs.mkdtempSync(
@@ -89,7 +90,8 @@ function createIntegrationContext(name, option = {}) {
   const manager = createManager({
     paths,
     discovery,
-    startupTimeout: option.startupTimeout ?? 3000,
+    startupTimeout:
+      option.startupTimeout ?? platformTimeout(DEFAULT_STARTUP_TIMEOUT),
     staleTimeout: option.staleTimeout ?? 1000,
     readyPollInterval: option.readyPollInterval ?? 25,
     heartbeatInterval: option.heartbeatInterval ?? 50,
@@ -129,7 +131,10 @@ function createIntegrationContext(name, option = {}) {
       return createManager({
         paths,
         discovery: extraDiscovery,
-        startupTimeout: extra.startupTimeout ?? option.startupTimeout ?? 3000,
+        startupTimeout:
+          extra.startupTimeout ??
+          option.startupTimeout ??
+          platformTimeout(DEFAULT_STARTUP_TIMEOUT),
         staleTimeout: extra.staleTimeout ?? option.staleTimeout ?? 1000,
         readyPollInterval:
           extra.readyPollInterval ?? option.readyPollInterval ?? 25,
@@ -181,7 +186,9 @@ function createIntegrationContext(name, option = {}) {
         multiplexerLegacyDriverDir: legacyDriverDir,
         multiplexerDaemonEntry: fakeDaemonEntry,
         multiplexerStartupTimeout:
-          extra.startupTimeout ?? option.startupTimeout ?? 3000,
+          extra.startupTimeout ??
+          option.startupTimeout ??
+          platformTimeout(DEFAULT_STARTUP_TIMEOUT),
         multiplexerStaleTimeout:
           extra.staleTimeout ?? option.staleTimeout ?? 1000,
         multiplexerRpcTimeout: extra.rpcTimeout ?? 1000,

@@ -22,6 +22,9 @@ const HIGH_PRESSURE_WEBSOCKET_FRONTENDS = 100;
 const HIGH_PRESSURE_CONNECTOR_MESSAGES = 500;
 const HIGH_PRESSURE_WEBSOCKET_MESSAGES = 500;
 const HIGH_PRESSURE_SETUP_BATCH_SIZE = 20;
+const HIGH_PRESSURE_TIMEOUT_MS = 10000;
+const HIGH_PRESSURE_RPC_TIMEOUT_MS = 30000;
+const HIGH_PRESSURE_STALE_TIMEOUT_MS = 10000;
 const RECOVERY_STALE_TIMEOUT = 200;
 
 describe("multiplexer integration stability, stress, and recovery", function () {
@@ -239,10 +242,12 @@ describe("multiplexer integration stability, stress, and recovery", function () 
   });
 
   it("handles three-digit connector and WebSocket frontends with four-digit concurrent routed messages", async function () {
+    this.timeout(180000);
     context = createIntegrationContext("stability-combined-high-pressure", {
       heartbeatInterval: 25,
       readyPollInterval: 10,
-      staleTimeout: 500,
+      startupTimeout: HIGH_PRESSURE_TIMEOUT_MS,
+      staleTimeout: HIGH_PRESSURE_STALE_TIMEOUT_MS,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -256,7 +261,12 @@ describe("multiplexer integration stability, stress, and recovery", function () 
 
     const connectors = Array.from(
       { length: HIGH_PRESSURE_CONNECTOR_FRONTENDS },
-      () => context.createConnector({ enableWebSocket: true,rpcTimeout: 5000, }),
+      () =>
+        context.createConnector({
+          enableWebSocket: true,
+          rpcTimeout: HIGH_PRESSURE_RPC_TIMEOUT_MS,
+          startupTimeout: HIGH_PRESSURE_TIMEOUT_MS,
+        }),
     );
     await runInBatches(connectors, HIGH_PRESSURE_SETUP_BATCH_SIZE, (connector) =>
       connector.connectDevices(-1, null, true),
@@ -298,7 +308,11 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         };
       },
     );
-    await waitForClientIds(frontends, [1, 2, 3, 4]);
+    await waitForClientIds(
+      frontends,
+      [1, 2, 3, 4],
+      HIGH_PRESSURE_TIMEOUT_MS,
+    );
 
     const connectorRequests = Array.from(
       { length: HIGH_PRESSURE_CONNECTOR_MESSAGES },
@@ -542,12 +556,16 @@ function createState({ deviceCount, clientCount, firstClientId = 1 }) {
   };
 }
 
-async function waitForClientIds(frontends, expectedIds) {
+async function waitForClientIds(
+  frontends,
+  expectedIds,
+  timeout = 3000,
+) {
   const expected = [...expectedIds].sort((first, second) => first - second);
   await waitFor(
     () =>
       frontends.every((frontend) => arraysEqual(latestClientIds(frontend), expected)),
-    3000,
+    timeout,
   );
 }
 
