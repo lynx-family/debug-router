@@ -247,6 +247,15 @@ describe("multiplexer FileLock", function () {
       })
     );
     assert.strictEqual(lock.readOwner(), null);
+
+    fs.writeFileSync(
+      path.join(lockPath, "owner.json"),
+      JSON.stringify({
+        pid: 1,
+        createdAt: Date.now(),
+      })
+    );
+    assert.strictEqual(lock.readOwner(), null);
   });
 
   it("reports whether the lock owner process is alive", function () {
@@ -329,12 +338,12 @@ describe("multiplexer FileLock", function () {
       path.join(lockPath, "owner.json"),
       JSON.stringify(staleOwner)
     );
-    lock.tryRemove = (shouldRemove) => {
+    lock.tryRemove = (expectedOwner) => {
       fs.writeFileSync(
         path.join(lockPath, "owner.json"),
         JSON.stringify(freshOwner)
       );
-      return originalTryRemove(shouldRemove);
+      return originalTryRemove(expectedOwner);
     };
 
     assert.strictEqual(lock.cleanupStale(1000, now), false);
@@ -400,14 +409,8 @@ describe("multiplexer FileLock", function () {
 
     const liveLock = new FileLock(liveLockPath);
     assert.strictEqual(liveLock.acquire(), true);
-    let liveOwner;
-    assert.strictEqual(
-      liveLock.tryRemove((owner) => {
-        liveOwner = owner;
-        return true;
-      }),
-      true
-    );
+    const liveOwner = liveLock.readOwner();
+    assert.strictEqual(liveLock.tryRemove(liveOwner), true);
     assert.strictEqual(liveLock.isLocked(), false);
     assert.strictEqual(fs.existsSync(liveLockPath), false);
     assert.strictEqual(liveOwner.pid, process.pid);
@@ -415,30 +418,22 @@ describe("multiplexer FileLock", function () {
 
     const localLock = new FileLock(localLockPath);
     assert.strictEqual(localLock.acquire(), true);
-    assert.strictEqual(
-      localLock.tryRemove((owner) => !!owner),
-      true
-    );
+    assert.strictEqual(localLock.tryRemove(localLock.readOwner()), true);
     assert.strictEqual(localLock.isLocked(), false);
     assert.strictEqual(fs.existsSync(localLockPath), false);
 
     assert.strictEqual(
-      new FileLock(path.join(tempDir, "try-missing.lock")).tryRemove(
-        () => true
-      ),
+      new FileLock(path.join(tempDir, "try-missing.lock")).tryRemove(null),
       false
     );
   });
 
-  it("does not try remove when the guard rejects removal", function () {
+  it("does not try remove when the expected owner does not match", function () {
     const lockPath = path.join(tempDir, "try-guarded.lock");
     const lock = new FileLock(lockPath);
 
     assert.strictEqual(lock.acquire(), true);
-    assert.strictEqual(
-      lock.tryRemove(() => false),
-      false
-    );
+    assert.strictEqual(lock.tryRemove(null), false);
     assert.strictEqual(lock.isLocked(), true);
     assert.strictEqual(fs.existsSync(lockPath), true);
 
@@ -455,10 +450,7 @@ describe("multiplexer FileLock", function () {
     };
 
     try {
-      assert.strictEqual(
-        new FileLock(lockPath).tryRemove(() => true),
-        false
-      );
+      assert.strictEqual(new FileLock(lockPath).tryRemove(null), false);
       assert.strictEqual(fs.existsSync(lockPath), true);
     } finally {
       fs.rmSync = originalRmSync;

@@ -7,12 +7,16 @@ import path from "path";
 
 export const DEBUG_ROUTER_CONNECTOR_DATA_DIR_NAME = ".DebugRouterConnector";
 export const MULTIPLEXER_DATA_DIR_NAME = "multiplexer";
+
+// Runtime artifacts shared by all connector processes on the same machine.
 export const MULTIPLEXER_DISCOVERY_FILE_NAME = "daemon.json";
 export const MULTIPLEXER_SPAWN_LOCK_NAME = "spawn.lock";
 export const MULTIPLEXER_DAEMON_LOCK_NAME = "daemon.lock";
 
 export type MultiplexerPathOptions = {
+  // Overrides the base DebugRouter connector data directory.
   rootDir?: string;
+  // Overrides the full multiplexer data directory and takes precedence over rootDir.
   dataDir?: string;
 };
 

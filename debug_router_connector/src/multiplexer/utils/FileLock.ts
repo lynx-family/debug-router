@@ -9,7 +9,7 @@ import { randomBytes } from "crypto";
 export type FileLockOwner = {
   pid: number;
   createdAt: number;
-  token: string;
+  token: string; // with pid, createdAt and random bytes, used to identify the owner of the lock.
 };
 
 export type FileLockTokenFactory = (
@@ -21,6 +21,8 @@ export class FileLock {
   private owner: FileLockOwner | null = null;
   readonly lockPath: string;
   private readonly tokenFactory: FileLockTokenFactory;
+  // used to generate tokens for the lock owners.
+  // can be overridden to use custom token generation logic for testing or debugging purposes.
 
   constructor(
     lockPath: string,
@@ -63,9 +65,7 @@ export class FileLock {
       return;
     }
 
-    const removed = this.tryRemove((currentOwner) =>
-      isSameOwner(currentOwner, owner),
-    );
+    const removed = this.tryRemove(owner);
 
     // If the lock now belongs to another owner, this instance no longer owns it locally either.
     if (!removed && !isSameOwner(this.readOwner(), owner)) {
@@ -125,7 +125,13 @@ export class FileLock {
       return now - owner.createdAt > timeout;
     }
 
+    // use lock mtime to check when owner.createdAt not exists.
     return now - this.getLockMtimeMs() > timeout;
+  }
+
+  cleanup(): boolean {
+    const lastOwner = this.readOwner();
+    return this.tryRemove(lastOwner);
   }
 
   cleanupStale(timeout: number, now: number = Date.now()): boolean {
@@ -134,19 +140,10 @@ export class FileLock {
       return false;
     }
 
-    return this.tryRemove(
-      (currentOwner) => isSameOwner(currentOwner, staleOwner)
-    );
+    return this.tryRemove(staleOwner);
   }
 
-  cleanup(): boolean {
-    const lastOwner = this.readOwner();
-    return this.tryRemove(
-      (currentOwner) => isSameOwner(currentOwner, lastOwner)
-    );
-  }
-
-  tryRemove(shouldRemove: (owner: FileLockOwner | null) => boolean): boolean {
+  tryRemove(expectedOwner: FileLockOwner | null): boolean {
     try {
       if (!fs.existsSync(this.lockPath)) {
         this.clearLocalState();
@@ -154,10 +151,13 @@ export class FileLock {
       }
 
       const owner = this.readOwner();
-      if (!shouldRemove(owner)) {
+
+      if (!isSameOwner(expectedOwner, owner)) {
         return false;
       }
 
+      // Best-effort removal: compare owners first to reduce the risk of
+      // accidentally deleting a lock held by someone else.
       fs.rmSync(this.lockPath, { recursive: true, force: true });
       this.clearLocalState();
       return true;
