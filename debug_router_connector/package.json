@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "debuger router connector",
   "main": "dist/cjs/src/index.js",
-   "repository": {
+  "repository": {
     "type": "git",
     "url": "git+https://github.com/lynx-family/debug-router.git",
     "directory": "debug_router_connector"
@@ -12,6 +12,7 @@
     "start": "node bin/driver.js start",
     "build": "rm -rf dist && bash ./scripts/build.sh",
     "types": "rm -rf lib && rm -rf typings && tsc -p tsconfig.prod.json",
+    "test:multiplexer": "npm run build && mocha \"../test/unit/multiplexer/**/*.test.js\"",
     "format": "prettier --write ."
   },
   "keywords": [
