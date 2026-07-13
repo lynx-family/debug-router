@@ -1417,22 +1417,65 @@ describe("MultiplexerDaemonManager", function () {
   it("ignores ESRCH when force stopping an already exited daemon", async function () {
     const discoveryPath = path.join(tempDir, "daemon.json");
     const daemonLockPath = path.join(tempDir, "daemon.lock");
+    const killCalls = [];
+    let isProcessAliveCalls = 0;
     fs.writeFileSync(discoveryPath, "{}");
     fs.mkdirSync(daemonLockPath);
     const { manager } = createManager(tempDir, {
       discovery: createSequenceDiscovery(discoveryPath, [unusable("missing")]),
       daemonLockPath,
-      kill: () => {
+      kill: (pid, signal) => {
+        killCalls.push([pid, signal]);
         const error = new Error("missing process");
         error.code = "ESRCH";
         throw error;
       },
+      isProcessAlive: () => {
+        isProcessAliveCalls++;
+        return true;
+      },
     });
 
-    await manager.stopDaemonForReplacement(createInfo({ pid: 404 }), "stale-daemon");
+    await manager.stopDaemonForReplacement(
+      createInfo({ pid: 404 }),
+      "stale-daemon"
+    );
 
     assert.strictEqual(fs.existsSync(discoveryPath), false);
     assert.strictEqual(fs.existsSync(daemonLockPath), false);
+    assert.deepStrictEqual(killCalls, [[404, "SIGTERM"]]);
+    assert.strictEqual(isProcessAliveCalls, 0);
+  });
+
+  it("ignores ESRCH when the daemon exits before SIGKILL", async function () {
+    const killCalls = [];
+    let now = 0;
+    const { manager } = createManager(tempDir, {
+      replacementTimeout: 0,
+      kill: (pid, signal) => {
+        killCalls.push([pid, signal]);
+        if (signal === "SIGKILL") {
+          const error = new Error("missing process");
+          error.code = "ESRCH";
+          throw error;
+        }
+      },
+      isProcessAlive: () => true,
+      now: () => now,
+      sleep: async (duration) => {
+        now += duration;
+      },
+    });
+
+    await manager.stopDaemonForReplacement(
+      createInfo({ pid: 406 }),
+      "stale-daemon"
+    );
+
+    assert.deepStrictEqual(killCalls, [
+      [406, "SIGTERM"],
+      [406, "SIGKILL"],
+    ]);
   });
 
   it("rethrows unexpected kill errors while force stopping", async function () {

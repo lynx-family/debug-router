@@ -14,7 +14,7 @@ This document helps readers quickly understand the code structure and call flow.
 
 1. `4. Overall Architecture`: understand the boundary between connector processes, daemon, WebSocket frontends, and SDK runtime.
 2. `5. Public DebugRouterConnector Facade` and `6. Daemon Discovery, Startup, and Replacement`: understand how normal callers automatically reuse the daemon.
-3. `10. WebSocket Frontend Path` and `11. Message ID Rewriting and Routing`: understand source isolation and targeted responses for concurrent frontends.
+3. `10. WebSocket Frontend Path` and `11. Message Routing and Notification Query Memoization`: understand source isolation, targeted responses, and coalescing for concurrent frontends.
 4. `12. Legacy Multi-open Owner Compatibility` and `13. Fault Recovery and Shutdown`: understand `LatestDriverProcess` compatibility, daemon crashes, and idle shutdown.
 
 The most important implementation boundary is: the public `DebugRouterConnector` is now a Multiplexer facade; real physical connections live inside the daemon; the connector side mainly holds device and USB runtime client mirrors; WebSocket app clients currently enter the daemon-side `ClientList`, but they are not synchronized as connector control-client state.
@@ -27,6 +27,7 @@ The most important implementation boundary is: the public `DebugRouterConnector`
 | debug_router_connector | The PC-side DebugRouter connection library. It discovers devices, connects to SDK runtimes, and provides a WebSocket debugging entry for HDT/browser DevTool pages. |
 | DebugRouter Multiplexer | A local multiplexing mechanism inside the connector. A daemon owns the real device and SDK connections, isolates messages, rewrites IDs, and routes responses for multiple frontends. |
 | Multiplexer daemon | A local detached shared process. It owns real physical connections, the control server, the WebSocket server, snapshot/event broadcast, and routing. |
+| memoized notification query | An ID-less `Customized` query whose runtime reply is an SDK-initiated notification. The daemon can coalesce duplicate queries and briefly reuse the latest notification for the same runtime client. |
 | control client | A daemon client created when a normal connector process connects to the daemon through the control WebSocket. |
 | WebSocket Driver frontend | A WebSocket frontend page whose type is `Driver`, such as HDT. |
 | runtime client | A debugging target for an SDK runtime. The current connector mirror mainly covers USB runtime clients; WebSocket app clients are tracked by the daemon-side `WebSocketController` and appear in `ClientList`. |
@@ -62,7 +63,8 @@ A normal connector process no longer owns a real SDK connection. Instead, it aut
 2. Multiple `DebugRouterConnector` instances, HDT pages, and other upper-layer tools can coexist and reuse the same local daemon.
 3. The public `DebugRouterConnector` API should keep the existing usage shape as much as possible: device and runtime clients are exposed through local mirror objects and events, while the WebSocket server keeps the original path and compatibility fields.
 4. CDP/App request-response message IDs are isolated so concurrent frontends using the same ID do not receive each other's responses.
-5. The implementation has recovery paths for daemon crashes, protocol upgrades, idle shutdown, and legacy multi-open owner preemption.
+5. Repeated ID-less state queries are coalesced without changing the SDK notification format or suppressing the original notification broadcast.
+6. The implementation has recovery paths for daemon crashes, protocol upgrades, idle shutdown, and legacy multi-open owner preemption.
 
 ### 2.5 Non-goals
 
@@ -98,6 +100,7 @@ Daemon side:
 - `debug_router_connector/src/multiplexer/daemon/entry.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerDaemon.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerHost.ts`
+- `debug_router_connector/src/multiplexer/daemon/MemoizedNotificationQueryTable.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerControlServer.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerControlConnection.ts`
 - `debug_router_connector/src/multiplexer/daemon/PendingRouteTable.ts`
@@ -266,6 +269,7 @@ Spawn uses the current Node executable to start `multiplexer/daemon/entry.js` as
 - Managing device watchers, runtime client watchers, and WebSocket clients.
 - Serializing snapshots and broadcasting control events.
 - Rewriting message IDs, managing pending routes, and routing responses.
+- Coalescing configured ID-less queries and briefly memoizing their notification replies per runtime client.
 - Maintaining legacy `LatestDriverProcess` owner state.
 - Managing idle timeout and shutdown handlers.
 
@@ -382,7 +386,9 @@ Current implementation boundaries:
 - Host currently routes outbound messages through `PhysicalConnector.usbClients`; the completed local path is Driver frontend to USB runtime request-response isolation.
 - WebSocket app clients appear in `ClientList`, but their connection events and independent request-response routing are not synchronized as connector control-client state. Full WiFi runtime bidirectional routing is not part of the currently completed path.
 
-## 11. Message ID Rewriting and Routing
+## 11. Message Routing and Notification Query Memoization
+
+### 11.1 ID-Bearing Request/Response Routing
 
 Different frontends can send the same CDP/App ID at the same time, for example:
 
@@ -444,6 +450,47 @@ Route cleanup:
 - When a WebSocket frontend disconnects, call `clearByWebClientId(webClientId)`.
 - When Host physical discovery resets or legacy owner is lost, clear all routes.
 
+### 11.2 ID-less Query/Notification Memoization
+
+Some `Customized` messages do not use the CDP/App request-response ID model. `ListSession` is an ID-less query, and the SDK answers it with an ID-less `SessionList` notification. When several control clients or Driver frontends query the same runtime concurrently, normal ID routing cannot correlate the reply to one requester, and forwarding every duplicate query creates unnecessary SDK traffic.
+
+`MemoizedNotificationQueryTable` handles this pattern independently from `PendingRouteTable`. Its table-level API supports declarative request/notification pairs, making the mechanism extensible without changing its state machine. `MultiplexerHost` currently constructs the table with only the internal default definition:
+
+```text
+ListSession -> SessionList
+```
+
+State is isolated by real runtime `clientId` and request or notification type. A `SessionList` recorded for one runtime is never returned for another runtime. The table stores the complete rewritten notification message string, preserving the existing `Customized` payload and frontend-visible message format. An empty `SessionList` is a valid notification and is memoized in the same way as a non-empty list.
+
+For each outbound message, Host asks the table for one of four decisions before normal message-ID rewriting:
+
+| Decision | Condition | Host behavior |
+|---|---|---|
+| `not-memoized` | The valid outer JSON is unrelated, does not expose a recognized `Customized` type, or its type is not in the table definitions. Invalid outer JSON is rejected before this table runs. | Continue through the existing outbound routing path unchanged. |
+| `forward` | There is no fresh notification and no fresh pending query for this runtime and request type. | Mark the query pending and forward it to the SDK runtime. |
+| `pending` | The same query was already forwarded for this runtime within the TTL and no matching notification has arrived. | Coalesce the duplicate and do not send another runtime message. |
+| `cached` | A matching notification for this runtime was recorded within the TTL. | Send the exact recorded notification only to the requesting control client or Driver frontend; do not send another runtime message. |
+
+The default TTL is 1000 ms. An entry whose age is equal to the TTL is still fresh; it becomes stale when its age is greater than the TTL. A missing, negative, or non-finite configured TTL falls back to the default; zero is valid. The same timeout bounds both pending-query coalescing and notification reuse. This ensures a missing SDK notification cannot suppress retries indefinitely and periodically refreshes state that may have changed.
+
+Inbound notification handling preserves the original fanout semantics:
+
+1. Host receives the ID-less SDK notification and rewrites its runtime client ID as before.
+2. The table records the rewritten message and clears the matching pending query.
+3. Host still broadcasts this original SDK notification to every Driver frontend and every control client.
+4. Because all concurrent requesters receive that broadcast, the table does not need to retain a waiter list for coalesced `pending` queries.
+5. A later `cached` query is different: Host sends the stored notification only to that requester. For a control requester, it uses the existing `usb-client-message` event envelope; for a Driver frontend, it uses `sendMessageToWebClient()`.
+
+The optimization is deliberately limited to declared query/notification pairs. Other ID-less commands, such as `OpenCard`, remain `not-memoized` and every invocation is forwarded. ID-bearing CDP/App requests continue to use `PendingRouteTable` and global ID rewriting.
+
+Memoized state cleanup follows runtime and Host lifecycle boundaries:
+
+- Runtime client disconnect: clear cached notifications and pending queries for that `clientId`.
+- Synchronous runtime send failure after a `forward` decision: clear that pending marker so the next query can retry immediately.
+- Physical discovery reset, legacy ownership loss, or complete Host reset: clear the entire table.
+- TTL expiry: treat the entry as stale and allow a new runtime query; physical removal is not required for correctness.
+- Control-client or Driver-frontend disconnect: keep the state because it belongs to the runtime client, not to an individual requester. A pending entry remains until a matching notification, TTL expiry, runtime disconnect, or Host reset.
+
 ## 12. Legacy Multi-open Owner Compatibility
 
 Multiplexer no longer lets each connector process compete for the legacy `LatestDriverProcess`. The legacy owner file is maintained only by daemon-side `LegacyOwnershipGuard`, for compatibility with physical-layer logic that still depends on the old multi-open owner.
@@ -494,6 +541,7 @@ State recovery converges on daemon snapshot. Even if incremental events were los
 | Local `devices` / `usbClients` mirrors | Connector facade | Rebuilt from snapshot. |
 | Connector pending RPC | Connector-side `MultiplexerDaemonClient` | Rejected when control socket disconnects; caller retries through existing logic. |
 | pending route | Daemon-side `PendingRouteTable` | Created for request lifecycle; cleared on control/WebSocket disconnect, Host reset, or timeout. |
+| memoized notification query | Daemon-side `MemoizedNotificationQueryTable` | Starts empty after daemon recovery and is repopulated opportunistically by matching runtime notifications; isolated by runtime client; cleared on runtime disconnect or Host/physical reset; stale entries are ignored after TTL. |
 | WebSocket frontend connection | Daemon-side `WebSocketController` | Frontend reconnects after WebSocket disconnect; Driver connection count is only used for daemon idle detection. |
 
 ### 13.2 Daemon Idle Auto-shutdown
@@ -537,6 +585,8 @@ Current Multiplexer-related `DebugRouterConnectorOption` fields:
 | `multiplexerLegacyDriverDir` | Directory containing the legacy `LatestDriverProcess`. |
 | `websocketOption.port` | Desired daemon WebSocket server port. Default is 19783. |
 | `websocketOption.roomId` | Room id returned by WebSocket `RoomJoined`. |
+
+`MultiplexerHostOption.memoizedNotificationTtlMs` controls the daemon-side pending and cache TTL and defaults to 1000 ms. It is currently an internal Host option used for embedding and deterministic tests, not a public `DebugRouterConnectorOption` propagated through daemon startup.
 
 Original physical options are passed to the daemon-side `PhysicalConnector`, including `manualConnect`, `enableWebSocket`, `enableAndroid`, `enableIOS`, `enableHarmony`, `enableDesktop`, `enableNetworkDevice`, `adbHostPort`, `hdcHostPort`, `usbConnectOpt`, and `networkDeviceOpt`. `reportService` is not passed to the daemon-side physical connector; the facade still initializes report service.
 
@@ -584,3 +634,11 @@ Protocol compatibility rules:
 3. If WebSocket is enabled, Host broadcasts it to all Driver frontends.
 4. Host also broadcasts it to all control clients through `usb-client-message`.
 5. Each connector facade dispatches the event into the corresponding `MultiplexerUsbClient` local event system.
+
+### 15.5 Concurrent `ListSession` Queries
+
+1. The first frontend sends `ListSession` for a runtime client. Host records a pending query and forwards it to the SDK runtime.
+2. Other frontends send `ListSession` for the same runtime within 1000 ms. Host coalesces these queries and does not send duplicate runtime messages.
+3. The runtime sends `SessionList`. Host records the complete rewritten notification, clears the pending marker, and broadcasts the notification through the original WebSocket and control event paths.
+4. A frontend sends another `ListSession` while the recorded notification is fresh. Host sends the cached `SessionList` only to that frontend.
+5. After the TTL expires, the next `ListSession` is forwarded to the runtime again so the cached session state is refreshed.

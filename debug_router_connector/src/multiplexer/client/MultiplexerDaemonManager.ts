@@ -286,11 +286,17 @@ export class MultiplexerDaemonManager {
     info: MultiplexerDiscoveryInfo,
   ): Promise<void> {
     const sigtermError = this.tryKillProcess(info.pid, "SIGTERM");
+    if (isProcessMissingError(sigtermError)) {
+      return;
+    }
     await this.waitUntilProcessExits(info.pid, this.replacementTimeout);
 
     let sigkillError: unknown = null;
     if (this.isProcessAlive(info.pid)) {
       sigkillError = this.tryKillProcess(info.pid, "SIGKILL");
+      if (isProcessMissingError(sigkillError)) {
+        return;
+      }
       await this.waitUntilProcessExits(info.pid, this.replacementTimeout);
     }
 
@@ -386,7 +392,9 @@ export class MultiplexerDaemonManager {
       this.isDaemonLockOwnerAlive(owner) &&
       owner.pid !== stoppedPid
     ) {
-      await this.forceStopDaemonProcess(this.createDaemonInfoFromLockOwner(owner));
+      await this.forceStopDaemonProcess(
+        this.createDaemonInfoFromLockOwner(owner),
+      );
     }
 
     this.removeDaemonArtifacts();
@@ -640,11 +648,15 @@ function defaultSleep(duration: number): Promise<void> {
 }
 
 function getUnexpectedKillError(error: unknown): Error | null {
-  if (!error || (error as any)?.code === "ESRCH") {
+  if (!error || isProcessMissingError(error)) {
     return null;
   }
 
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function isProcessMissingError(error: unknown): boolean {
+  return (error as any)?.code === "ESRCH";
 }
 
 function isProcessAlive(pid: number): boolean {

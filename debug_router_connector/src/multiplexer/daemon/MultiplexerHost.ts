@@ -40,6 +40,7 @@ import {
   LegacyOwnershipChange,
   LegacyOwnershipGuard,
 } from "./LegacyOwnershipGuard";
+import { MemoizedNotificationQueryTable } from "./MemoizedNotificationQueryTable";
 import { PendingRoute, PendingRouteTable } from "./PendingRouteTable";
 
 const DEFAULT_DEV_SERVE_PORT = 19783;
@@ -86,6 +87,7 @@ export type MultiplexerHostOption = PhysicalConnectorOption & {
   capabilities?: string[];
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
+  memoizedNotificationTtlMs?: number;
   websocketOption?: {
     port?: number;
     roomId?: string;
@@ -111,6 +113,7 @@ export class MultiplexerHost
   private readonly minSupportedProtocolVersion: number;
   private readonly now: () => number;
   private readonly pendingRoutes: PendingRouteTable;
+  private readonly memoizedNotificationQueryTable: MemoizedNotificationQueryTable;
   private controlServer: MultiplexerControlServer | null = null;
   private webSocketController: WebSocketControllerLike | null = null;
   private webSocketServerInfo: WebSocketServerInfo | undefined;
@@ -197,6 +200,8 @@ export class MultiplexerHost
       return;
     }
 
+    this.memoizedNotificationQueryTable.clearClient(id);
+
     this.broadcast({
       kind: "event",
       event: "client-disconnected",
@@ -243,6 +248,10 @@ export class MultiplexerHost
       MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
     this.now = option.now ?? Date.now;
     this.pendingRoutes = new PendingRouteTable({
+      now: this.now,
+    });
+    this.memoizedNotificationQueryTable = new MemoizedNotificationQueryTable({
+      ttlMs: option.memoizedNotificationTtlMs,
       now: this.now,
     });
 
@@ -589,6 +598,10 @@ export class MultiplexerHost
     }
 
     const broadcastMessage = rewriteRuntimeClientId(message, clientId);
+    this.memoizedNotificationQueryTable.recordNotification(
+      clientId,
+      broadcastMessage,
+    );
     if (this.option.enableWebSocket) {
       this.sendMessageToWeb(broadcastMessage);
     }
@@ -1102,6 +1115,7 @@ export class MultiplexerHost
     this.activeControlIds.clear();
     this.activeWebSocketDriverIds.clear();
     this.clearIdleTimeout();
+    this.memoizedNotificationQueryTable.clear();
     this.rejectRoutes(
       this.pendingRoutes.clear(),
       new Error("Multiplexer host route table was reset"),
@@ -1148,6 +1162,7 @@ export class MultiplexerHost
     this.clientDiscoveryStartedDeviceIds.clear();
     this.clientDiscoveryStartingByDeviceId.clear();
     this.allClientWatchersRequested = false;
+    this.memoizedNotificationQueryTable.clear();
     this.rejectRoutes(this.pendingRoutes.clear(), error);
   }
 
@@ -1185,15 +1200,53 @@ export class MultiplexerHost
       data.data.data.client_id = -1;
     }
 
+    const memoizedQuery = this.memoizedNotificationQueryTable.query(
+      clientId,
+      data,
+    );
+    if (memoizedQuery.action === "cached") {
+      this.sendMessageToTarget(target, clientId, memoizedQuery.message);
+      return;
+    }
+    if (memoizedQuery.action === "pending") {
+      return;
+    }
+
     const route = this.rewriteOutboundMessageData(data, target);
     try {
       client.sendMessage(data);
     } catch (error) {
+      if (memoizedQuery.action === "forward") {
+        this.memoizedNotificationQueryTable.handleSendFailure(
+          clientId,
+          memoizedQuery.requestType,
+        );
+      }
       if (route) {
         this.pendingRoutes.delete(route.globalMessageId);
       }
       throw error;
     }
+  }
+
+  private sendMessageToTarget(
+    target: PendingTargetSeed,
+    clientId: number,
+    message: string,
+  ): void {
+    if (target.kind === "control") {
+      this.sendToControl(target.controlId, {
+        kind: "event",
+        event: "usb-client-message",
+        data: {
+          id: clientId,
+          message,
+        },
+      });
+      return;
+    }
+
+    this.sendMessageToWebClient(target.webClientId, message);
   }
 
   private rewriteOutboundMessageData(

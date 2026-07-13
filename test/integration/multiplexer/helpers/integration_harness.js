@@ -64,6 +64,7 @@ const DEFAULT_STATE = {
 };
 const WINDOWS_TIMEOUT_MULTIPLIER = 4;
 const DEFAULT_STARTUP_TIMEOUT = 3000;
+const DEFAULT_TEST_DAEMON_IDLE_TIMEOUT = 30000;
 
 function createIntegrationContext(name, option = {}) {
   const rootDir = fs.mkdtempSync(
@@ -101,7 +102,8 @@ function createIntegrationContext(name, option = {}) {
     daemonVersion: option.daemonVersion,
     capabilities: option.capabilities,
     legacyDriverDir,
-    multiplexerDaemonIdleTimeout: option.multiplexerDaemonIdleTimeout,
+    multiplexerDaemonIdleTimeout:
+      option.multiplexerDaemonIdleTimeout ?? DEFAULT_TEST_DAEMON_IDLE_TIMEOUT,
     enableWebSocket: option.enableWebSocket,
     websocketOption: option.websocketOption,
   });
@@ -152,7 +154,8 @@ function createIntegrationContext(name, option = {}) {
         legacyDriverDir: extra.legacyDriverDir ?? legacyDriverDir,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??
-          option.multiplexerDaemonIdleTimeout,
+          option.multiplexerDaemonIdleTimeout ??
+          DEFAULT_TEST_DAEMON_IDLE_TIMEOUT,
         enableWebSocket: extra.enableWebSocket ?? option.enableWebSocket,
         websocketOption: extra.websocketOption ?? option.websocketOption,
       });
@@ -194,7 +197,8 @@ function createIntegrationContext(name, option = {}) {
         multiplexerRpcTimeout: extra.rpcTimeout ?? 1000,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??
-          option.multiplexerDaemonIdleTimeout,
+          option.multiplexerDaemonIdleTimeout ??
+          DEFAULT_TEST_DAEMON_IDLE_TIMEOUT,
         reportService: null,
       });
       connectors.push(connector);
@@ -230,6 +234,7 @@ function createIntegrationContext(name, option = {}) {
           await client.close().catch(() => {});
         }
         await stopDiscoveredDaemon(paths.discoveryPath);
+        await stopLoggedDaemons(paths);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
         restoreEnv(originalEnv);
@@ -312,6 +317,36 @@ async function stopDiscoveredDaemon(discoveryPath) {
       });
     }
   }
+}
+
+async function stopLoggedDaemons(paths) {
+  const pids = [
+    ...new Set(
+      readJsonLines(getLogPath(paths))
+        .filter((entry) => entry.event === "daemon-started")
+        .map((entry) => entry.pid)
+        .filter((pid) => Number.isInteger(pid) && pid > 0)
+        .reverse(),
+    ),
+  ];
+  for (const pid of pids) {
+    await stopDaemonPid(pid);
+  }
+}
+
+async function stopDaemonPid(pid) {
+  if (!processExists(pid)) {
+    return;
+  }
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (_error) {}
+  await waitFor(() => !processExists(pid), 1000).catch(async () => {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch (_error) {}
+    await waitFor(() => !processExists(pid), 1000).catch(() => {});
+  });
 }
 
 function readJsonFile(filePath, fallback) {

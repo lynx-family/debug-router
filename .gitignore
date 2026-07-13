@@ -62,3 +62,8 @@ tools/android_tools/
 dev_docs/
 test/e2e_test/connector_test/reports
 .vscode/
+
+# Python tooling artifacts
+.venv-ci-py312/
+check_style.xml
+test/unit_test/**/__pycache__/

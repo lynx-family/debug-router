@@ -425,6 +425,7 @@ function createHost(options = {}) {
     manualConnect: options.manualConnect,
     enableWebSocket: options.enableWebSocket,
     websocketOption: options.websocketOption,
+    memoizedNotificationTtlMs: options.memoizedNotificationTtlMs,
     now: options.now ?? (() => 1000),
   });
   if (options.legacyOwnershipAttached !== false) {
@@ -541,6 +542,29 @@ function readCustomizedInner(message) {
   const data = typeof message === "string" ? JSON.parse(message) : message;
   const raw = data.data.data.message;
   return typeof raw === "string" ? JSON.parse(raw) : raw;
+}
+
+function createListSessionMessage(clientId) {
+  return JSON.stringify({
+    event: "Customized",
+    data: {
+      type: "ListSession",
+      data: [],
+      sender: clientId,
+    },
+    from: clientId,
+  });
+}
+
+function createSessionListMessage(clientId, sessions) {
+  return JSON.stringify({
+    event: "Customized",
+    data: {
+      type: "SessionList",
+      data: sessions,
+      sender: clientId,
+    },
+  });
 }
 
 describe("MultiplexerHost", function () {
@@ -858,11 +882,7 @@ describe("MultiplexerHost", function () {
     physical.usbClients.set(client.clientId(), client);
     host.webSocketController = webSocketController;
 
-    host.legacyOwnershipGuard.emitStatus(
-      "unattached",
-      "legacy-preempted",
-      200
-    );
+    host.legacyOwnershipGuard.emitStatus("unattached", "legacy-preempted", 200);
 
     assert.strictEqual(host.legacyOwnershipAttached, false);
     assert.strictEqual(physical.disableAllClientsCalls, 1);
@@ -925,11 +945,7 @@ describe("MultiplexerHost", function () {
     );
     await nextTick();
 
-    host.legacyOwnershipGuard.emitStatus(
-      "unattached",
-      "legacy-preempted",
-      200
-    );
+    host.legacyOwnershipGuard.emitStatus("unattached", "legacy-preempted", 200);
     deferred.resolve([device]);
 
     await assert.rejects(discovery, /legacy owner is not attached/);
@@ -963,11 +979,7 @@ describe("MultiplexerHost", function () {
     await nextTick();
     assert.deepStrictEqual(physical.startWatchClientCalls, ["device-1"]);
 
-    host.legacyOwnershipGuard.emitStatus(
-      "unattached",
-      "legacy-preempted",
-      200
-    );
+    host.legacyOwnershipGuard.emitStatus("unattached", "legacy-preempted", 200);
     startDeferred.resolve();
 
     await assert.rejects(discovery, /legacy owner is not attached/);
@@ -985,11 +997,7 @@ describe("MultiplexerHost", function () {
     host.webSocketController = webSocketController;
     physical.devices.set(device.serial, device);
 
-    host.legacyOwnershipGuard.emitStatus(
-      "unattached",
-      "legacy-preempted",
-      200
-    );
+    host.legacyOwnershipGuard.emitStatus("unattached", "legacy-preempted", 200);
     await host.handleControlRpc(
       1,
       createRpcRequest("reacquireLegacyOwnership", {})
@@ -2110,6 +2118,161 @@ describe("MultiplexerHost", function () {
         message: "hello",
       })
     );
+  });
+
+  it("coalesces concurrent ListSession queries and targets a fresh SessionList cache hit to one websocket frontend", function () {
+    let now = 1000;
+    const { host, physical } = createHost({
+      enableWebSocket: true,
+      memoizedNotificationTtlMs: 100,
+      now: () => now,
+    });
+    const client = createClient(20);
+    const webMessages = [];
+    physical.usbClients.set(client.clientId(), client);
+    host.webSocketController = {
+      sendMessageToWeb(message) {
+        webMessages.push({ kind: "broadcast", message });
+      },
+      sendMessageToWebClient(webClientId, message) {
+        webMessages.push({ kind: "targeted", webClientId, message });
+      },
+      close() {},
+    };
+
+    const query = createListSessionMessage(20);
+    host.handleWebSocketMessage(100, 20, query);
+    host.handleWebSocketMessage(101, 20, query);
+
+    assert.strictEqual(client.state.sendMessageCalls.length, 1);
+
+    const notification = createSessionListMessage(0, [
+      { session_id: 1, type: "web", url: "app://first" },
+    ]);
+    host.handlePhysicalMessage(20, notification);
+    assert.strictEqual(webMessages.length, 1);
+    assert.strictEqual(webMessages[0].kind, "broadcast");
+    assert.strictEqual(JSON.parse(webMessages[0].message).data.sender, 20);
+
+    now = 1050;
+    host.handleWebSocketMessage(102, 20, query);
+
+    assert.strictEqual(client.state.sendMessageCalls.length, 1);
+    assert.deepStrictEqual(webMessages.slice(1), [
+      {
+        kind: "targeted",
+        webClientId: 102,
+        message: webMessages[0].message,
+      },
+    ]);
+  });
+
+  it("retries ListSession after pending or cached data becomes stale", function () {
+    let now = 2000;
+    const { host, physical } = createHost({
+      memoizedNotificationTtlMs: 100,
+      now: () => now,
+    });
+    const client = createClient(21);
+    const controlServer = attachControlServer(host);
+    const query = createListSessionMessage(21);
+    physical.usbClients.set(client.clientId(), client);
+
+    host.sendMessageToApp(21, query, undefined, 1);
+    now = 2050;
+    host.sendMessageToApp(21, query, undefined, 2);
+    assert.strictEqual(client.state.sendMessageCalls.length, 1);
+
+    now = 2101;
+    host.sendMessageToApp(21, query, undefined, 3);
+    assert.strictEqual(client.state.sendMessageCalls.length, 2);
+
+    host.handlePhysicalMessage(21, createSessionListMessage(21, []));
+    controlServer.broadcasts.length = 0;
+    now = 2150;
+    host.sendMessageToApp(21, query, undefined, 4);
+    assert.strictEqual(client.state.sendMessageCalls.length, 2);
+    assert.strictEqual(
+      controlServer.targeted[controlServer.targeted.length - 1].controlId,
+      4
+    );
+
+    now = 2252;
+    host.sendMessageToApp(21, query, undefined, 5);
+    assert.strictEqual(client.state.sendMessageCalls.length, 3);
+  });
+
+  it("isolates memoized SessionList notifications by runtime client", function () {
+    const { host, physical } = createHost({
+      memoizedNotificationTtlMs: 100,
+    });
+    const firstClient = createClient(22);
+    const secondClient = createClient(23);
+    const controlServer = attachControlServer(host);
+    physical.usbClients.set(firstClient.clientId(), firstClient);
+    physical.usbClients.set(secondClient.clientId(), secondClient);
+
+    host.handlePhysicalMessage(
+      22,
+      createSessionListMessage(22, [
+        { session_id: 1, type: "web", url: "app://first" },
+      ])
+    );
+    host.sendMessageToApp(22, createListSessionMessage(22), undefined, 6);
+    host.sendMessageToApp(23, createListSessionMessage(23), undefined, 7);
+
+    assert.strictEqual(firstClient.state.sendMessageCalls.length, 0);
+    assert.strictEqual(secondClient.state.sendMessageCalls.length, 1);
+    assert.strictEqual(
+      controlServer.targeted[controlServer.targeted.length - 1].controlId,
+      6
+    );
+  });
+
+  it("does not coalesce unrelated idless Customized commands", function () {
+    const { host, physical } = createHost();
+    const client = createClient(24);
+    physical.usbClients.set(client.clientId(), client);
+    const openCard = JSON.stringify({
+      event: "Customized",
+      data: {
+        type: "OpenCard",
+        data: { type: "url", url: "app://card" },
+        sender: 24,
+      },
+    });
+
+    host.sendMessageToApp(24, openCard, undefined, 1);
+    host.sendMessageToApp(24, openCard, undefined, 2);
+
+    assert.strictEqual(client.state.sendMessageCalls.length, 2);
+  });
+
+  it("clears memoized query state on runtime disconnect and send failure", function () {
+    const { host, physical } = createHost();
+    const disconnectedClient = createClient(25);
+    const retryClient = createClient(26);
+    physical.usbClients.set(disconnectedClient.clientId(), disconnectedClient);
+    physical.usbClients.set(retryClient.clientId(), retryClient);
+    bindHostEvents(host);
+
+    host.handlePhysicalMessage(25, createSessionListMessage(25, []));
+    physical.emit("client-disconnected", 25);
+    host.sendMessageToApp(25, createListSessionMessage(25), undefined, 1);
+    assert.strictEqual(disconnectedClient.state.sendMessageCalls.length, 1);
+
+    const sendMessage = retryClient.sendMessage;
+    retryClient.sendMessage = () => {
+      throw new Error("send failed");
+    };
+    assert.throws(
+      () =>
+        host.sendMessageToApp(26, createListSessionMessage(26), undefined, 2),
+      /send failed/
+    );
+    retryClient.sendMessage = sendMessage;
+    host.sendMessageToApp(26, createListSessionMessage(26), undefined, 3);
+    assert.strictEqual(retryClient.state.sendMessageCalls.length, 1);
   });
 
   it("routes concurrent websocket messages with duplicate original ids back to the originating web clients", function () {
