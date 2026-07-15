@@ -96,6 +96,20 @@ describe("MultiplexerControlConnection", function () {
     assert.deepStrictEqual(messages, [[11, request]]);
   });
 
+  it("closes and unregisters a socket error without letting it escape", function () {
+    const { socket, connection, closed } = createConnection();
+    const error = new Error("unhandled control socket error");
+
+    assert.doesNotThrow(() => socket.emit("error", error));
+
+    assert.strictEqual(connection.closed, true);
+    assert.deepStrictEqual(closed, [11]);
+    assert.strictEqual(socket.closeCalls, 1);
+    assert.strictEqual(socket.listenerCount("message"), 0);
+    assert.strictEqual(socket.listenerCount("close"), 0);
+    assert.strictEqual(socket.listenerCount("error"), 0);
+  });
+
   it("sends invalid message errors using the incoming numeric id when present", function () {
     const { socket } = createConnection();
 
@@ -280,6 +294,7 @@ describe("MultiplexerControlConnection", function () {
     assert.strictEqual(socket.closeCalls, 1);
     assert.strictEqual(socket.listenerCount("message"), 0);
     assert.strictEqual(socket.listenerCount("close"), 0);
+    assert.strictEqual(socket.listenerCount("error"), 0);
   });
 
   it("marks closed sockets as closed without closing them again", function () {

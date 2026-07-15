@@ -21,6 +21,7 @@ const {
 const STATE_FILE_NAME = "fake_physical_state.json";
 const COMMAND_FILE_NAME = "fake_physical_commands.jsonl";
 const LOG_FILE_NAME = "fake_daemon_log.jsonl";
+let emitControlSocketError;
 
 function readJsonFile(filePath, fallback) {
   try {
@@ -432,6 +433,14 @@ class FakePhysicalConnector {
         break;
       case "throw-uncaught-error":
         throw new Error(command.message ?? "fake daemon uncaught error");
+      case "emit-control-socket-error":
+        if (!emitControlSocketError) {
+          throw new Error("control socket error hook is unavailable");
+        }
+        emitControlSocketError(
+          command.message ?? "fake daemon control socket error",
+        );
+        break;
       default:
         this.record("unknown-command", command);
     }
@@ -470,6 +479,13 @@ async function main() {
     PhysicalConnectorCtor: FakePhysicalConnector,
     discoveryPathForFake: entryOption.discoveryPath,
   });
+  emitControlSocketError = (message) => {
+    const connection = host.controlServer?.connections.values().next().value;
+    if (!connection) {
+      throw new Error("no active control socket to fail");
+    }
+    connection.socket.emit("error", new Error(message));
+  };
 
   const daemon = new MultiplexerDaemon({
     discoveryPath: entryOption.discoveryPath,

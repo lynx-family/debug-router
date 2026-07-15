@@ -153,6 +153,39 @@ describe("MultiplexerControlServer", function () {
     assert.strictEqual(server.connections.has(2), true);
   });
 
+  it("isolates a socket error to the affected control connection", function () {
+    const disconnected = [];
+    const server = new MultiplexerControlServer({
+      host: {
+        handleControlRpc() {},
+        handleControlDisconnected(controlId) {
+          disconnected.push(controlId);
+        },
+      },
+    });
+    const firstSocket = new FakeSocket();
+    const secondSocket = new FakeSocket();
+    const first = server.registerConnection(firstSocket);
+    const second = server.registerConnection(secondSocket);
+    const event = {
+      kind: "event",
+      event: "client-disconnected",
+      data: { id: 1 },
+    };
+
+    assert.doesNotThrow(() => {
+      firstSocket.emit("error", new Error("first socket failed"));
+    });
+    server.sendToControl(second.controlId, event);
+
+    assert.strictEqual(first.closed, true);
+    assert.strictEqual(second.closed, false);
+    assert.deepStrictEqual(disconnected, [first.controlId]);
+    assert.strictEqual(server.connections.has(first.controlId), false);
+    assert.strictEqual(server.connections.has(second.controlId), true);
+    assert.deepStrictEqual(secondSocket.sent.map(JSON.parse), [event]);
+  });
+
   it("dispatches RPCs to the host and sends successful responses", async function () {
     const calls = [];
     const server = new MultiplexerControlServer({

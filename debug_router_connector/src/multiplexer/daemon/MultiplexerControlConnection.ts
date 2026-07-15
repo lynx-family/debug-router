@@ -48,6 +48,7 @@ export class MultiplexerControlConnection {
 
     this.socket.on("message", this.handleSocketMessage);
     this.socket.on("close", this.handleClose);
+    this.socket.on("error", this.handleSocketError);
   }
 
   get subscribed(): boolean {
@@ -132,7 +133,12 @@ export class MultiplexerControlConnection {
     this.closedValue = true;
     this.socket.off("message", this.handleSocketMessage);
     this.socket.off("close", this.handleClose);
+    this.socket.off("error", this.handleSocketError);
     this.onClose(this.controlId);
+  };
+
+  private handleSocketError = (): void => {
+    this.close();
   };
 
   private handleSocketMessage = (data: RawData): void => {

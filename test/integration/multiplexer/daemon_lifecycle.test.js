@@ -122,6 +122,53 @@ describe("multiplexer integration daemon lifecycle", function () {
       "fake physical connector should be closed during idle cleanup",
     );
   });
+
+  it("keeps the daemon and other controls alive when one control WebSocket errors", async function () {
+    context = createIntegrationContext("daemon-control-socket-error", {
+      heartbeatInterval: 25,
+      staleTimeout: 500,
+    });
+
+    const info = await context.manager.ensureDaemon();
+    const failedClient = context.createClient();
+    const healthyClient = context.createClient();
+    const failedClientStates = [];
+    failedClient.subscribeConnectionState((state) => {
+      failedClientStates.push(state.state);
+    });
+    await failedClient.connect();
+    await healthyClient.connect();
+
+    context.appendCommand({
+      type: "emit-control-socket-error",
+      message: "integration control socket error",
+    });
+
+    await waitFor(() => !failedClient.ready, 3000);
+
+    assert(processExists(info.pid), "daemon process should remain alive");
+    assert.strictEqual(healthyClient.ready, true);
+    assert.strictEqual(fs.existsSync(context.paths.discoveryPath), true);
+    assert.strictEqual(fs.existsSync(context.paths.daemonLockPath), true);
+    assert.strictEqual((await getHealth(info.controlPort)).body.pid, info.pid);
+    assert.deepStrictEqual(
+      (await healthyClient.call("getDevices", {})).map(
+        (device) => device.serial,
+      ),
+      ["device-1"],
+    );
+    assert.deepStrictEqual(failedClientStates, ["connected", "disconnected"]);
+
+    const log = context.readLog();
+    assert(
+      !log.some((entry) => entry.event === "daemon-uncaught-exception"),
+      "socket errors should not reach the daemon uncaught exception handler",
+    );
+    assert(
+      !log.some((entry) => entry.event === "fake-physical-closed"),
+      "isolating one control socket should not close physical resources",
+    );
+  });
 });
 
 async function stopDaemonForPlatform(context, info) {

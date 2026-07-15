@@ -2,7 +2,7 @@
 
 ## 1. Background
 
-The `debug_router` SDK still uses an exclusive single-frontend connection model: the native side keeps only one current transceiver or USB client, and a new connection replaces the previous one. When multiple DevTool frontend processes start at the same time, such as HDT, Lynx DevTool MCP, and VSCode extensions, they all connect to the SDK-side DevTool through `debug_router_connector`. The later frontend then takes over the SDK connection and disconnects the existing frontend.
+The `debug_router` SDK still uses an exclusive single-frontend connection model: the native side keeps only one current transceiver or USB client, and a new connection replaces the previous one. When multiple DevTool frontend processes start at the same time, such as Lynx DevTool MCP and VSCode extensions, they all connect to the SDK-side DevTool through `debug_router_connector`. The later frontend then takes over the SDK connection and disconnects the existing frontend.
 
 The current Multiplexer implementation moves this multi-frontend concurrency problem into `debug_router_connector`: the local machine keeps one detached daemon that owns the real device and SDK runtime connections, and all connector processes and WebSocket frontends share the same physical channel through that daemon.
 
@@ -24,17 +24,17 @@ The most important implementation boundary is: the public `DebugRouterConnector`
 | Name | Meaning |
 |---|---|
 | debug_router SDK | The SDK-side DebugRouter component. It receives debugging messages from frontends and returns SDK runtime events and responses. |
-| debug_router_connector | The PC-side DebugRouter connection library. It discovers devices, connects to SDK runtimes, and provides a WebSocket debugging entry for HDT/browser DevTool pages. |
+| debug_router_connector | The PC-side DebugRouter connection library. It discovers devices, connects to SDK runtimes, and provides a WebSocket debugging entry for Lynx DevTool/browser DevTool pages. |
 | DebugRouter Multiplexer | A local multiplexing mechanism inside the connector. A daemon owns the real device and SDK connections, isolates messages, rewrites IDs, and routes responses for multiple frontends. |
 | Multiplexer daemon | A local detached shared process. It owns real physical connections, the control server, the WebSocket server, snapshot/event broadcast, and routing. |
 | memoized notification query | An ID-less `Customized` query whose runtime reply is an SDK-initiated notification. The daemon can coalesce duplicate queries and briefly reuse the latest notification for the same runtime client. |
 | control client | A daemon client created when a normal connector process connects to the daemon through the control WebSocket. |
-| WebSocket Driver frontend | A WebSocket frontend page whose type is `Driver`, such as HDT. |
+| WebSocket Driver frontend | A WebSocket frontend page whose type is `Driver`. |
 | runtime client | A debugging target for an SDK runtime. The current connector mirror mainly covers USB runtime clients; WebSocket app clients are tracked by the daemon-side `WebSocketController` and appear in `ClientList`. |
 
 ### 2.3 Caller Usage
 
-For HDT, Lynx DevTool MCP, VSCode extensions, and similar callers, Multiplexer is an internal capability of `debug_router_connector`. Callers continue to create and use `DebugRouterConnector` in the original way:
+For Lynx DevTool MCP, VSCode extensions, and similar callers, Multiplexer is an internal capability of `debug_router_connector`. Callers continue to create and use `DebugRouterConnector` in the original way:
 
 ```ts
 const connector = new DebugRouterConnector(options);
@@ -60,7 +60,7 @@ A normal connector process no longer owns a real SDK connection. Instead, it aut
 ### 2.4 Goals
 
 1. The SDK side still sees only one real DevTool frontend connection. No SDK native multi-frontend support is required.
-2. Multiple `DebugRouterConnector` instances, HDT pages, and other upper-layer tools can coexist and reuse the same local daemon.
+2. Multiple `DebugRouterConnector` instances, Lynx DevTool pages, and other upper-layer tools can coexist and reuse the same local daemon.
 3. The public `DebugRouterConnector` API should keep the existing usage shape as much as possible: device and runtime clients are exposed through local mirror objects and events, while the WebSocket server keeps the original path and compatibility fields.
 4. CDP/App request-response message IDs are isolated so concurrent frontends using the same ID do not receive each other's responses.
 5. Repeated ID-less state queries are coalesced without changing the SDK notification format or suppressing the original notification broadcast.
@@ -139,7 +139,7 @@ Caller process
             PhysicalConnector
               SDK runtime / device
 
-HDT and other WebSocket frontends
+WebSocket frontends
   ws://<host>:<wssPort>/mdevices/page/android
     daemon-side WebSocketController
       MultiplexerHost
@@ -367,7 +367,7 @@ WebSocket client handshake:
 
 1. The server allocates a client id and sends `Initialize`.
 2. The client replies with `Register`, including type and info.
-3. Connections whose type is `Driver` are stored in `webClients`, representing HDT-style Web frontends.
+3. Connections whose type is `Driver` are stored in `webClients`, representing WebSocket Driver frontends.
 4. Other types are stored in `websocketAppClients`, representing WiFi app clients.
 5. Host maintains `activeWebSocketDriverIds` on connect/disconnect for idle detection. These connection events are not currently broadcast to connector control clients.
 
@@ -618,16 +618,7 @@ Protocol compatibility rules:
 3. The new control connection receives current snapshot.
 4. Later device, runtime client, and SDK message events are broadcast by the daemon to all control clients; WebSocket frontend connection state currently stays inside the daemon.
 
-### 15.3 HDT Requests Runtime
-
-1. Facade calls `startWSServer()`, and daemon starts the WebSocket server.
-2. HDT registers as type `Driver` and enters `webClients`.
-3. HDT sends `Customized` with target runtime `client_id`.
-4. Host allocates a global ID for the CDP/App ID and records `webClientId + originalId + clientId`.
-5. After runtime response, Host matches the route and restores the original ID and runtime client ID.
-6. Host sends the response only to the original HDT web client.
-
-### 15.4 SDK-initiated Event
+### 15.3 SDK-initiated Event
 
 1. Runtime sends a CDP/App notification without request ID.
 2. Host recognizes it as an SDK-initiated event and rewrites runtime client ID.
@@ -635,7 +626,7 @@ Protocol compatibility rules:
 4. Host also broadcasts it to all control clients through `usb-client-message`.
 5. Each connector facade dispatches the event into the corresponding `MultiplexerUsbClient` local event system.
 
-### 15.5 Concurrent `ListSession` Queries
+### 15.4 Concurrent `ListSession` Queries
 
 1. The first frontend sends `ListSession` for a runtime client. Host records a pending query and forwards it to the SDK runtime.
 2. Other frontends send `ListSession` for the same runtime within 1000 ms. Host coalesces these queries and does not send duplicate runtime messages.
