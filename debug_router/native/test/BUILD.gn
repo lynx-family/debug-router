@@ -68,11 +68,13 @@ unittest_set("example_testset") {
 
 unit_test("example_unittest") {
   defines = [ "TESTING=1" ]
+  include_dirs = [ "//third_party/jsoncpp/include" ]
   sources = [
     "count_down_latch_unittest.cc",
     "debug_router_core_concurrency_unittest.cc",
     "example_source_unittest.cc",
     "socket_util_unittest.cc",
+    "update_session_debug_router_id_unittest.cc",
   ]
   deps = [ ":example_testset" ]
 }

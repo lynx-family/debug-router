@@ -52,6 +52,13 @@ jint Plug(JNIEnv *env, jobject jcaller, jobject slot) {
   return debugrouter::core::DebugRouterCore::GetInstance().Plug(native_slot);
 }
 
+void UpdateSessionDebugRouterId(JNIEnv *env, jobject jcaller, jint sessionId,
+                                jstring sessionDebugRouterId) {
+  debugrouter::core::DebugRouterCore::GetInstance().UpdateSessionDebugRouterId(
+      sessionId, debugrouter::common::android::JNIHelper::ConvertToString(
+                     env, sessionDebugRouterId));
+}
+
 void SetReportDelegate(JNIEnv *env, jobject jcaller, jobject delegate) {
   debugrouter::core::DebugRouterCore::GetInstance().SetReportDelegate(
       std::make_unique<debugrouter::android::DebugRouterReportAndroid>(

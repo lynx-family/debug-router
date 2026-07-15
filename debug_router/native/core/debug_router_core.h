@@ -95,6 +95,8 @@ class DebugRouterCore : public MessageTransceiverDelegate {
                      int32_t session, int32_t mark, bool is_object);
 
   int32_t Plug(const std::shared_ptr<core::NativeSlot> &slot);
+  void UpdateSessionDebugRouterId(int32_t session_id,
+                                  const std::string &session_debug_router_id);
 
   int32_t GetUSBPort();
 

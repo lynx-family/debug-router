@@ -23,6 +23,8 @@ const char *kRemoteDebugProtocolBodyData4CDP = "CDP";
 const char *kRemoteDebugProtocolBodyData4Custom4ListSession = "ListSession";
 const char *kRemoteDebugProtocolBodyData4Custom4MessageHandler = "App";
 const char *kRemoteDebugProtocolBodyData4Custom4SessionList = "SessionList";
+const char *kRemoteDebugProtocolBodyData4Custom4UpdateSessionDebugRouterId =
+    "UpdateSessionDebugRouterId";
 const char *kRemoteDebugProtocolBodyData4Custom4OpenSession = "OpenSession";
 const char *kRemoteDebugProtocolBodyData4Custom4CloseSession = "CloseSession";
 const char *kRemoteDebugProtocolBodyData4Custom4D2RStopAtEntry =
@@ -42,6 +44,7 @@ const char *kKeyType = "type";
 const char *kKeyInfo = "info";
 const char *kKeyClientId = "client_id";
 const char *kKeySessionId = "session_id";
+const char *kKeySessionDebugRouterId = "session_debug_router_id";
 const char *kKeyUrl = "url";
 const char *kKeyCode = "code";
 const char *kKeyMessage = "message";
@@ -260,6 +263,20 @@ std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Custom(
       std::make_shared<RemoteDebugProtocolBody>(kRemoteDebugServerEvent4Custom,
                                                 custom_content);
   return custom_body;
+}
+
+std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Custom(
+    std::string type, RemoteDebugPrococolClientId client_id,
+    std::shared_ptr<CustomData4UpdateSessionDebugRouterId>
+        update_session_debug_router_id) {
+  std::shared_ptr<RemoteDebugProtocolBodyData4Custom> custom_content =
+      std::make_shared<RemoteDebugProtocolBodyData4Custom>();
+  custom_content->type_ = type;
+  custom_content->client_id_ = client_id;
+  custom_content->update_session_debug_router_id_data_ =
+      update_session_debug_router_id;
+  return std::make_shared<RemoteDebugProtocolBody>(
+      kRemoteDebugServerEvent4Custom, custom_content);
 }
 
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Custom(

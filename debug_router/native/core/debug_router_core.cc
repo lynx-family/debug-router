@@ -53,6 +53,19 @@ class MessageHandlerCore : public processor::MessageHandler {
     return session_list;
   }
 
+  std::unordered_map<int, std::string> GetSessionDebugRouterIds() override {
+    std::unordered_map<int, std::string> session_debug_router_ids;
+    std::shared_lock lock(DebugRouterCore::GetInstance().slots_mutex_);
+    for (const auto &entry : DebugRouterCore::GetInstance().slots_) {
+      const std::string session_debug_router_id =
+          entry.second->GetSessionDebugRouterId();
+      if (!session_debug_router_id.empty()) {
+        session_debug_router_ids[entry.first] = session_debug_router_id;
+      }
+    }
+    return session_debug_router_ids;
+  }
+
   std::string HandleAppAction(const std::string &method,
                               const std::string &params) override {
     DebugRouterMessageHandler *handler =
@@ -303,12 +316,14 @@ void DebugRouterCore::SendDataAsync(const std::string &data,
 }
 
 int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
+  int32_t session_id;
   {
     std::unique_lock lock(slots_mutex_);
     max_session_id_++;
-    slots_[max_session_id_] = slot;
+    session_id = max_session_id_;
+    slots_[session_id] = slot;
   }
-  LOGI("plug session: " << max_session_id_);
+  LOGI("plug session: " << session_id);
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     processor_->FlushSessionList();
   }
@@ -323,10 +338,30 @@ int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
       }
     }
     for (auto *handler : handlers) {
-      handler->OnSessionCreate(max_session_id_, slot->GetUrl());
+      handler->OnSessionCreate(session_id, slot->GetUrl());
     }
   }
-  return max_session_id_;
+  return session_id;
+}
+
+void DebugRouterCore::UpdateSessionDebugRouterId(
+    int32_t session_id, const std::string &session_debug_router_id) {
+  if (session_debug_router_id.empty()) {
+    return;
+  }
+  {
+    std::unique_lock lock(slots_mutex_);
+    auto slot = slots_.find(session_id);
+    if (slot == slots_.end()) {
+      LOGW("update session debug router id failed, session not found: "
+           << session_id);
+      return;
+    }
+    slot->second->SetSessionDebugRouterId(session_debug_router_id);
+  }
+  if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
+    processor_->FlushSessionList();
+  }
 }
 
 int32_t DebugRouterCore::GetUSBPort() {

@@ -250,7 +250,13 @@ public class DebugRouter {
     synchronized (viewMap) {
       viewMap.put(view, sessionId);
     }
+    String sessionDebugRouterId =
+        Long.toString(System.identityHashCode(view) & 0xffffffffL);
+    nativeUpdateSessionDebugRouterId(sessionId, sessionDebugRouterId);
   }
+
+  private native void nativeUpdateSessionDebugRouterId(
+      int sessionId, String sessionDebugRouterId);
 
   @Deprecated
   public void disconnect() {

@@ -199,6 +199,15 @@ export default class ClientAdapter {
           this.handleSessionList(data.data);
           return;
         }
+        if (
+          isCustomizedEventType(
+            response,
+            CustomizedEventType.UpdateSessionDebugRouterId,
+          )
+        ) {
+          this.handleUpdateSessionDebugRouterId(data.data);
+          return;
+        }
         if (this.connection) {
           callback = this.connection.matchPendingRequest(data.type);
         }
@@ -290,6 +299,22 @@ export default class ClientAdapter {
   protected handleSessionList(sessionList: any) {
     if (this.connection) {
       this.connection.handleSessionList(sessionList);
+    }
+  }
+
+  protected handleUpdateSessionDebugRouterId(update: any) {
+    const sessionId = Number(update?.session_id);
+    const sessionDebugRouterId = update?.session_debug_router_id;
+    if (
+      this.connection &&
+      Number.isFinite(sessionId) &&
+      typeof sessionDebugRouterId === "string" &&
+      sessionDebugRouterId.length > 0
+    ) {
+      this.connection.handleUpdateSessionDebugRouterId({
+        sessionId,
+        sessionDebugRouterId,
+      });
     }
   }
 
