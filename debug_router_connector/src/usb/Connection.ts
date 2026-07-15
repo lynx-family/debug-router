@@ -33,6 +33,13 @@ export abstract class Connection {
     this.events.emit("SessionList", sessionList);
   }
 
+  handleUpdateSessionDebugRouterId(update: {
+    sessionId: number;
+    sessionDebugRouterId: string;
+  }) {
+    this.events.emit("UpdateSessionDebugRouterId", update);
+  }
+
   on(event: string, callback: EventHandler) {
     this.events.on(event, callback);
   }

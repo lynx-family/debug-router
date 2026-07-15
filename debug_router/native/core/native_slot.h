@@ -16,12 +16,15 @@ class NativeSlot {
   virtual ~NativeSlot() = default;
   std::string GetUrl();
   std::string GetType();
+  std::string GetSessionDebugRouterId();
+  void SetSessionDebugRouterId(const std::string &session_debug_router_id);
   virtual void OnMessage(const std::string &message,
                          const std::string &type) = 0;
 
  private:
   std::string url_;
   std::string type_;
+  std::string session_debug_router_id_;
 };
 
 }  // namespace core

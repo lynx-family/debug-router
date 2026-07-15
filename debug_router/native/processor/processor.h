@@ -5,6 +5,7 @@
 #ifndef DEBUGROUTER_NATIVE_PROCESSOR_PROCESSOR_H_
 #define DEBUGROUTER_NATIVE_PROCESSOR_PROCESSOR_H_
 
+#include <mutex>
 #include <string>
 
 #include "debug_router/native/processor/message_handler.h"
@@ -27,6 +28,8 @@ class Processor {
   void SetIsReconnect(bool is_reconnect);
 
  private:
+  void UpdateSessionDebugRouterId(int session_id,
+                                  const std::string &session_debug_router_id);
   void registerDevice();
   void joinRoom();
   void reportError(const std::string &error);
@@ -43,6 +46,7 @@ class Processor {
 
   debugrouter::protocol::RemoteDebugPrococolClientId client_id_;
   std::unique_ptr<MessageHandler> message_handler_;
+  std::mutex session_list_mutex_;
   bool is_reconnect_;
 
   void process(const Json::Value &root);

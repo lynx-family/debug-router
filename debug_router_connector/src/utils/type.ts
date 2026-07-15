@@ -27,6 +27,7 @@ export enum CustomizedEventType {
   SetGlobalSwitch = "SetGlobalSwitch",
   GetGlobalSwitch = "GetGlobalSwitch",
   SessionList = "SessionList",
+  UpdateSessionDebugRouterId = "UpdateSessionDebugRouterId",
   App = "App",
 }
 
@@ -136,6 +137,15 @@ export type SessionListType = {
   sender: number;
 };
 
+export type UpdateSessionDebugRouterIdType = {
+  type: CustomizedEventType.UpdateSessionDebugRouterId;
+  data: {
+    session_id: number;
+    session_debug_router_id: string;
+  };
+  sender: number;
+};
+
 export type CDPResponseType = {
   type: string;
   data: {
@@ -157,7 +167,11 @@ export type OpenCardResponseType = {
 
 export type CustomizeResponseType = {
   event: "Customized";
-  data: CDPResponseType | SessionListType | OpenCardResponseType;
+  data:
+    | CDPResponseType
+    | SessionListType
+    | UpdateSessionDebugRouterIdType
+    | OpenCardResponseType;
 };
 
 export type ResponseMessageType = CustomizeResponseType | RegisterResponseType;

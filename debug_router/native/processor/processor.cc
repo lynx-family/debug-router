@@ -132,6 +132,21 @@ std::string Processor::WrapCustomizedMessage(const std::string &type,
 
 void Processor::FlushSessionList() { sessionList(); }
 
+void Processor::UpdateSessionDebugRouterId(
+    int session_id, const std::string &session_debug_router_id) {
+  if (!message_handler_ || session_debug_router_id.empty()) {
+    return;
+  }
+  auto update =
+      std::make_shared<protocol::CustomData4UpdateSessionDebugRouterId>();
+  update->session_id_ = session_id;
+  update->session_debug_router_id_ = session_debug_router_id;
+  auto body = protocol::RemoteDebugProtocol::CreateProtocolBody4Custom(
+      protocol::kRemoteDebugProtocolBodyData4Custom4UpdateSessionDebugRouterId,
+      client_id_, update);
+  message_handler_->SendMessage(protocol::RemoteDebugProtocol::Stringify(body));
+}
+
 void Processor::SetIsReconnect(bool is_reconnect) {
   is_reconnect_ = is_reconnect;
 }
@@ -164,7 +179,11 @@ void Processor::reportError(const std::string &error) {
 }
 
 void Processor::sessionList() {
+  std::lock_guard<std::mutex> lock(session_list_mutex_);
   if (message_handler_) {
+    for (const auto &entry : message_handler_->GetSessionDebugRouterIds()) {
+      UpdateSessionDebugRouterId(entry.first, entry.second);
+    }
     std::unique_ptr<protocol::CustomData4SessionList> session_list =
         std::make_unique<protocol::CustomData4SessionList>();
     Json::Reader reader;

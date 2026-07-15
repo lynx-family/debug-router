@@ -617,6 +617,10 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   @synchronized(viewMap_) {
     [viewMap_ setObject:@(sessionId) forKey:(id)view];
   }
+  NSString *sessionDebugRouterId =
+      [NSString stringWithFormat:@"%p", (void *)view];
+  debugrouter::core::DebugRouterCore::GetInstance().UpdateSessionDebugRouterId(
+      sessionId, [sessionDebugRouterId UTF8String]);
 }
 
 - (UIView *)getViewBySessionId:(int)sessionId {

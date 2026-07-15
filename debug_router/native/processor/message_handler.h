@@ -17,6 +17,7 @@ class MessageHandler {
   virtual std::string GetRoomId() = 0;
   virtual std::unordered_map<std::string, std::string> GetClientInfo() = 0;
   virtual std::unordered_map<int, std::string> GetSessionList() = 0;
+  virtual std::unordered_map<int, std::string> GetSessionDebugRouterIds() = 0;
   virtual void OnMessage(const std::string &type, int session_id,
                          const std::string &message) = 0;
   virtual void SendMessage(const std::string &message) = 0;

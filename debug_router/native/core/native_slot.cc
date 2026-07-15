@@ -16,6 +16,13 @@ NativeSlot::NativeSlot(const std::string &type, const std::string &url) {
 
 std::string NativeSlot::GetUrl() { return url_; }
 std::string NativeSlot::GetType() { return type_; }
+std::string NativeSlot::GetSessionDebugRouterId() {
+  return session_debug_router_id_;
+}
+void NativeSlot::SetSessionDebugRouterId(
+    const std::string &session_debug_router_id) {
+  session_debug_router_id_ = session_debug_router_id;
+}
 
 }  // namespace core
 }  // namespace debugrouter
