@@ -108,7 +108,7 @@ void SocketServerPosix::Start() {
   }
   if (old_temp_client) {
     LOGI("close last connector, destroy temp_usb_client_.");
-    old_temp_client->Stop();
+    ScheduleClientStop(old_temp_client);
   }
   std::shared_ptr<ClientListener> listener =
       std::make_shared<ClientListener>(shared_from_this());

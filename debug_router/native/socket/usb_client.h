@@ -38,6 +38,10 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   void SetConnectStatus(USBConnectStatus status);
 
  private:
+#if defined(TESTING)
+  friend class SocketServerPosixTestPeer;
+#endif
+
   void StartInternal(const std::shared_ptr<UsbClientListener> &listener);
   // Marks the client as stopping before closing the socket so read/write loops
   // can exit even if DisconnectInternal() is called outside Stop() later.

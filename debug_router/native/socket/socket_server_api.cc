@@ -276,6 +276,9 @@ void SocketServer::Close() {
   SocketType socket_fd =
       socket_fd_.exchange(kInvalidSocket, std::memory_order_acq_rel);
   LOGI("SocketServer::Close server socket_fd_:" << socket_fd);
+  if (socket_fd == kInvalidSocket) {
+    return;
+  }
   CloseSocket(socket_fd);
 }
 
