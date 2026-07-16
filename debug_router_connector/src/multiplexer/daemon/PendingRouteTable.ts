@@ -130,6 +130,11 @@ export class PendingRouteTable {
     });
   }
 
+  clearByClientId(clientId: number): PendingRoute[] {
+    assertClientId(clientId, "clientId");
+    return this.clearMatching((route) => route.clientId === clientId);
+  }
+
   clear(): PendingRoute[] {
     return this.clearMatching(() => true);
   }

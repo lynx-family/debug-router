@@ -463,7 +463,52 @@ function parsePhysicalConnectorOption(
     );
   }
 
+  validateSerializedConnectionTraceOption(
+    (parsed as Record<string, unknown>).connectionTrace,
+  );
+  if ("traceRecorder" in (parsed as Record<string, unknown>)) {
+    throw new Error(
+      "Invalid multiplexer daemon option physicalConnectorOption.traceRecorder: recorder instances are not serializable",
+    );
+  }
+
   return parsed as PhysicalConnectorOption;
+}
+
+function validateSerializedConnectionTraceOption(value: unknown): void {
+  if (value === undefined) {
+    return;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      "Invalid multiplexer daemon option physicalConnectorOption.connectionTrace: expected object",
+    );
+  }
+
+  const option = value as Record<string, unknown>;
+  if (
+    option.enabled !== undefined &&
+    typeof option.enabled !== "boolean"
+  ) {
+    throw new Error(
+      "Invalid multiplexer daemon option physicalConnectorOption.connectionTrace.enabled: expected boolean",
+    );
+  }
+  if (option.output !== undefined && typeof option.output !== "string") {
+    throw new Error(
+      "Invalid multiplexer daemon option physicalConnectorOption.connectionTrace.output: expected string path",
+    );
+  }
+  if (
+    option.bufferSize !== undefined &&
+    (typeof option.bufferSize !== "number" ||
+      !Number.isFinite(option.bufferSize) ||
+      option.bufferSize < 0)
+  ) {
+    throw new Error(
+      "Invalid multiplexer daemon option physicalConnectorOption.connectionTrace.bufferSize: expected non-negative finite number",
+    );
+  }
 }
 
 if (require.main === module) {

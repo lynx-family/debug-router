@@ -533,9 +533,13 @@ export class MultiplexerDaemonManager {
     }
 
     if (this.physicalConnectorOption !== undefined) {
+      const serializablePhysicalConnectorOption = {
+        ...this.physicalConnectorOption,
+      };
+      delete serializablePhysicalConnectorOption.traceRecorder;
       args.push(
         "--physical-connector-option",
-        JSON.stringify(this.physicalConnectorOption),
+        JSON.stringify(serializablePhysicalConnectorOption),
       );
     }
 

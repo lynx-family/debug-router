@@ -21,6 +21,9 @@ const { MultiplexerHost } = hostModule;
 const {
   defaultLogger,
 } = require("../../../../debug_router_connector/src/utils/logger");
+const {
+  UsbClient,
+} = require("../../../../debug_router_connector/src/usb/Client");
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -159,6 +162,100 @@ function createClient(id, overrides = {}) {
   };
 
   return client;
+}
+
+function createWebSocketClient(id, type = "runtime", overrides = {}) {
+  const state = {
+    sendMessageCalls: [],
+    sendCustomizedCalls: [],
+    closeCalls: 0,
+  };
+  return {
+    info: {
+      id,
+      app: overrides.app ?? `wifi-app-${id}`,
+      debugRouterVersion: overrides.debugRouterVersion ?? "1.0.0",
+      deviceModel: overrides.deviceModel ?? "Pixel",
+      network: "WiFi",
+      osVersion: overrides.osVersion ?? "14",
+      sdkVersion: overrides.sdkVersion ?? "2.0.0",
+      type,
+      raw_info: overrides.rawInfo ?? { app: `wifi-app-${id}` },
+    },
+    state,
+    clientId() {
+      return id;
+    },
+    type() {
+      return type;
+    },
+    sendMessage(message) {
+      if (overrides.sendMessageError) {
+        throw overrides.sendMessageError;
+      }
+      state.sendMessageCalls.push(message);
+    },
+    async sendCustomizedMessage(method, params, sessionId, messageType) {
+      state.sendCustomizedCalls.push({
+        method,
+        params,
+        sessionId,
+        messageType,
+      });
+      return overrides.sendCustomizedResult ?? "websocket-customized-result";
+    },
+    close() {
+      state.closeCalls++;
+    },
+  };
+}
+
+function createWebSocketControllerState(appClients = [], webClients = []) {
+  const appMap = new Map(
+    appClients.map((client) => [client.clientId(), client])
+  );
+  const webMap = new Map(
+    webClients.map((client) => [client.clientId(), client])
+  );
+  const state = {
+    appMap,
+    webMap,
+    webMessages: [],
+    closeAllWebsocketAppClientsCalls: 0,
+    sendClientListCalls: 0,
+    sendDeviceListCalls: 0,
+  };
+  return {
+    state,
+    controller: {
+      getAllWebsocketAppClients() {
+        return appMap;
+      },
+      getAllWebsocketWebClients() {
+        return webMap;
+      },
+      sendMessageToWeb(message) {
+        state.webMessages.push({ kind: "broadcast", message });
+      },
+      sendMessageToWebClient(webClientId, message) {
+        state.webMessages.push({ kind: "targeted", webClientId, message });
+      },
+      closeAllWebsocketAppClients() {
+        state.closeAllWebsocketAppClientsCalls++;
+        const clients = Array.from(appMap.values());
+        appMap.clear();
+        clients.forEach((client) => client.close());
+        this.sendClientList();
+      },
+      sendClientList() {
+        state.sendClientListCalls++;
+      },
+      sendDeviceList() {
+        state.sendDeviceListCalls++;
+      },
+      close() {},
+    },
+  };
 }
 
 class FakePhysicalConnector extends EventEmitter {
@@ -425,6 +522,7 @@ function createHost(options = {}) {
     manualConnect: options.manualConnect,
     enableWebSocket: options.enableWebSocket,
     websocketOption: options.websocketOption,
+    connectionTrace: options.connectionTrace,
     memoizedNotificationTtlMs: options.memoizedNotificationTtlMs,
     now: options.now ?? (() => 1000),
   });
@@ -592,8 +690,9 @@ describe("MultiplexerHost", function () {
     defaultLogger.setOutput(() => {});
   });
 
-  it("constructs a physical connector when one is not injected", function () {
+  it("constructs a physical connector with a daemon-owned trace recorder", async function () {
     const calls = [];
+    const callerRecorder = { source: "caller" };
     class PhysicalConnectorCtor extends FakePhysicalConnector {
       constructor(option) {
         calls.push(option);
@@ -605,17 +704,140 @@ describe("MultiplexerHost", function () {
       PhysicalConnectorCtor,
       protocolVersion: 3,
       manualConnect: true,
+      connectionTrace: {
+        enabled: true,
+        output: { write() {} },
+      },
+      traceRecorder: callerRecorder,
     });
     const snapshot = host.createSnapshot();
+    const controlServer = attachControlServer(host);
 
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].protocolVersion, 3);
     assert.strictEqual(calls[0].manualConnect, true);
+    assert.ok(calls[0].traceRecorder);
+    assert.notStrictEqual(calls[0].traceRecorder, callerRecorder);
+    assert.strictEqual(calls[0].traceRecorder, host.connectionTraceRecorder);
+    calls[0].traceRecorder.recordWatchClientStart("device-1", {
+      source: "host-test",
+    });
+    const trace = calls[0].traceRecorder.getRecentNodes(1);
     assert.deepStrictEqual(snapshot.devices, []);
     assert.deepStrictEqual(snapshot.clients, []);
+    assert.strictEqual("connectionTrace" in snapshot, false);
+    assert.deepStrictEqual(
+      trace.map((node) => node.event),
+      ["client_watch_started"]
+    );
+    assert.deepStrictEqual(trace[0].metadata, {
+      source: "host-test",
+    });
+    assert.deepStrictEqual(controlServer.targeted, []);
     assert.strictEqual("webSocketServerStarted" in snapshot, false);
     assert.strictEqual("webSocketServerInfo" in snapshot, false);
     assert.strictEqual("wss" in snapshot, false);
+    await host.stop();
+  });
+
+  it("records facade-level USB and WebSocket lifecycle facts only in the daemon", async function () {
+    const { host, physical } = createHost({
+      connectionTrace: {
+        enabled: true,
+        output: { write() {} },
+      },
+    });
+    const controlServer = attachControlServer(host);
+    bindHostEvents(host);
+    const usbClient = new UsbClient(createClient(3).info, {
+      close() {},
+    });
+    physical.emit("client-connected", usbClient);
+    physical.emit("client-disconnected", usbClient.clientId());
+    const websocketClient = createWebSocketClient(30, "runtime");
+    host.emit("websocket-app-client-connected", websocketClient);
+    host.emit("websocket-app-client-disconnected", 30);
+
+    const trace = host.connectionTraceRecorder.getRecentNodes();
+    assert.deepStrictEqual(
+      trace.map((node) => node.event),
+      [
+        "app_client_connected",
+        "app_client_disconnected",
+        "websocket_app_client_connected",
+        "websocket_app_client_disconnected",
+      ]
+    );
+    assert.deepStrictEqual(controlServer.targeted, []);
+    await host.stop();
+  });
+
+  it("records daemon and control socket lifecycle facts in order", async function () {
+    FakeStartControlServer.instances = [];
+    FakeStartControlServer.startError = null;
+    FakeStartControlServer.stopError = null;
+    const resetControlServer = replaceControlServerForStart();
+    const trace = [];
+    const { host } = createHost({
+      protocolVersion: 3,
+      minSupportedProtocolVersion: 2,
+      daemonVersion: "0.0.3",
+      connectionTrace: {
+        enabled: true,
+        output: {
+          write(line) {
+            trace.push(JSON.parse(line));
+          },
+        },
+      },
+    });
+
+    try {
+      await host.start();
+      host.handleControlConnected(7);
+      host.handleControlDisconnected(7);
+      await host.stop();
+      await host.stop();
+
+      assert.deepStrictEqual(
+        trace.map((node) => node.event),
+        [
+          "daemon_started",
+          "legacy_ownership_attached",
+          "control_socket_connected",
+          "control_socket_disconnected",
+          "daemon_stopped",
+        ]
+      );
+      assert.deepStrictEqual(trace[0].metadata, {
+        pid: process.pid,
+        controlPort: 8899,
+        protocolVersion: 3,
+        minSupportedProtocolVersion: 2,
+        daemonVersion: "0.0.3",
+      });
+      assert.deepStrictEqual(trace[1].metadata, {
+        ownerPid: 100,
+        reason: "daemon-started",
+      });
+      assert.deepStrictEqual(trace[2].metadata, {
+        controlId: 7,
+        activeControlCount: 1,
+      });
+      assert.deepStrictEqual(trace[3].metadata, {
+        controlId: 7,
+        activeControlCount: 0,
+      });
+      assert.deepStrictEqual(trace[4].metadata, {
+        pid: process.pid,
+      });
+      assert.deepStrictEqual(
+        trace.map((node) => node.sequence),
+        [1, 2, 3, 4, 5]
+      );
+    } finally {
+      resetControlServer();
+    }
   });
 
   it("starts once, reports the listening port, and stops idempotently", async function () {
@@ -763,6 +985,57 @@ describe("MultiplexerHost", function () {
         },
       },
     ]);
+
+    const wifiRuntime = createWebSocketClient(23);
+    const { controller } = createWebSocketControllerState([wifiRuntime]);
+    host.webSocketController = controller;
+    host.sendMessageToApp(
+      23,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 10,
+          clientId: 23,
+          method: "Runtime.evaluate",
+          messageAsString: false,
+        })
+      ),
+      undefined,
+      56
+    );
+    const wifiGlobalId = readCustomizedInner(
+      JSON.parse(wifiRuntime.state.sendMessageCalls[0])
+    ).id;
+    host.handleWebSocketAppMessage(
+      23,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: wifiGlobalId,
+          result: { value: 43 },
+          messageAsString: false,
+        })
+      )
+    );
+
+    assert.deepStrictEqual(controlServer.targeted[1], {
+      controlId: 56,
+      event: {
+        kind: "event",
+        event: "ws-client-message",
+        data: {
+          id: 23,
+          message: JSON.stringify(
+            createCustomizedEnvelope({
+              id: 10,
+              result: { value: 43 },
+              clientId: 23,
+              sender: 23,
+              messageAsString: false,
+            })
+          ),
+        },
+      },
+    });
+    assert.deepStrictEqual(controlServer.broadcasts, []);
   });
 
   it("serializes device host failures and non-json client raw_info without leaking invalid fields", function () {
@@ -867,7 +1140,7 @@ describe("MultiplexerHost", function () {
     });
   });
 
-  it("handles legacy ownership loss by stopping physical state and publishing an empty snapshot", async function () {
+  it("removes devices and runtimes, keeps Driver clients, and publishes one real state after ownership loss", async function () {
     const { host, physical } = createHost({
       now: () => 3000,
     });
@@ -877,7 +1150,12 @@ describe("MultiplexerHost", function () {
     const client = createClient(7, {
       deviceId: "device-1",
     });
-    const webSocketController = createWebSocketControllerProbe();
+    const wifiRuntime = createWebSocketClient(30, "runtime");
+    const driver = createWebSocketClient(30, "Driver");
+    const {
+      controller: webSocketController,
+      state: webSocketControllerState,
+    } = createWebSocketControllerState([wifiRuntime], [driver]);
     physical.devices.set(device.serial, device);
     physical.usbClients.set(client.clientId(), client);
     host.webSocketController = webSocketController;
@@ -903,6 +1181,22 @@ describe("MultiplexerHost", function () {
       clients: [],
       daemonVersion: undefined,
       capabilities: undefined,
+      websocketAppClients: [],
+      websocketWebClients: [
+        {
+          id: 30,
+          type: "Driver",
+          app: "wifi-app-30",
+          deviceModel: "Pixel",
+          osVersion: "14",
+          sdkVersion: "2.0.0",
+          debugRouterVersion: "1.0.0",
+          network: "WiFi",
+          raw_info: {
+            app: "wifi-app-30",
+          },
+        },
+      ],
     });
     assert.deepStrictEqual(controlServer.broadcasts[1].data, {
       status: "unattached",
@@ -910,8 +1204,21 @@ describe("MultiplexerHost", function () {
       previousOwnerPid: 200,
       reason: "legacy-preempted",
     });
-    assert.strictEqual(webSocketController.sendDeviceListCalls, 1);
-    assert.strictEqual(webSocketController.sendClientListCalls, 1);
+    assert.strictEqual(wifiRuntime.state.closeCalls, 1);
+    assert.strictEqual(driver.state.closeCalls, 0);
+    assert.deepStrictEqual(
+      Array.from(webSocketControllerState.appMap.keys()),
+      []
+    );
+    assert.deepStrictEqual(Array.from(webSocketControllerState.webMap.keys()), [
+      30,
+    ]);
+    assert.strictEqual(
+      webSocketControllerState.closeAllWebsocketAppClientsCalls,
+      1
+    );
+    assert.strictEqual(webSocketControllerState.sendDeviceListCalls, 1);
+    assert.strictEqual(webSocketControllerState.sendClientListCalls, 2);
 
     physical.emit("device-connected", createDevice("late-device"));
     physical.emit("client-connected", createClient(8));
@@ -990,7 +1297,12 @@ describe("MultiplexerHost", function () {
   });
 
   it("reacquireLegacyOwnership reattaches the host and allows watcher recovery", async function () {
-    const { host, physical } = createHost();
+    const { host, physical } = createHost({
+      connectionTrace: {
+        enabled: true,
+        output: { write() {} },
+      },
+    });
     const controlServer = attachControlServer(host);
     const device = createDevice("device-1");
     const webSocketController = createWebSocketControllerProbe();
@@ -1025,10 +1337,38 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(device.state.startWatchCalls, 1);
     assert.strictEqual(webSocketController.sendDeviceListCalls, 1);
     assert.strictEqual(webSocketController.sendClientListCalls, 2);
+    assert.deepStrictEqual(
+      host.connectionTraceRecorder.getRecentNodes().map((node) => ({
+        event: node.event,
+        metadata: node.metadata,
+      })),
+      [
+        {
+          event: "legacy_ownership_lost",
+          metadata: {
+            ownerPid: 100,
+            previousOwnerPid: 200,
+            reason: "legacy-preempted",
+          },
+        },
+        {
+          event: "legacy_ownership_attached",
+          metadata: {
+            ownerPid: 100,
+            reason: "reacquire-requested",
+          },
+        },
+      ]
+    );
   });
 
   it("shutdownDaemon schedules the explicit daemon shutdown handler", async function () {
-    const { host } = createHost();
+    const { host } = createHost({
+      connectionTrace: {
+        enabled: true,
+        output: { write() {} },
+      },
+    });
     let idleCalls = 0;
     let shutdownCalls = 0;
     host.setIdleTimeoutHandler(() => {
@@ -1056,6 +1396,20 @@ describe("MultiplexerHost", function () {
     );
     await nextTick();
     assert.strictEqual(shutdownCalls, 1);
+    assert.deepStrictEqual(
+      host.connectionTraceRecorder.getRecentNodes().map((node) => ({
+        event: node.event,
+        metadata: node.metadata,
+      })),
+      [
+        {
+          event: "daemon_shutdown_requested",
+          metadata: {
+            reason: "stale-daemon",
+          },
+        },
+      ]
+    );
   });
 
   it("rejects shutdownDaemon when no daemon shutdown handler is configured", async function () {
@@ -1684,7 +2038,7 @@ describe("MultiplexerHost", function () {
         assertControlError(
           error,
           "multiplexer-client-not-found",
-          /Multiplexer USB client was not found: 404/
+          /Multiplexer client was not found: 404/
         );
         return true;
       }
@@ -1933,7 +2287,7 @@ describe("MultiplexerHost", function () {
         assertControlError(
           error,
           "multiplexer-client-not-found",
-          /Multiplexer USB client was not found: 404/
+          /Multiplexer client was not found: 404/
         );
         return true;
       }
@@ -1951,11 +2305,178 @@ describe("MultiplexerHost", function () {
         assertControlError(
           error,
           "multiplexer-client-not-found",
-          /Multiplexer USB client was not found: 404/
+          /Multiplexer client was not found: 404/
         );
         return true;
       }
     );
+  });
+
+  it("routes Driver requests through WiFi runtimes and restores responses to the originating Driver", function () {
+    const { host } = createHost({
+      enableWebSocket: true,
+    });
+    const runtime = createWebSocketClient(90);
+    const { controller, state } = createWebSocketControllerState([runtime]);
+    const controlServer = attachControlServer(host);
+    host.webSocketController = controller;
+    host.webSocketRequesterControlIds.add(1);
+
+    host.handleWebSocketMessage(
+      800,
+      90,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 44,
+          clientId: 90,
+          method: "Runtime.evaluate",
+          messageAsString: true,
+        })
+      )
+    );
+
+    assert.strictEqual(runtime.state.sendMessageCalls.length, 1);
+    const routedId = readCustomizedInner(
+      JSON.parse(runtime.state.sendMessageCalls[0])
+    ).id;
+    assert.notStrictEqual(routedId, 44);
+
+    host.handleWebSocketAppMessage(
+      90,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: routedId,
+          result: { value: 2 },
+          clientId: -1,
+          messageAsString: true,
+        })
+      )
+    );
+
+    assert.strictEqual(state.webMessages.length, 1);
+    assert.strictEqual(state.webMessages[0].kind, "targeted");
+    assert.strictEqual(state.webMessages[0].webClientId, 800);
+    assert.strictEqual(
+      readCustomizedInner(JSON.parse(state.webMessages[0].message)).id,
+      44
+    );
+    assert.deepStrictEqual(controlServer.broadcasts, []);
+    assert.deepStrictEqual(controlServer.targeted, []);
+  });
+
+  it("serializes WebSocket lifecycle state without letting WiFi runtimes prevent idle shutdown", async function () {
+    const { host } = createHost({
+      enableWebSocket: true,
+    });
+    const runtime = createWebSocketClient(91, "runtime", {
+      rawInfo: { app: "wifi-runtime" },
+    });
+    const driver = createWebSocketClient(92, "Driver");
+    const { controller, state } = createWebSocketControllerState(
+      [runtime],
+      [driver]
+    );
+    const controlServer = attachControlServer(host);
+    host.webSocketController = controller;
+    host.webSocketRequesterControlIds.add(1);
+
+    host.emit("websocket-app-client-connected", runtime);
+    host.handleWebSocketClientConnected(91, "runtime");
+    assert.strictEqual(host.isIdle(), true);
+    host.emit("websocket-web-client-connected", driver);
+    host.handleWebSocketClientConnected(92, "Driver");
+
+    const snapshot = host.createSnapshot();
+    assert.deepStrictEqual(
+      snapshot.websocketAppClients.map((client) => client.id),
+      [91]
+    );
+    assert.deepStrictEqual(
+      snapshot.websocketWebClients.map((client) => client.id),
+      [92]
+    );
+    assert.strictEqual(host.isIdle(), false);
+    assert.deepStrictEqual(controlServer.broadcasts, []);
+    assert.deepStrictEqual(
+      controlServer.targeted
+        .filter(({ event }) => event.event.includes("-connected"))
+        .map(({ controlId, event }) => [controlId, event.event]),
+      [
+        [1, "websocket-app-client-connected"],
+        [1, "websocket-web-client-connected"],
+      ]
+    );
+
+    const pending = host.handleControlRpc(
+      77,
+      createRpcRequest("sendCustomizedMessage", {
+        clientId: 91,
+        method: "Runtime.evaluate",
+      })
+    );
+    state.appMap.delete(91);
+    host.handleWebSocketClientDisconnected(91, "runtime");
+    await assert.rejects(
+      () => pending,
+      /Multiplexer runtime client 91 disconnected/
+    );
+    state.webMap.delete(92);
+    host.handleWebSocketClientDisconnected(92, "Driver");
+    assert.strictEqual(host.isIdle(), true);
+  });
+
+  it("targets WiFi runtimes when Driver and app client ids collide", async function () {
+    const { host } = createHost({ enableWebSocket: true });
+    const runtime = createWebSocketClient(93);
+    const driver = createWebSocketClient(93, "Driver");
+    const { controller } = createWebSocketControllerState([runtime], [driver]);
+    host.webSocketController = controller;
+
+    await host.handleControlRpc(
+      1,
+      createRpcRequest("sendMessage", {
+        clientId: 93,
+        message: "raw-wifi-message",
+      })
+    );
+    const resultPromise = host.handleControlRpc(
+      1,
+      createRpcRequest("sendCustomizedMessage", {
+        clientId: 93,
+        method: "Runtime.call",
+        params: { value: true },
+        sessionId: 3,
+        type: "App",
+      })
+    );
+    const routedRequest = readCustomizedInner(
+      JSON.parse(runtime.state.sendMessageCalls[1])
+    );
+    host.handleWebSocketAppMessage(
+      93,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: routedRequest.id,
+          result: { value: "runtime-result" },
+          clientId: -1,
+        })
+      )
+    );
+    const result = await resultPromise;
+    await host.handleControlRpc(
+      1,
+      createRpcRequest("closeClient", { clientId: 93 })
+    );
+
+    assert.strictEqual(runtime.state.sendMessageCalls[0], "raw-wifi-message");
+    assert.strictEqual(runtime.state.sendMessageCalls.length, 2);
+    assert.strictEqual(runtime.state.closeCalls, 1);
+    assert.deepStrictEqual(JSON.parse(result).result, {
+      value: "runtime-result",
+    });
+    assert.deepStrictEqual(driver.state.sendMessageCalls, []);
+    assert.deepStrictEqual(driver.state.sendCustomizedCalls, []);
+    assert.strictEqual(driver.state.closeCalls, 0);
   });
 
   it("startWSServer returns when websocket is disabled", async function () {
@@ -2003,6 +2524,7 @@ describe("MultiplexerHost", function () {
         roomId: "room-a",
       },
     });
+    const controlServer = attachControlServer(host);
 
     try {
       const first = await host.handleControlRpc(
@@ -2030,6 +2552,102 @@ describe("MultiplexerHost", function () {
       });
       assert.strictEqual(host.createClientId(), 1);
       assert.strictEqual(physical.createClientIdCalls, 1);
+      assert.deepStrictEqual(
+        controlServer.targeted.map(({ controlId, event }) => [
+          controlId,
+          event.event,
+        ]),
+        [
+          [1, "snapshot"],
+          [1, "snapshot"],
+        ]
+      );
+    } finally {
+      reset();
+    }
+  });
+
+  it("keeps the shared websocket server after all requesting controls disconnect", async function () {
+    const instances = [];
+    class FakeWebSocketController {
+      constructor(_controllerHost, option) {
+        this.closeCalls = 0;
+        instances.push(this);
+        option.callback();
+      }
+
+      close() {
+        this.closeCalls++;
+      }
+
+      sendMessageToWeb() {}
+
+      sendMessageToWebClient() {}
+    }
+    const reset = replaceWebSocketStartDependencies({
+      detectPortImpl: async () => 19001,
+      addressImpl: () => "127.0.0.1",
+      WebSocketControllerCtor: FakeWebSocketController,
+    });
+    const trace = [];
+    const { host } = createHost({
+      enableWebSocket: true,
+      connectionTrace: {
+        enabled: true,
+        output: {
+          write(line) {
+            trace.push(JSON.parse(line));
+          },
+        },
+      },
+    });
+
+    try {
+      host.handleControlConnected(1);
+      host.handleControlConnected(2);
+      await host.handleControlRpc(1, createRpcRequest("startWSServer", {}));
+      await host.handleControlRpc(2, createRpcRequest("startWSServer", {}));
+
+      host.handleControlDisconnected(1);
+      assert.strictEqual(instances[0].closeCalls, 0);
+      assert.strictEqual(host.webSocketController, instances[0]);
+
+      host.handleControlDisconnected(2);
+      assert.strictEqual(instances[0].closeCalls, 0);
+      assert.strictEqual(host.webSocketController, instances[0]);
+      assert.deepStrictEqual(host.webSocketServerInfo, {
+        port: 19001,
+        host: "127.0.0.1:19001",
+        roomId: undefined,
+      });
+      assert.strictEqual(host.webSocketServerStarted, true);
+      await host.stop();
+      assert.strictEqual(instances[0].closeCalls, 1);
+      assert.deepStrictEqual(
+        trace
+          .filter((node) => node.event.startsWith("websocket_server_"))
+          .map((node) => ({
+            event: node.event,
+            metadata: node.metadata,
+          })),
+        [
+          {
+            event: "websocket_server_started",
+            metadata: {
+              port: 19001,
+              host: "127.0.0.1:19001",
+            },
+          },
+          {
+            event: "websocket_server_stopped",
+            metadata: {
+              port: 19001,
+              host: "127.0.0.1:19001",
+              reason: "daemon_stop",
+            },
+          },
+        ]
+      );
     } finally {
       reset();
     }
@@ -2091,6 +2709,7 @@ describe("MultiplexerHost", function () {
     await assert.rejects(() =>
       host.handleControlRpc(1, createRpcRequest("startWSServer", {}))
     );
+    assert.strictEqual(host.webSocketRequesterControlIds.size, 0);
     await assert.rejects(() =>
       host.handleControlRpc(1, createRpcRequest("startWSServer", {}))
     );
@@ -2516,6 +3135,22 @@ describe("MultiplexerHost", function () {
         },
       })
     );
+    host.handleWebSocketAppMessage(
+      32,
+      JSON.stringify({
+        event: "Customized",
+        data: {
+          type: "CDP",
+          data: {
+            client_id: -1,
+            message: JSON.stringify({
+              method: "Runtime.executionContextCreated",
+            }),
+          },
+          sender: 0,
+        },
+      })
+    );
 
     assert.deepStrictEqual(webMessages, [
       JSON.stringify({
@@ -2531,12 +3166,26 @@ describe("MultiplexerHost", function () {
           sender: 31,
         },
       }),
+      JSON.stringify({
+        event: "Customized",
+        data: {
+          type: "CDP",
+          data: {
+            client_id: 32,
+            message: JSON.stringify({
+              method: "Runtime.executionContextCreated",
+            }),
+          },
+          sender: 32,
+        },
+      }),
     ]);
     assert.deepStrictEqual(
       controlServer.broadcasts.map((event) => event.event),
-      ["usb-client-message"]
+      ["usb-client-message", "ws-client-message"]
     );
     assert.strictEqual(controlServer.broadcasts[0].data.id, 31);
+    assert.strictEqual(controlServer.broadcasts[1].data.id, 32);
     assert.strictEqual(
       controlServer.broadcasts[0].data.message,
       webMessages[0]

@@ -269,10 +269,15 @@ async function runPlatformStressScenario(platform, args) {
   const startedAt = Date.now();
   let context;
   let state;
+  let androidForwardBaseline = null;
 
   try {
     await stopInterferingMultiplexerDaemons();
     await assertPlatformDeviceOnline(platform, args);
+    if (platform === "android") {
+      const serial = args.androidSerial || (await listAndroidDevices())[0];
+      androidForwardBaseline = await captureAndroidForwardBaseline(serial);
+    }
 
     logStep(platform, "creating isolated multiplexer stress context");
     context = createContext(platform, args, {
@@ -280,7 +285,9 @@ async function runPlatformStressScenario(platform, args) {
     });
     state = createScenarioState(platform, args);
 
-    const primary = context.createConnector({ enableWebSocket: args.websocket });
+    const primary = context.createConnector({
+      enableWebSocket: args.websocket,
+    });
     state.connectors.push({
       id: "primary",
       connector: primary,
@@ -292,7 +299,7 @@ async function runPlatformStressScenario(platform, args) {
       primary,
       platform,
       state.serial,
-      args.deviceTimeout,
+      args.deviceTimeout
     );
     state.serial = firstDevice.serial;
     await launchAppIfNeeded(platform, args, firstDevice);
@@ -304,7 +311,7 @@ async function runPlatformStressScenario(platform, args) {
       state.serial,
       state.clientName,
       args.clientTimeout,
-      args,
+      args
     );
 
     if (args.websocket) {
@@ -321,14 +328,16 @@ async function runPlatformStressScenario(platform, args) {
     const daemonInfo = await waitFor(
       () => readJsonFile(context.paths.discoveryPath, null),
       5000,
-      `${platform} daemon discovery`,
+      `${platform} daemon discovery`
     );
     report.daemon.initialPid = daemonInfo.pid;
     report.daemon.finalPid = daemonInfo.pid;
     state.lastDaemonPid = daemonInfo.pid;
     logStep(
       platform,
-      `stress warmup ready daemon=${daemonInfo.pid} device=${state.serial} client=${state.targetClient.clientId()}`,
+      `stress warmup ready daemon=${daemonInfo.pid} device=${
+        state.serial
+      } client=${state.targetClient.clientId()}`
     );
 
     await runStressRounds(context, state, args, report);
@@ -344,7 +353,13 @@ async function runPlatformStressScenario(platform, args) {
   } catch (error) {
     recordFailure(report, classifyError(error), error);
   } finally {
-    await cleanupContext(context, state, args, report);
+    try {
+      await cleanupContext(context, state, args, report);
+    } finally {
+      if (androidForwardBaseline) {
+        await removeAddedAndroidForwards(androidForwardBaseline);
+      }
+    }
     finalizeReport(report, startedAt);
     printReport(report);
   }
@@ -368,14 +383,14 @@ function createScenarioState(platform, args) {
 
 function createContext(platform, args, option = {}) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-real-stress-${platform}-`),
+    path.join(os.tmpdir(), `debug-router-real-stress-${platform}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
   const legacyOwnerPath = path.join(legacyDriverDir, "LatestDriverProcess");
   const hadOriginalHome = Object.prototype.hasOwnProperty.call(
     process.env,
-    "HOME",
+    "HOME"
   );
   const originalHome = process.env.HOME;
   fs.mkdirSync(homeDir, { recursive: true });
@@ -394,9 +409,9 @@ function createContext(platform, args, option = {}) {
     createConnector(extra = {}) {
       const connector = new DebugRouterConnector({
         manualConnect: true,
-        enableWebSocket: extra.enableWebSocket ?? option.enableWebSocket ?? false,
-        websocketOption:
-          extra.websocketOption ??
+        enableWebSocket:
+          extra.enableWebSocket ?? option.enableWebSocket ?? false,
+        websocketOption: extra.websocketOption ??
           option.websocketOption ?? {
             port: 0,
             roomId: `real-device-stress-${platform}`,
@@ -454,7 +469,9 @@ function createPaths(rootDir) {
 
 async function createAdditionalConnectors(context, state, args) {
   for (let index = 1; index < args.connectors; index++) {
-    const connector = context.createConnector({ enableWebSocket: args.websocket });
+    const connector = context.createConnector({
+      enableWebSocket: args.websocket,
+    });
     state.connectors.push({
       id: `connector-${index}`,
       connector,
@@ -465,14 +482,16 @@ async function createAdditionalConnectors(context, state, args) {
       connector,
       state.platform,
       state.serial,
-      args.deviceTimeout,
+      args.deviceTimeout
     );
     state.serial = device.serial;
   }
 }
 
 async function prepareAdditionalConnectors(state, args) {
-  for (const entry of activeConnectors(state).filter((entry) => !entry.primary)) {
+  for (const entry of activeConnectors(state).filter(
+    (entry) => !entry.primary
+  )) {
     await prepareConnector(entry.connector, state, args);
   }
 }
@@ -496,7 +515,7 @@ async function prepareConnector(connector, state, args) {
     connector,
     state.platform,
     state.serial,
-    args.deviceTimeout,
+    args.deviceTimeout
   );
   state.serial = device.serial;
   const matched = state.targetClient
@@ -506,7 +525,7 @@ async function prepareConnector(connector, state, args) {
         state.serial,
         state.targetClient,
         args.clientTimeout,
-        args,
+        args
       )
     : await connectTargetClient(
         connector,
@@ -514,7 +533,7 @@ async function prepareConnector(connector, state, args) {
         state.serial,
         state.clientName,
         args.clientTimeout,
-        args,
+        args
       );
   state.targetClient = matched;
   return matched;
@@ -526,13 +545,15 @@ async function refreshAndAssertState(context, state, args, report, label) {
     if (!entry.connector.devices.has(state.serial)) {
       throw new StressError(
         "empty_devices",
-        `${label}: connector ${entry.id} missing device ${state.serial}`,
+        `${label}: connector ${entry.id} missing device ${state.serial}`
       );
     }
     if (!entry.connector.usbClients.has(state.targetClient.clientId())) {
       throw new StressError(
         "empty_clients",
-        `${label}: connector ${entry.id} missing client ${state.targetClient.clientId()}`,
+        `${label}: connector ${
+          entry.id
+        } missing client ${state.targetClient.clientId()}`
       );
     }
   }
@@ -551,8 +572,8 @@ async function refreshAndAssertState(context, state, args, report, label) {
       report,
       "daemon_exited",
       new Error(
-        `${label}: daemon pid changed unexpectedly ${state.lastDaemonPid} -> ${discovery.pid}`,
-      ),
+        `${label}: daemon pid changed unexpectedly ${state.lastDaemonPid} -> ${discovery.pid}`
+      )
     );
   }
   state.lastDaemonPid = discovery.pid;
@@ -574,7 +595,9 @@ async function runStressRounds(context, state, args, report) {
     const tasks = createMessageTasks(state, args, round, scheduled, count);
     logStep(
       state.platform,
-      `round ${round + 1}/${args.rounds}: ${tasks.length} messages concurrency=${args.concurrency}`,
+      `round ${round + 1}/${args.rounds}: ${
+        tasks.length
+      } messages concurrency=${args.concurrency}`
     );
 
     await runWithConcurrency(tasks, args.concurrency, async (task) => {
@@ -590,7 +613,7 @@ async function runStressRounds(context, state, args, report) {
       state,
       args,
       report,
-      `round-${round + 1}`,
+      `round-${round + 1}`
     );
 
     report.roundSummaries.push({
@@ -657,27 +680,27 @@ async function sendConnectorMessage(task, args) {
   if (task.connectorEntry.closed) {
     throw new StressError(
       "connector_closed",
-      `${task.connectorEntry.id} is closed`,
+      `${task.connectorEntry.id} is closed`
     );
   }
   const client = task.connectorEntry.connector.usbClients.get(task.clientId);
   if (!client) {
     throw new StressError(
       "empty_clients",
-      `${task.connectorEntry.id} missing client ${task.clientId}`,
+      `${task.connectorEntry.id} missing client ${task.clientId}`
     );
   }
   const response = await withTimeout(
     client.sendClientMessage(args.messageMethod, { marker: task.marker }),
     args.clientTimeout,
-    `connector message ${task.marker}`,
+    `connector message ${task.marker}`
   );
   if (!containsMarker(response, task.marker)) {
     throw new StressError(
       "marker_mismatch",
       `connector response missing marker ${task.marker}: ${stringifyForLog(
-        response,
-      )}`,
+        response
+      )}`
     );
   }
 }
@@ -686,7 +709,7 @@ async function sendWebSocketMessage(task, args) {
   if (task.frontendEntry.closed) {
     throw new StressError(
       "connector_closed",
-      `${task.frontendEntry.id} socket is closed`,
+      `${task.frontendEntry.id} socket is closed`
     );
   }
   const wait = waitForSocketMessage(
@@ -699,7 +722,7 @@ async function sendWebSocketMessage(task, args) {
       return containsMarker(parsed.cdp, task.marker);
     },
     args.clientTimeout,
-    `websocket ${args.websocketMessageType} message ${task.marker}`,
+    `websocket ${args.websocketMessageType} message ${task.marker}`
   );
   task.frontendEntry.socket.send(
     createCustomizedEnvelope(
@@ -707,35 +730,43 @@ async function sendWebSocketMessage(task, args) {
       task.cdpId,
       args.messageMethod,
       task.marker,
-      args.websocketMessageType,
-    ),
+      args.websocketMessageType
+    )
   );
   const message = await wait;
   const parsed = parseCustomizedEnvelope(message.text);
   if (parsed.cdp.id !== task.cdpId) {
     throw new StressError(
       "cdp_id_mismatch",
-      `expected cdp id ${task.cdpId}, got ${parsed.cdp.id}`,
+      `expected cdp id ${task.cdpId}, got ${parsed.cdp.id}`
     );
   }
   if (!containsMarker(parsed.cdp, task.marker)) {
     throw new StressError(
       "marker_mismatch",
-      `websocket response missing marker ${task.marker}`,
+      `websocket response missing marker ${task.marker}`
     );
   }
 }
 
-async function churnConnectorsAndFrontends(context, state, args, round, report) {
+async function churnConnectorsAndFrontends(
+  context,
+  state,
+  args,
+  round,
+  report
+) {
   const connectorCandidate = activeConnectors(state).find(
-    (entry) => !entry.primary,
+    (entry) => !entry.primary
   );
   if (connectorCandidate) {
     connectorCandidate.closed = true;
     await connectorCandidate.connector.close().catch((error) => {
       recordFailure(report, classifyError(error), error);
     });
-    const replacement = context.createConnector({ enableWebSocket: args.websocket });
+    const replacement = context.createConnector({
+      enableWebSocket: args.websocket,
+    });
     const replacementEntry = {
       id: `${connectorCandidate.id}-r${round + 1}`,
       connector: replacement,
@@ -770,7 +801,7 @@ async function runRecoveryProbe(context, state, args, report) {
     recordFailure(
       report,
       "daemon_recovery_failed",
-      new Error("missing daemon pid before recovery"),
+      new Error("missing daemon pid before recovery")
     );
     return;
   }
@@ -786,16 +817,20 @@ async function runRecoveryProbe(context, state, args, report) {
   await waitFor(
     () => !processExists(oldPid),
     5000,
-    `${state.platform} old daemon process exit`,
+    `${state.platform} old daemon process exit`
   );
 
   const primary = activeConnectors(state).find((entry) => entry.primary);
   if (!primary) {
-    throw new StressError("daemon_recovery_failed", "primary connector missing");
+    throw new StressError(
+      "daemon_recovery_failed",
+      "primary connector missing"
+    );
   }
   await retryTransientDaemonReconnect(
-    () => primary.connector.connectDevices(args.deviceTimeout, state.serial, true),
-    `${state.platform} recovery connectDevices`,
+    () =>
+      primary.connector.connectDevices(args.deviceTimeout, state.serial, true),
+    `${state.platform} recovery connectDevices`
   );
   state.targetClient = await retryTransientDaemonReconnect(
     () =>
@@ -805,9 +840,9 @@ async function runRecoveryProbe(context, state, args, report) {
         state.serial,
         state.clientName,
         args.clientTimeout,
-        args,
+        args
       ),
-    `${state.platform} recovery connectTargetClient`,
+    `${state.platform} recovery connectTargetClient`
   );
   if (args.websocket) {
     await primary.connector.startWSServer();
@@ -828,17 +863,22 @@ async function runRecoveryProbe(context, state, args, report) {
         : null;
     },
     10000,
-    `${state.platform} replacement daemon discovery`,
+    `${state.platform} replacement daemon discovery`
   );
   report.daemon.recoveryCount++;
   state.lastDaemonPid = newInfo.pid;
   report.daemon.finalPid = newInfo.pid;
   await refreshAndAssertState(context, state, args, report, "recovery");
 
-  const probeCount = Math.min(DEFAULT_RECOVERY_PROBE_MESSAGES, args.messageCount);
+  const probeCount = Math.min(
+    DEFAULT_RECOVERY_PROBE_MESSAGES,
+    args.messageCount
+  );
   const tasks = createMessageTasks(state, args, 999, 0, probeCount);
-  await runWithConcurrency(tasks, Math.min(args.concurrency, probeCount), (task) =>
-    runMessageTask(task, args, report),
+  await runWithConcurrency(
+    tasks,
+    Math.min(args.concurrency, probeCount),
+    (task) => runMessageTask(task, args, report)
   );
 }
 
@@ -852,7 +892,7 @@ async function runLegacyPreemptionProbe(context, state, args, report) {
     recordFailure(
       report,
       "legacy_preemption_failed",
-      new Error("missing daemon pid before legacy preemption"),
+      new Error("missing daemon pid before legacy preemption")
     );
     return;
   }
@@ -869,7 +909,7 @@ async function runLegacyPreemptionProbe(context, state, args, report) {
     await waitFor(
       () => readOwnerPid(context.legacyOwnerPath) === daemonPid,
       LEGACY_PREEMPTION_TIMEOUT,
-      `${state.platform} daemon owns legacy owner file`,
+      `${state.platform} daemon owns legacy owner file`
     );
 
     const legacyOwner = spawnLegacyOwnerProcess();
@@ -879,14 +919,14 @@ async function runLegacyPreemptionProbe(context, state, args, report) {
       await waitFor(
         () => statuses.includes(MultiOpenStatus.unattached),
         LEGACY_PREEMPTION_TIMEOUT,
-        `${state.platform} connector receives legacy unattached status`,
+        `${state.platform} connector receives legacy unattached status`
       );
       await waitFor(
         () =>
           primary.connector.devices.size === 0 &&
           primary.connector.usbClients.size === 0,
         LEGACY_PREEMPTION_TIMEOUT,
-        `${state.platform} connector mirror cleared after legacy preemption`,
+        `${state.platform} device and runtime mirrors cleared after legacy preemption`
       );
     } finally {
       stopLegacyOwnerProcess(legacyOwner);
@@ -898,7 +938,7 @@ async function runLegacyPreemptionProbe(context, state, args, report) {
         statuses.includes(MultiOpenStatus.attached) &&
         primary.connector.watchAllClientsStarted,
       Math.max(args.deviceTimeout, 5000),
-      `${state.platform} daemon reacquires legacy owner`,
+      `${state.platform} daemon reacquires legacy owner`
     );
     await launchAppIfNeeded(state.platform, args, { serial: state.serial });
     await refreshAndAssertState(context, state, args, report, "legacy");
@@ -938,7 +978,7 @@ async function cleanupContext(context, state, args, report) {
         },
         args.multiplexerDaemonIdleTimeout + 5000,
         "daemon idle cleanup",
-        250,
+        250
       ).catch((error) => {
         cleanupError = error;
       });
@@ -958,7 +998,7 @@ async function cleanupContext(context, state, args, report) {
     }
 
     const leftoverPids = Array.from(observedPids).filter((pid) =>
-      processExists(pid),
+      processExists(pid)
     );
     if (leftoverPids.length > 0) {
       for (const pid of leftoverPids) {
@@ -968,9 +1008,7 @@ async function cleanupContext(context, state, args, report) {
         report,
         "cleanup_leftover_daemon",
         cleanupError ??
-          new Error(
-            `leftover daemon pid=${leftoverPids.join(",")}`,
-          ),
+          new Error(`leftover daemon pid=${leftoverPids.join(",")}`)
       );
     }
   } finally {
@@ -986,15 +1024,15 @@ async function assertPlatformDeviceOnline(platform, args) {
       assert(
         onlineDevices.includes(serial),
         `Android device ${serial} is not online. adb devices: ${onlineDevices.join(
-          ", ",
-        )}`,
+          ", "
+        )}`
       );
       return;
     }
     if (onlineDevices.length === 0) {
       throw new StressError(
         "empty_devices",
-        "No online Android device found. Connect a device and authorize adb first.",
+        "No online Android device found. Connect a device and authorize adb first."
       );
     }
     return;
@@ -1010,14 +1048,14 @@ async function assertPlatformDeviceOnline(platform, args) {
       onlineDevices.some((device) => device.udid === serial),
       `iOS device ${serial} is not online. xcrun devices: ${onlineDevices
         .map((device) => `${device.name}(${device.udid})`)
-        .join(", ")}`,
+        .join(", ")}`
     );
     return;
   }
   if (onlineDevices.length === 0) {
     throw new StressError(
       "empty_devices",
-      "No online iOS device found. Connect and trust an iPhone before running this test.",
+      "No online iOS device found. Connect and trust an iPhone before running this test."
     );
   }
 }
@@ -1031,10 +1069,56 @@ async function listAndroidDevices() {
     .map((line) => line.split(/\s+/)[0]);
 }
 
+async function captureAndroidForwardBaseline(serial) {
+  const forwards = await listAndroidForwards(serial);
+  return {
+    serial,
+    entries: new Set(
+      forwards.map(({ local, remote }) => `${local}\u0000${remote}`)
+    ),
+  };
+}
+
+async function listAndroidForwards(serial) {
+  const output = await execFile(
+    "adb",
+    ["-s", serial, "forward", "--list"],
+    10000
+  );
+  return output
+    .split(/\n/)
+    .map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.length >= 3 && parts[0] === serial)
+    .map((parts) => ({
+      local: parts[1],
+      remote: parts[2],
+    }));
+}
+
+async function removeAddedAndroidForwards(baseline) {
+  const current = await listAndroidForwards(baseline.serial);
+  const added = current.filter(
+    ({ local, remote }) => !baseline.entries.has(`${local}\u0000${remote}`)
+  );
+  for (const { local } of added) {
+    await execFile(
+      "adb",
+      ["-s", baseline.serial, "forward", "--remove", local],
+      10000
+    );
+  }
+  if (added.length > 0) {
+    logStep(
+      "android",
+      `removed ${added.length} Android ADB forward(s) created by this run`
+    );
+  }
+}
+
 async function listIosDevices() {
   const output = await execRetryingTransientIOSCancel(
     "xcrun xctrace list devices",
-    15000,
+    15000
   );
   const devices = [];
   let inOnlineDevicesSection = false;
@@ -1051,7 +1135,9 @@ async function listIosDevices() {
     if (!inOnlineDevicesSection) {
       continue;
     }
-    const match = trimmed.match(/^(.+?) \((\d+(?:\.\d+)*)\) \(([0-9A-Fa-f-]+)\)$/);
+    const match = trimmed.match(
+      /^(.+?) \((\d+(?:\.\d+)*)\) \(([0-9A-Fa-f-]+)\)$/
+    );
     if (match) {
       devices.push({
         name: match[1],
@@ -1075,9 +1161,11 @@ async function connectTargetDevice(connector, platform, serial, timeout) {
   if (candidates.length === 0) {
     throw new StressError(
       "empty_devices",
-      `Expected ${platform} device${serial ? ` ${serial}` : ""}, got: ${devices
+      `Expected ${platform} device${
+        serial ? ` ${serial}` : ""
+      }, got: ${devices
         .map((device) => `${device.serial}(${device.info.os})`)
-        .join(", ")}`,
+        .join(", ")}`
     );
   }
   return candidates[0];
@@ -1088,7 +1176,7 @@ async function activateClientWatching(connector, platform, timeout) {
   await waitFor(
     () => connector.watchAllClientsStarted,
     Math.max(timeout, 5000),
-    `${platform} client watching activation`,
+    `${platform} client watching activation`
   );
 }
 
@@ -1098,12 +1186,17 @@ async function connectTargetClient(
   serial,
   clientName,
   timeout,
-  args,
+  args
 ) {
   let clients = [];
   const maxAttempts = platform === "ios" ? 3 : 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    clients = await connector.connectUsbClients(serial, timeout, true, clientName);
+    clients = await connector.connectUsbClients(
+      serial,
+      timeout,
+      true,
+      clientName
+    );
     if (clients.length > 0) {
       return clients[0];
     }
@@ -1116,7 +1209,7 @@ async function connectTargetClient(
     "empty_clients",
     `Expected at least one runtime client for ${serial}${
       clientName ? ` matching ${clientName}` : ""
-    }`,
+    }`
   );
 }
 
@@ -1126,7 +1219,7 @@ async function connectMatchingClient(
   serial,
   targetClient,
   timeout,
-  args,
+  args
 ) {
   let clients = [];
   let matched;
@@ -1141,7 +1234,7 @@ async function connectMatchingClient(
     });
     if (!matched) {
       matched = clients.find((client) =>
-        hasSameRuntimeIdentity(client, targetClient),
+        hasSameRuntimeIdentity(client, targetClient)
       );
     }
     if (matched) {
@@ -1154,9 +1247,9 @@ async function connectMatchingClient(
   }
   throw new StressError(
     "empty_clients",
-    `Expected matching runtime client ${describeClient(targetClient)} for ${serial}, got: ${clients
-      .map(describeClient)
-      .join(", ")}`,
+    `Expected matching runtime client ${describeClient(
+      targetClient
+    )} for ${serial}, got: ${clients.map(describeClient).join(", ")}`
   );
 }
 
@@ -1210,17 +1303,19 @@ function describeClient(client) {
 
 async function launchAppIfNeeded(platform, args, device) {
   if (platform === "android" && args.launchAndroidApp) {
-    const serialPrefix = device.serial ? `-s ${shellQuote(device.serial)} ` : "";
+    const serialPrefix = device.serial
+      ? `-s ${shellQuote(device.serial)} `
+      : "";
     const packageName = getAndroidPackageName(args.androidActivity);
     if (packageName) {
       await exec(
         `adb ${serialPrefix}shell am force-stop ${shellQuote(packageName)}`,
-        10000,
+        10000
       );
       await delay(500);
     }
     const command = `adb ${serialPrefix}shell am start -n ${shellQuote(
-      args.androidActivity,
+      args.androidActivity
     )} --es connection_type usb`;
     logStep(platform, `launching Android test app: ${command}`);
     await exec(command, 10000);
@@ -1229,10 +1324,9 @@ async function launchAppIfNeeded(platform, args, device) {
   }
 
   if (platform === "ios" && args.launchIOSApp) {
-    const command =
-      `xcrun devicectl device process launch --device ${shellQuote(
-        device.serial,
-      )} --terminate-existing ${shellQuote(args.iosBundleId)}`;
+    const command = `xcrun devicectl device process launch --device ${shellQuote(
+      device.serial
+    )} --terminate-existing ${shellQuote(args.iosBundleId)}`;
     logStep(platform, `launching iOS test app: ${command}`);
     await execRetryingTransientIOSCancel(command, 15000);
     await delay(2500);
@@ -1244,10 +1338,10 @@ async function assertFrontendClientLists(state, args, label) {
   await waitFor(
     () =>
       activeFrontends(state).every((frontend) =>
-        latestClientIds(frontend).includes(clientId),
+        latestClientIds(frontend).includes(clientId)
       ),
     Math.max(args.clientTimeout, 5000),
-    `${label}: frontends latest ClientList to include ${clientId}`,
+    `${label}: frontends latest ClientList to include ${clientId}`
   ).catch((error) => {
     throw new StressError("client_list_missing", error.message);
   });
@@ -1255,7 +1349,7 @@ async function assertFrontendClientLists(state, args, label) {
 
 function latestClientIds(frontend) {
   const clientLists = frontend.messages.filter(
-    (message) => message?.event === "ClientList",
+    (message) => message?.event === "ClientList"
   );
   if (clientLists.length === 0) {
     return [];
@@ -1287,7 +1381,7 @@ async function connectDriverWebSocket(url, info) {
             },
             type: "Driver",
           },
-        }),
+        })
       );
     }
   });
@@ -1298,7 +1392,7 @@ async function connectDriverWebSocket(url, info) {
   await waitFor(
     () => messages.find((message) => message?.event === "RoomJoined"),
     3000,
-    `${info.app} room joined`,
+    `${info.app} room joined`
   );
   return { socket, messages };
 }
@@ -1308,7 +1402,7 @@ function createCustomizedEnvelope(
   cdpId,
   method,
   marker,
-  type = DEFAULT_WEBSOCKET_MESSAGE_TYPE,
+  type = DEFAULT_WEBSOCKET_MESSAGE_TYPE
 ) {
   const message = {
     id: cdpId,
@@ -1344,13 +1438,13 @@ function waitForSocketMessage(
   socket,
   predicate,
   timeout,
-  label = "WebSocket message",
+  label = "WebSocket message"
 ) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
       reject(
-        new StressError("socket_timeout", `Timed out waiting for ${label}`),
+        new StressError("socket_timeout", `Timed out waiting for ${label}`)
       );
     }, timeout);
     const onMessage = (data) => {
@@ -1366,8 +1460,8 @@ function waitForSocketMessage(
       reject(
         new StressError(
           "connector_closed",
-          "WebSocket closed while waiting for message",
-        ),
+          "WebSocket closed while waiting for message"
+        )
       );
     };
     const cleanup = () => {
@@ -1382,7 +1476,10 @@ function waitForSocketMessage(
 
 function getWebSocketUrl(connector) {
   if (!connector.wssPort) {
-    throw new StressError("client_list_missing", "WebSocket server has no port");
+    throw new StressError(
+      "client_list_missing",
+      "WebSocket server has no port"
+    );
   }
   return `ws://127.0.0.1:${connector.wssPort}/mdevices/page/android`;
 }
@@ -1459,25 +1556,33 @@ function summarizeLatency(samples) {
 }
 
 function percentile(sorted, ratio) {
-  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1);
+  const index = Math.min(
+    sorted.length - 1,
+    Math.ceil(sorted.length * ratio) - 1
+  );
   return sorted[index];
 }
 
 function totalFailures(report) {
-  return Object.values(report.failures).reduce((total, value) => total + value, 0);
+  return Object.values(report.failures).reduce(
+    (total, value) => total + value,
+    0
+  );
 }
 
 function printReport(report) {
   const failures = totalFailures(report);
   logStep(
     report.platform,
-    `summary success=${report.success} failures=${failures} avg=${report.latencyMs.avg}ms p95=${report.latencyMs.p95}ms p99=${report.latencyMs.p99}ms daemonPidChanges=${report.daemon.pidChanges}`,
+    `summary success=${report.success} failures=${failures} avg=${report.latencyMs.avg}ms p95=${report.latencyMs.p95}ms p99=${report.latencyMs.p99}ms daemonPidChanges=${report.daemon.pidChanges}`
   );
   const nonZeroFailures = Object.entries(report.failures).filter(
-    ([_category, count]) => count > 0,
+    ([_category, count]) => count > 0
   );
   if (nonZeroFailures.length > 0) {
-    console.error(`[multiplexer-real-device-stress:${report.platform}] failures`);
+    console.error(
+      `[multiplexer-real-device-stress:${report.platform}] failures`
+    );
     for (const [category, count] of nonZeroFailures) {
       console.error(`  ${category}: ${count}`);
     }
@@ -1495,8 +1600,8 @@ function writeReports(reportPath, reports) {
     JSON.stringify(
       reports.length === 1 ? reports[0] : { platforms: reports },
       null,
-      2,
-    ),
+      2
+    )
   );
 }
 
@@ -1537,7 +1642,7 @@ async function runWithConcurrency(items, concurrency, task) {
         const item = items[nextIndex++];
         await task(item);
       }
-    },
+    }
   );
   await Promise.all(workers);
 }
@@ -1549,7 +1654,7 @@ function spawnLegacyOwnerProcess() {
     {
       stdio: "ignore",
       windowsHide: true,
-    },
+    }
   );
   assert(child.pid, "legacy owner helper process should have a pid");
   return child;
@@ -1575,11 +1680,35 @@ function exec(command, timeout) {
           return;
         }
         resolve(stdout);
-      },
+      }
     );
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error(`timeout:${timeout} exec:${command}`));
+    }, timeout);
+    child.on("exit", () => clearTimeout(timer));
+  });
+}
+
+function execFile(command, args, timeout) {
+  return new Promise((resolve, reject) => {
+    const child = childProcess.execFile(
+      command,
+      args,
+      { windowsHide: true },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve(stdout);
+      }
+    );
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(
+        new Error(`timeout:${timeout} execFile:${command} ${args.join(" ")}`)
+      );
     }, timeout);
     child.on("exit", () => clearTimeout(timer));
   });
@@ -1612,7 +1741,9 @@ function isTransientIOSCancelError(error) {
 function withTimeout(promise, timeout, label) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new StressError("send_timeout", `Timeout after ${timeout}ms: ${label}`));
+      reject(
+        new StressError("send_timeout", `Timeout after ${timeout}ms: ${label}`)
+      );
     }, timeout);
     promise.then(
       (value) => {
@@ -1622,7 +1753,7 @@ function withTimeout(promise, timeout, label) {
       (error) => {
         clearTimeout(timer);
         reject(error);
-      },
+      }
     );
   });
 }
@@ -1638,7 +1769,7 @@ async function stopDaemon(discoveryPath) {
   await waitFor(
     () => !processExists(discovery.pid),
     1000,
-    "daemon termination",
+    "daemon termination"
   ).catch(() => {
     try {
       process.kill(discovery.pid, "SIGKILL");
@@ -1647,7 +1778,7 @@ async function stopDaemon(discoveryPath) {
   await waitFor(
     () => !processExists(discovery.pid),
     1000,
-    "daemon force termination",
+    "daemon force termination"
   ).catch(() => {});
 }
 
@@ -1761,7 +1892,7 @@ async function stopInterferingMultiplexerDaemons() {
   }
 
   console.log(
-    `[multiplexer-real-device-stress] stopping ${targets.length} existing multiplexer daemon(s)`,
+    `[multiplexer-real-device-stress] stopping ${targets.length} existing multiplexer daemon(s)`
   );
   for (const target of targets) {
     try {
@@ -1772,7 +1903,7 @@ async function stopInterferingMultiplexerDaemons() {
   await waitFor(
     () => targets.every((target) => !processExists(target.pid)),
     2000,
-    "existing multiplexer daemon graceful stop",
+    "existing multiplexer daemon graceful stop"
   ).catch(() => {});
 
   for (const target of targets.filter((entry) => processExists(entry.pid))) {
@@ -1798,7 +1929,7 @@ function listInterferingMultiplexerDaemons() {
         process.env.HOME || os.homedir(),
         ".DebugRouterConnector",
         "multiplexer",
-        "daemon.json",
+        "daemon.json"
       );
       const targets = stdout
         .split(/\n/)
@@ -1821,9 +1952,11 @@ function listInterferingMultiplexerDaemons() {
             return false;
           }
           return (
-            entry.command.includes(`--discovery-path ${defaultDiscoveryPath}`) ||
+            entry.command.includes(
+              `--discovery-path ${defaultDiscoveryPath}`
+            ) ||
             /\/T\/debug-router-real(?:-stress)?-[^/]+\/multiplexer\/daemon\.json/.test(
-              entry.command,
+              entry.command
             )
           );
         });
@@ -1843,10 +1976,13 @@ async function main() {
   }
 
   writeReports(args.report, reports);
-  const failures = reports.reduce((total, report) => total + totalFailures(report), 0);
+  const failures = reports.reduce(
+    (total, report) => total + totalFailures(report),
+    0
+  );
   if (failures > 0) {
     console.error(
-      `[multiplexer-real-device-stress] TEST FAILED with ${failures} failure(s)`,
+      `[multiplexer-real-device-stress] TEST FAILED with ${failures} failure(s)`
     );
     process.exitCode = 1;
     return;

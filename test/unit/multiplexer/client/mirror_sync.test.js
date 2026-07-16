@@ -11,8 +11,14 @@ const {
   MultiplexerUsbClient,
 } = require("../../../../debug_router_connector/src/multiplexer/client");
 const {
+  MultiplexerWebSocketClient,
+} = require("../../../../debug_router_connector/src/multiplexer/client/MultiplexerWebSocketClient");
+const {
   defaultLogger,
 } = require("../../../../debug_router_connector/src/utils/logger");
+const {
+  WebSocketClient,
+} = require("../../../../debug_router_connector/src/websocket/WebSocketConnection");
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -67,6 +73,20 @@ function createClientSnapshot(overrides = {}) {
   };
 }
 
+function createWebSocketClientSnapshot(overrides = {}) {
+  return {
+    id: overrides.id ?? 100,
+    app: overrides.app ?? "wifi-demo",
+    debugRouterVersion: overrides.debugRouterVersion ?? "1.0.0",
+    deviceModel: overrides.deviceModel ?? "Pixel",
+    network: "WiFi",
+    osVersion: overrides.osVersion ?? "14",
+    sdkVersion: overrides.sdkVersion ?? "2.0.0",
+    type: overrides.type ?? "runtime",
+    raw_info: overrides.rawInfo ?? { App: "WiFi Demo" },
+  };
+}
+
 function createCustomizedMessage(type, data) {
   return JSON.stringify({
     event: "Customized",
@@ -114,7 +134,6 @@ describe("multiplexer client mirror sync", function () {
       }),
       daemonClient
     );
-
     device.disConnect();
     device.updateFromSnapshot(
       createDeviceSnapshot({
@@ -360,6 +379,165 @@ describe("multiplexer client mirror sync", function () {
     );
   });
 
+  it("builds a legacy WebSocketClient-compatible proxy with stable mutable info identity", function () {
+    const daemonClient = createDaemonClient();
+    const snapshot = createWebSocketClientSnapshot({
+      rawInfo: { App: "Original" },
+    });
+    const client = MultiplexerWebSocketClient.fromSnapshot(
+      snapshot,
+      daemonClient
+    );
+
+    snapshot.raw_info.App = "Changed";
+    const info = client.info;
+    info.raw_info.App = "Mutated";
+    info.externalMarker = "keep-me";
+
+    assert.strictEqual(client instanceof WebSocketClient, true);
+    assert.strictEqual(client.clientId(), 100);
+    assert.strictEqual(client.type(), "runtime");
+    assert.strictEqual(client.info, info);
+    assert.deepStrictEqual(client.info.raw_info, { App: "Mutated" });
+
+    client.updateFromSnapshot(
+      createWebSocketClientSnapshot({
+        id: 100,
+        app: "updated",
+        rawInfo: { App: "Updated" },
+      })
+    );
+    assert.strictEqual(client.info, info);
+    assert.strictEqual(client.info.app, "updated");
+    assert.deepStrictEqual(client.info.raw_info, { App: "Updated" });
+    assert.strictEqual(client.info.externalMarker, "keep-me");
+    assert.throws(
+      () =>
+        client.updateFromSnapshot(createWebSocketClientSnapshot({ id: 101 })),
+      /Cannot update multiplexer WebSocket client 100/
+    );
+  });
+
+  it("delegates handleListClients only for legacy Driver proxies", function () {
+    const daemonClient = createDaemonClient();
+    let calls = 0;
+    const driver = MultiplexerWebSocketClient.fromSnapshot(
+      createWebSocketClientSnapshot({ type: "Driver" }),
+      daemonClient,
+      () => calls++
+    );
+    const runtime = MultiplexerWebSocketClient.fromSnapshot(
+      createWebSocketClientSnapshot({ id: 101, type: "runtime" }),
+      daemonClient,
+      () => calls++
+    );
+
+    driver.handleListClients();
+    runtime.handleListClients();
+
+    assert.strictEqual(calls, 1);
+  });
+
+  it("forwards MultiplexerWebSocketClient compatibility APIs to daemon RPC", async function () {
+    const daemonClient = createDaemonClient({
+      results: new Map([["sendCustomizedMessage", "wifi-result"]]),
+    });
+    const client = MultiplexerWebSocketClient.fromSnapshot(
+      createWebSocketClientSnapshot(),
+      daemonClient
+    );
+
+    client.close();
+    client.sendMessage("raw-message");
+    const customized = await client.sendCustomizedMessage(
+      "Runtime.evaluate",
+      { expression: "1 + 1" },
+      7,
+      "CDP"
+    );
+    await nextTick();
+
+    assert.strictEqual(customized, "wifi-result");
+    assert.deepStrictEqual(daemonClient.state.calls, [
+      {
+        method: "closeClient",
+        params: { clientId: 100 },
+      },
+      {
+        method: "sendMessage",
+        params: { clientId: 100, message: "raw-message" },
+      },
+      {
+        method: "sendCustomizedMessage",
+        params: {
+          clientId: 100,
+          method: "Runtime.evaluate",
+          params: { expression: "1 + 1" },
+          sessionId: 7,
+          type: "CDP",
+        },
+      },
+    ]);
+  });
+
+  it("forwards sendCustomizedMessage RPC errors without legacy rewrapping", async function () {
+    const daemonClient = createDaemonClient({
+      rejectMethods: new Set(["sendCustomizedMessage"]),
+    });
+    daemonClient.call = async (method, params) => {
+      daemonClient.state.calls.push({ method, params });
+      throw new Error(
+        "Timed out waiting for multiplexer RPC sendCustomizedMessage response"
+      );
+    };
+    const client = MultiplexerWebSocketClient.fromSnapshot(
+      createWebSocketClientSnapshot(),
+      daemonClient
+    );
+
+    await assert.rejects(
+      client.sendCustomizedMessage(
+        "Runtime.evaluate",
+        { expression: "1 + 1" },
+        7,
+        "CDP"
+      ),
+      (error) => {
+        assert.strictEqual(
+          error.message,
+          "Timed out waiting for multiplexer RPC sendCustomizedMessage response"
+        );
+        return true;
+      }
+    );
+  });
+
+  it("contains rejected fire-and-forget WebSocket proxy RPCs", async function () {
+    const daemonClient = createDaemonClient({
+      rejectMethods: new Set(["closeClient", "sendMessage"]),
+    });
+    const client = MultiplexerWebSocketClient.fromSnapshot(
+      createWebSocketClientSnapshot(),
+      daemonClient
+    );
+    const originalWarn = defaultLogger.warn;
+    const warnings = [];
+    defaultLogger.warn = (...args) => warnings.push(args);
+
+    try {
+      assert.doesNotThrow(() => client.close());
+      assert.doesNotThrow(() => client.sendMessage("message"));
+      await nextTick();
+      assert.deepStrictEqual(
+        daemonClient.state.calls.map((call) => call.method),
+        ["closeClient", "sendMessage"]
+      );
+      assert.deepStrictEqual(warnings, []);
+    } finally {
+      defaultLogger.warn = originalWarn;
+    }
+  });
+
   it("emits session list, CDP, App, once, off, and all-event callbacks from USB messages", function () {
     const daemonClient = createDaemonClient();
     const client = MultiplexerUsbClient.fromSnapshot(
@@ -372,9 +550,7 @@ describe("multiplexer client mirror sync", function () {
     const onceEvents = [];
     const offHandler = (...params) => offEvents.push(params);
 
-    client.on("Runtime.consoleAPICalled", (...params) =>
-      events.push(params)
-    );
+    client.on("Runtime.consoleAPICalled", (...params) => events.push(params));
     client.on("off-event", offHandler);
     client.off("off-event", offHandler);
     client.once("once-event", (...params) => onceEvents.push(params));

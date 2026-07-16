@@ -95,8 +95,7 @@ function createClient(snapshot, connector) {
       snapshot.deviceModel ?? snapshot.query?.device_model ?? "Pixel",
     device_id: deviceId,
     sdk_version: snapshot.sdkVersion ?? snapshot.query?.sdk_version ?? "1.0.0",
-    raw_info:
-      snapshot.rawInfo ??
+    raw_info: snapshot.rawInfo ??
       snapshot.query?.raw_info ?? {
         AppProcessName: snapshot.processName ?? `com.demo.${id}`,
         App: snapshot.appName ?? `Demo ${id}`,
@@ -160,6 +159,7 @@ class FakePhysicalConnector {
     this.usbClients = new Map();
     this.nextClientId = 1000;
     this.closed = false;
+    this.traceRecorder = option.traceRecorder ?? null;
     this.dataDir = path.dirname(option.discoveryPathForFake);
     this.statePath = path.join(this.dataDir, STATE_FILE_NAME);
     this.commandPath = path.join(this.dataDir, COMMAND_FILE_NAME);
@@ -207,7 +207,11 @@ class FakePhysicalConnector {
     return ++this.nextClientId;
   }
 
-  async connectDevices(_timeout = -1, serial = null, isAutoListenClients = true) {
+  async connectDevices(
+    _timeout = -1,
+    serial = null,
+    isAutoListenClients = true
+  ) {
     this.record("connect-devices", { serial, isAutoListenClients });
     return this.getDevices(-1, serial);
   }
@@ -217,7 +221,9 @@ class FakePhysicalConnector {
     if (serial === null || serial === undefined) {
       return Promise.resolve(devices);
     }
-    return Promise.resolve(devices.filter((device) => device.serial === serial));
+    return Promise.resolve(
+      devices.filter((device) => device.serial === serial)
+    );
   }
 
   startWatchClient(device) {
@@ -235,7 +241,12 @@ class FakePhysicalConnector {
     this.record("disable-all-clients");
   }
 
-  async connectUsbClients(deviceId, timeout = -1, waitTimeout = true, clientName = null) {
+  async connectUsbClients(
+    deviceId,
+    timeout = -1,
+    waitTimeout = true,
+    clientName = null
+  ) {
     this.record("connect-usb-clients", {
       deviceId,
       timeout,
@@ -247,7 +258,7 @@ class FakePhysicalConnector {
 
   getDeviceUsbClients(_deviceId, _timeout = -1, clientName = null) {
     const clients = Array.from(this.usbClients.values()).filter(
-      (client) => client.deviceId() === _deviceId,
+      (client) => client.deviceId() === _deviceId
     );
     if (clientName === null || clientName === undefined) {
       return Promise.resolve(clients);
@@ -259,7 +270,7 @@ class FakePhysicalConnector {
           query.raw_info?.AppProcessName === clientName ||
           query.raw_info?.App === clientName
         );
-      }),
+      })
     );
   }
 
@@ -385,7 +396,9 @@ class FakePhysicalConnector {
       },
     };
     customized.message =
-      typeof payload === "string" ? JSON.stringify(responseInner) : responseInner;
+      typeof payload === "string"
+        ? JSON.stringify(responseInner)
+        : responseInner;
     return JSON.stringify(data);
   }
 
@@ -431,6 +444,16 @@ class FakePhysicalConnector {
       case "emit-usb-message":
         this.emitUsbMessage(command.id, command.message);
         break;
+      case "record-client-watch-start": {
+        const device = this.devices.get(command.deviceId);
+        this.traceRecorder?.recordWatchClientStart(command.deviceId, {
+          source: command.source ?? "fake-daemon",
+        });
+        if (device) {
+          this.emit("device-connected", device);
+        }
+        break;
+      }
       case "throw-uncaught-error":
         throw new Error(command.message ?? "fake daemon uncaught error");
       case "emit-control-socket-error":
@@ -438,7 +461,7 @@ class FakePhysicalConnector {
           throw new Error("control socket error hook is unavailable");
         }
         emitControlSocketError(
-          command.message ?? "fake daemon control socket error",
+          command.message ?? "fake daemon control socket error"
         );
         break;
       default:
@@ -467,6 +490,7 @@ async function main() {
   });
 
   const host = new MultiplexerHost({
+    ...entryOption.physicalConnectorOption,
     controlPort: entryOption.controlPort,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
@@ -575,7 +599,7 @@ async function main() {
 
 void main().catch((error) => {
   const discoveryPathIndex = process.argv.findIndex(
-    (arg) => arg === "--discovery-path",
+    (arg) => arg === "--discovery-path"
   );
   const discoveryPath =
     discoveryPathIndex >= 0 ? process.argv[discoveryPathIndex + 1] : undefined;

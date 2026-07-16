@@ -19,7 +19,7 @@ const {
 
 const fakeDaemonEntry = path.resolve(
   __dirname,
-  "../../../integration/multiplexer/fixtures/fake_daemon_entry.js",
+  "../../../integration/multiplexer/fixtures/fake_daemon_entry.js"
 );
 
 const DATA_DIR_NAME = "multiplexer";
@@ -45,14 +45,14 @@ function createPaths(rootDir) {
 
 function createContext(name, state, option = {}) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-e2e-${name}-`),
+    path.join(os.tmpdir(), `debug-router-e2e-${name}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
   const legacyOwnerPath = path.join(legacyDriverDir, "LatestDriverProcess");
   const hadOriginalHome = Object.prototype.hasOwnProperty.call(
     process.env,
-    "HOME",
+    "HOME"
   );
   const originalHome = process.env.HOME;
   fs.mkdirSync(homeDir, { recursive: true });
@@ -62,7 +62,7 @@ function createContext(name, state, option = {}) {
   fs.mkdirSync(paths.dataDir, { recursive: true });
   fs.writeFileSync(
     path.join(paths.dataDir, STATE_FILE_NAME),
-    JSON.stringify(state, null, 2),
+    JSON.stringify(state, null, 2)
   );
 
   const connectors = [];
@@ -101,7 +101,7 @@ function createContext(name, state, option = {}) {
     appendCommand(command) {
       fs.appendFileSync(
         path.join(paths.dataDir, COMMAND_FILE_NAME),
-        `${JSON.stringify(command)}\n`,
+        `${JSON.stringify(command)}\n`
       );
     },
     readLog() {
@@ -168,7 +168,7 @@ async function runEmptyDaemonFlow() {
     },
     {
       multiplexerDaemonIdleTimeout: 120,
-    },
+    }
   );
   let daemonPid;
 
@@ -178,14 +178,14 @@ async function runEmptyDaemonFlow() {
     assert.deepStrictEqual(devices, []);
     assert.deepStrictEqual(
       await connector.connectUsbClients("missing-device", 100, false),
-      [],
+      []
     );
     assert.deepStrictEqual(connector.getAllUsbClients(), []);
 
     const discovery = await waitFor(
       () => readJsonFile(context.paths.discoveryPath, null),
       2000,
-      "daemon discovery",
+      "daemon discovery"
     );
     daemonPid = discovery.pid;
     assert(processExists(daemonPid), "daemon should be alive while connected");
@@ -197,7 +197,7 @@ async function runEmptyDaemonFlow() {
         !fs.existsSync(context.paths.daemonLockPath) &&
         !processExists(daemonPid),
       2500,
-      "idle daemon cleanup",
+      "idle daemon cleanup"
     );
 
     const events = context.readLog().map((entry) => entry.event);
@@ -231,17 +231,17 @@ async function runSharedDaemonMirrorFlow() {
     ]);
     assert.deepStrictEqual(
       firstDevices.map((device) => device.serial),
-      ["device-1"],
+      ["device-1"]
     );
     assert.deepStrictEqual(
       secondDevices.map((device) => device.serial),
-      ["device-1"],
+      ["device-1"]
     );
 
     const discovery = await waitFor(
       () => readJsonFile(context.paths.discoveryPath, null),
       3000,
-      "shared daemon discovery",
+      "shared daemon discovery"
     );
     daemonPid = discovery?.pid;
     assert(daemonPid, "expected daemon pid in discovery");
@@ -252,11 +252,11 @@ async function runSharedDaemonMirrorFlow() {
     ]);
     assert.deepStrictEqual(
       firstClients.map((client) => client.clientId()),
-      [1],
+      [1]
     );
     assert.deepStrictEqual(
       secondClients.map((client) => client.clientId()),
-      [1],
+      [1]
     );
     assert.notStrictEqual(firstClients[0], secondClients[0]);
 
@@ -288,15 +288,15 @@ async function runSharedDaemonMirrorFlow() {
     await waitFor(
       () => first.usbClients.has(2) && second.usbClients.has(2),
       2000,
-      "dynamic client mirror",
+      "dynamic client mirror"
     );
     assert.deepStrictEqual(
       firstConnected.map((client) => client.clientId()),
-      [1, 2],
+      [1, 2]
     );
     assert.deepStrictEqual(
       secondConnected.map((client) => client.clientId()),
-      [1, 2],
+      [1, 2]
     );
 
     const notification = JSON.stringify({
@@ -320,17 +320,17 @@ async function runSharedDaemonMirrorFlow() {
     await waitFor(
       () => firstMessages.length === 1 && secondMessages.length === 1,
       2000,
-      "usb message fanout",
+      "usb message fanout"
     );
     assert.strictEqual(firstMessages[0].id, 2);
     assert.strictEqual(secondMessages[0].id, 2);
     assert.strictEqual(
       parseCustomizedEnvelope(firstMessages[0].message).cdp.params.marker,
-      "broadcast",
+      "broadcast"
     );
     assert.strictEqual(
       parseCustomizedEnvelope(secondMessages[0].message).cdp.params.marker,
-      "broadcast",
+      "broadcast"
     );
 
     context.appendCommand({
@@ -340,7 +340,7 @@ async function runSharedDaemonMirrorFlow() {
     await waitFor(
       () => !first.usbClients.has(2) && !second.usbClients.has(2),
       2000,
-      "dynamic client removal",
+      "dynamic client removal"
     );
     assert.deepStrictEqual(firstDisconnected, [2]);
     assert.deepStrictEqual(secondDisconnected, [2]);
@@ -352,14 +352,14 @@ async function runSharedDaemonMirrorFlow() {
         !fs.existsSync(context.paths.daemonLockPath) &&
         !processExists(daemonPid),
       2500,
-      "shared daemon idle cleanup",
+      "shared daemon idle cleanup"
     );
 
     const startedPids = new Set(
       context
         .readLog()
         .filter((entry) => entry.event === "daemon-started")
-        .map((entry) => entry.pid),
+        .map((entry) => entry.pid)
     );
     assert.deepStrictEqual([...startedPids], [daemonPid]);
   } finally {
@@ -387,7 +387,7 @@ async function runLegacyPreemptionFlow() {
       },
     });
     connector.on("device-disconnected", (device) =>
-      disconnectedDevices.push(device.serial),
+      disconnectedDevices.push(device.serial)
     );
     connector.on("client-disconnected", (id) => disconnectedClients.push(id));
 
@@ -397,19 +397,19 @@ async function runLegacyPreemptionFlow() {
     await waitFor(
       () => connector.watchAllClientsStarted,
       2000,
-      "initial legacy watch all clients",
+      "initial legacy watch all clients"
     );
 
     const discovery = await waitFor(
       () => readJsonFile(context.paths.discoveryPath, null),
       3000,
-      "legacy preemption daemon discovery",
+      "legacy preemption daemon discovery"
     );
     assert(processExists(discovery.pid), "daemon should be alive");
     await waitFor(
       () => readOwnerPid(context.legacyOwnerPath) === discovery.pid,
       3000,
-      "daemon owns legacy owner file",
+      "daemon owns legacy owner file"
     );
 
     fs.mkdirSync(context.legacyDriverDir, { recursive: true });
@@ -417,7 +417,7 @@ async function runLegacyPreemptionFlow() {
     await waitFor(
       () => multiOpenStatuses.includes(MultiOpenStatus.unattached),
       3000,
-      "connector receives legacy unattached status",
+      "connector receives legacy unattached status"
     );
     await waitFor(
       () =>
@@ -425,7 +425,7 @@ async function runLegacyPreemptionFlow() {
         connector.usbClients.size === 0 &&
         connector.watchAllClientsStarted === false,
       3000,
-      "connector mirror cleared after legacy preemption",
+      "connector device and runtime mirrors cleared after legacy preemption"
     );
     assert.deepStrictEqual(disconnectedClients, [1]);
     assert.deepStrictEqual(disconnectedDevices, ["device-1"]);
@@ -457,13 +457,13 @@ async function runLegacyPreemptionFlow() {
         return (
           log.some(
             (entry) =>
-              entry.event === "device-added" && entry.serial === "device-2",
+              entry.event === "device-added" && entry.serial === "device-2"
           ) &&
           log.some((entry) => entry.event === "client-added" && entry.id === 2)
         );
       },
       2000,
-      "fake physical updates while preempted",
+      "fake physical updates while preempted"
     );
     assert.strictEqual(connector.devices.has("device-2"), false);
     assert.strictEqual(connector.usbClients.has(2), false);
@@ -474,7 +474,7 @@ async function runLegacyPreemptionFlow() {
         multiOpenStatuses.includes(MultiOpenStatus.attached) &&
         connector.watchAllClientsStarted,
       3000,
-      "daemon reacquires legacy owner",
+      "daemon reacquires legacy owner"
     );
     assert.strictEqual(readOwnerPid(context.legacyOwnerPath), discovery.pid);
 
@@ -483,15 +483,15 @@ async function runLegacyPreemptionFlow() {
       "device-2",
       -1,
       true,
-      null,
+      null
     );
     assert(
       devices.some((device) => device.serial === "device-2"),
-      "device-2 should be discoverable after daemon reacquires legacy owner",
+      "device-2 should be discoverable after daemon reacquires legacy owner"
     );
     assert.deepStrictEqual(
       clients.map((client) => client.clientId()),
-      [2],
+      [2]
     );
   } finally {
     await context.cleanup();
@@ -519,7 +519,7 @@ async function runWebSocketMirrorRecoveryFlow() {
     const disconnectedDevices = [];
     const disconnectedClients = [];
     connector.on("device-disconnected", (device) =>
-      disconnectedDevices.push(device.serial),
+      disconnectedDevices.push(device.serial)
     );
     connector.on("client-disconnected", (id) => disconnectedClients.push(id));
 
@@ -529,14 +529,14 @@ async function runWebSocketMirrorRecoveryFlow() {
     await waitFor(
       () => connector.watchAllClientsStarted,
       2000,
-      "initial WatchAllClients",
+      "initial WatchAllClients"
     );
     await connector.startWSServer();
 
     const discovery = await waitFor(
       () => readJsonFile(context.paths.discoveryPath, null),
       2000,
-      "websocket recovery discovery",
+      "websocket recovery discovery"
     );
     initialPid = discovery.pid;
     assert(connector.wssPort > 0, "websocket port should be assigned");
@@ -552,7 +552,7 @@ async function runWebSocketMirrorRecoveryFlow() {
         connector.devices.size === 0 &&
         connector.usbClients.size === 0,
       3000,
-      "websocket mirror cleared after daemon kill",
+      "websocket mirror cleared after daemon kill"
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
     assert.strictEqual(connector.desiredWatchAllClientsForce, false);
@@ -561,7 +561,7 @@ async function runWebSocketMirrorRecoveryFlow() {
     await waitFor(
       () => !processExists(initialPid),
       3000,
-      "old websocket daemon exits",
+      "old websocket daemon exits"
     );
 
     const replacement = await waitFor(
@@ -581,7 +581,7 @@ async function runWebSocketMirrorRecoveryFlow() {
         return null;
       },
       10000,
-      "websocket mirror restored after daemon respawn",
+      "websocket mirror restored after daemon respawn"
     );
     assert.notStrictEqual(replacement.pid, initialPid);
     assert.deepStrictEqual(connector.wss, {
@@ -613,7 +613,7 @@ async function runCompatibilityUpgradeFlow() {
     await waitFor(
       () => !processExists(daemonV1.pid),
       3000,
-      "v1 daemon replaced",
+      "v1 daemon replaced"
     );
 
     await v1.client.reconnect();
@@ -628,26 +628,30 @@ async function runCompatibilityUpgradeFlow() {
     await waitFor(
       () => !processExists(daemonV2.pid),
       3000,
-      "v2 daemon replaced",
+      "v2 daemon replaced"
     );
 
     await assert.rejects(
       () => v1.client.reconnect(),
-      /requires debug-router-connector protocol 2 or newer/i,
+      /requires debug-router-connector protocol 2 or newer/i
     );
     await v2.client.reconnect();
     await v3.client.reconnect();
     await connectRuntime(v2.client);
     await connectRuntime(v3.client);
 
-    await Promise.all([v1.client.close(), v2.client.close(), v3.client.close()]);
+    await Promise.all([
+      v1.client.close(),
+      v2.client.close(),
+      v3.client.close(),
+    ]);
     await waitFor(
       () =>
         !fs.existsSync(context.paths.discoveryPath) &&
         !fs.existsSync(context.paths.daemonLockPath) &&
         !processExists(daemonV3.pid),
       2500,
-      "upgrade daemon idle cleanup",
+      "upgrade daemon idle cleanup"
     );
 
     const startedPids = context
@@ -664,7 +668,12 @@ async function runCompatibilityUpgradeFlow() {
   }
 }
 
-function createVersionedControl(context, name, protocolVersion, minSupportedVersion) {
+function createVersionedControl(
+  context,
+  name,
+  protocolVersion,
+  minSupportedVersion
+) {
   const discovery = new MultiplexerDiscovery({
     discoveryPath: context.paths.discoveryPath,
     staleTimeout: 500,
@@ -703,7 +712,7 @@ async function connectRuntime(client) {
   });
   assert.deepStrictEqual(
     devices.map((device) => device.serial),
-    ["device-1"],
+    ["device-1"]
   );
 
   const clients = await client.call("connectUsbClients", {
@@ -714,7 +723,7 @@ async function connectRuntime(client) {
   });
   assert.deepStrictEqual(
     clients.map((client) => client.id),
-    [1],
+    [1]
   );
 }
 
@@ -725,7 +734,7 @@ async function waitForDiscoveryProtocol(context, protocolVersion) {
       return info?.protocolVersion === protocolVersion ? info : null;
     },
     3000,
-    `daemon protocol ${protocolVersion}`,
+    `daemon protocol ${protocolVersion}`
   );
 }
 
@@ -749,7 +758,7 @@ async function stopDaemon(discoveryPath) {
   await waitFor(
     () => !processExists(discovery.pid) || !fs.existsSync(discoveryPath),
     1000,
-    "daemon termination",
+    "daemon termination"
   ).catch(() => {
     try {
       process.kill(discovery.pid, "SIGKILL");

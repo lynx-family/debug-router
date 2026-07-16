@@ -3,7 +3,10 @@
 // LICENSE file in the root directory of this source tree.
 
 export { DebugRouterConnector } from "./connector";
-export type { DebugRouterConnectorOption, devOption } from "./connector";
+export type {
+  DebugRouterConnectorOption,
+  devOption,
+} from "./connector";
 export { MultiplexerDevice, MultiplexerUsbClient } from "./multiplexer";
 export type {
   ClientSnapshot,

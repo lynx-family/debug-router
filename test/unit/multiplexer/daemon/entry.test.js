@@ -247,6 +247,11 @@ describe("multiplexer daemon entry", function () {
         usbConnectOpt: {
           retryTime: 5000,
         },
+        connectionTrace: {
+          enabled: true,
+          output: "/tmp/connection-trace.ndjson",
+          bufferSize: 100,
+        },
       }),
     ]);
 
@@ -261,6 +266,11 @@ describe("multiplexer daemon entry", function () {
       },
       usbConnectOpt: {
         retryTime: 5000,
+      },
+      connectionTrace: {
+        enabled: true,
+        output: "/tmp/connection-trace.ndjson",
+        bufferSize: 100,
       },
     });
   });
@@ -290,6 +300,26 @@ describe("multiplexer daemon entry", function () {
         ]),
       /expected object/
     );
+    for (const invalidOption of [
+      { connectionTrace: null },
+      { connectionTrace: { enabled: "true" } },
+      { connectionTrace: { output: { stream: true } } },
+      { connectionTrace: { bufferSize: -1 } },
+      { traceRecorder: {} },
+    ]) {
+      assert.throws(
+        () =>
+          parseEntryOption([
+            "--discovery-path",
+            "/tmp/daemon.json",
+            "--daemon-lock-path",
+            "/tmp/daemon.lock",
+            "--physical-connector-option",
+            JSON.stringify(invalidOption),
+          ]),
+        /Invalid multiplexer daemon option physicalConnectorOption/
+      );
+    }
   });
 
   it("rejects missing required options", function () {

@@ -364,6 +364,9 @@ describe("MultiplexerDaemonManager", function () {
       usbConnectOpt: {
         retryTime: 5000,
       },
+      traceRecorder: {
+        shouldNotCrossProcessBoundary: true,
+      },
     };
     const { manager, spawnRecorder } = createManager(tempDir, {
       discovery,
@@ -381,10 +384,23 @@ describe("MultiplexerDaemonManager", function () {
     const args = spawnRecorder.calls[0].args;
     const optionIndex = args.indexOf("--physical-connector-option");
     assert.notStrictEqual(optionIndex, -1);
-    assert.deepStrictEqual(
-      JSON.parse(args[optionIndex + 1]),
-      physicalConnectorOption
-    );
+    const serializedOption = JSON.parse(args[optionIndex + 1]);
+    assert.strictEqual("traceRecorder" in serializedOption, false);
+    assert.deepStrictEqual(serializedOption, {
+      manualConnect: true,
+      enableAndroid: true,
+      enableIOS: false,
+      enableHarmony: false,
+      enableDesktop: false,
+      enableNetworkDevice: false,
+      adbHostPort: {
+        host: "127.0.0.1",
+        port: 5037,
+      },
+      usbConnectOpt: {
+        retryTime: 5000,
+      },
+    });
   });
 
   it("waits for an in-flight spawn when spawn lock is held elsewhere", async function () {

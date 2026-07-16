@@ -4,13 +4,11 @@ const os = require("os");
 const path = require("path");
 const { WebSocket } = require("ws");
 
-const {
-  DebugRouterConnector,
-} = require("@lynx-js/debug-router-connector");
+const { DebugRouterConnector } = require("@lynx-js/debug-router-connector");
 
 const fakeDaemonEntry = path.resolve(
   __dirname,
-  "../../../integration/multiplexer/fixtures/fake_daemon_entry.js",
+  "../../../integration/multiplexer/fixtures/fake_daemon_entry.js"
 );
 
 const DATA_DIR_NAME = "multiplexer";
@@ -62,12 +60,12 @@ function defaultState() {
 
 function createContext(name, state = defaultState()) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-e2e-${name}-`),
+    path.join(os.tmpdir(), `debug-router-e2e-${name}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const hadOriginalHome = Object.prototype.hasOwnProperty.call(
     process.env,
-    "HOME",
+    "HOME"
   );
   const originalHome = process.env.HOME;
   fs.mkdirSync(homeDir, { recursive: true });
@@ -77,7 +75,7 @@ function createContext(name, state = defaultState()) {
   fs.mkdirSync(paths.dataDir, { recursive: true });
   fs.writeFileSync(
     path.join(paths.dataDir, STATE_FILE_NAME),
-    JSON.stringify(state, null, 2),
+    JSON.stringify(state, null, 2)
   );
 
   const sockets = [];
@@ -118,7 +116,7 @@ function createContext(name, state = defaultState()) {
     appendCommand(command) {
       fs.appendFileSync(
         path.join(paths.dataDir, COMMAND_FILE_NAME),
-        `${JSON.stringify(command)}\n`,
+        `${JSON.stringify(command)}\n`
       );
     },
     readLog() {
@@ -172,7 +170,7 @@ async function connectDriverWebSocket(url, info) {
             },
             type: "Driver",
           },
-        }),
+        })
       );
     }
   });
@@ -183,7 +181,7 @@ async function connectDriverWebSocket(url, info) {
   await waitFor(
     () => messages.find((message) => message?.event === "RoomJoined"),
     2000,
-    `${info.app} room joined`,
+    `${info.app} room joined`
   );
   return { socket, messages };
 }
@@ -203,7 +201,7 @@ async function runWebSocketRoutingFlow() {
     const discovery = await waitFor(
       () => readJsonFile(context.paths.discoveryPath, null),
       3000,
-      "websocket daemon discovery",
+      "websocket daemon discovery"
     );
     daemonPid = discovery?.pid;
     assert(daemonPid, "expected daemon pid in discovery");
@@ -219,10 +217,10 @@ async function runWebSocketRoutingFlow() {
         first.messages.find(
           (message) =>
             message?.event === "ClientList" &&
-            message.data?.some((client) => client.id === 1),
+            message.data?.some((client) => client.id === 1)
         ),
       2000,
-      "driver receives usb client list",
+      "driver receives usb client list"
     );
 
     const firstResponse = waitForSocketMessage(first.socket, (value) => {
@@ -256,17 +254,17 @@ async function runWebSocketRoutingFlow() {
 
     assert.strictEqual(
       first.messages.some((message) =>
-        JSON.stringify(message).includes("driver-b"),
+        JSON.stringify(message).includes("driver-b")
       ),
       false,
-      "first driver should not receive second driver's response",
+      "first driver should not receive second driver's response"
     );
     assert.strictEqual(
       second.messages.some((message) =>
-        JSON.stringify(message).includes("driver-a"),
+        JSON.stringify(message).includes("driver-a")
       ),
       false,
-      "second driver should not receive first driver's response",
+      "second driver should not receive first driver's response"
     );
 
     first.socket.close();
@@ -278,7 +276,7 @@ async function runWebSocketRoutingFlow() {
         !fs.existsSync(context.paths.daemonLockPath) &&
         !processExists(daemonPid),
       2500,
-      "websocket daemon idle cleanup",
+      "websocket daemon idle cleanup"
     );
 
     const sentMessages = context
@@ -369,7 +367,7 @@ async function runFrontendTimingFlow() {
     context.appendCommand({ type: "remove-device", serial: "device-1" });
     await waitForClientIds(
       [agentA, devtoolC, lateDevtool, agentBReconnect, agentD],
-      [],
+      []
     );
 
     context.appendCommand({
@@ -401,7 +399,7 @@ async function runFrontendTimingFlow() {
     ];
     await waitForClientIds(
       frontends.map(([, frontend]) => frontend),
-      [13],
+      [13]
     );
 
     const responses = frontends.map(([marker, frontend]) =>
@@ -411,17 +409,18 @@ async function runFrontendTimingFlow() {
           parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
             ?.marker === marker
         );
-      }),
+      })
     );
     for (const [marker, frontend] of frontends) {
       frontend.socket.send(createCustomizedEnvelope(13, 7, marker));
     }
     const received = await Promise.all(responses);
     assert.deepStrictEqual(
-      received.map((message) =>
-        parseCustomizedEnvelope(message.text).cdp.result.params.marker,
+      received.map(
+        (message) =>
+          parseCustomizedEnvelope(message.text).cdp.result.params.marker
       ),
-      frontends.map(([marker]) => marker),
+      frontends.map(([marker]) => marker)
     );
 
     await connector.close();
@@ -512,7 +511,7 @@ async function runLargeRandomFrontendChurnFlow() {
     assert.strictEqual(openFrontends(frontends).length, 12);
     await waitForClientIds(
       openFrontends(frontends).map((entry) => entry.frontend),
-      [],
+      []
     );
 
     for (const deviceIndex of shuffleWithRandom([1, 2, 3], random)) {
@@ -527,7 +526,7 @@ async function runLargeRandomFrontendChurnFlow() {
         [301, "device-3"],
         [302, "device-3"],
       ],
-      random,
+      random
     )) {
       addClient(clientId, deviceId);
     }
@@ -535,14 +534,18 @@ async function runLargeRandomFrontendChurnFlow() {
       frontends,
       connectors,
       activeDevices,
-      activeClients,
+      activeClients
     );
 
     for (const entry of takeRandom(openFrontends(frontends), 5, random)) {
       entry.closed = true;
       entry.frontend.socket.close();
     }
-    for (const entry of takeRandom(openConnectors(connectors).slice(1), 4, random)) {
+    for (const entry of takeRandom(
+      openConnectors(connectors).slice(1),
+      4,
+      random
+    )) {
       entry.closed = true;
       await entry.connector.close();
     }
@@ -554,7 +557,7 @@ async function runLargeRandomFrontendChurnFlow() {
       frontends,
       connectors,
       activeDevices,
-      activeClients,
+      activeClients
     );
 
     const repluggedDeviceId = addDevice(4);
@@ -568,10 +571,7 @@ async function runLargeRandomFrontendChurnFlow() {
     assertSingleStartedDaemon(context);
     let reconnectFrontendIndex = 12;
     while (openFrontends(frontends).length < 12) {
-      await openFrontend(
-        `frontend-reconnect-${reconnectFrontendIndex}`,
-        url,
-      );
+      await openFrontend(`frontend-reconnect-${reconnectFrontendIndex}`, url);
       reconnectFrontendIndex++;
     }
     assert.strictEqual(openConnectors(connectors).length >= 12, true);
@@ -580,11 +580,15 @@ async function runLargeRandomFrontendChurnFlow() {
       frontends,
       connectors,
       activeDevices,
-      activeClients,
+      activeClients
     );
 
     const targetClientId = pickRandom([...activeClients.keys()], random);
-    const selectedConnectors = takeRandom(openConnectors(connectors), 10, random);
+    const selectedConnectors = takeRandom(
+      openConnectors(connectors),
+      10,
+      random
+    );
     const selectedFrontends = takeRandom(openFrontends(frontends), 10, random);
     const connectorResponses = selectedConnectors.map((entry) => {
       const events = connectorEvents.get(entry.connector);
@@ -593,31 +597,35 @@ async function runLargeRandomFrontendChurnFlow() {
           events.find(
             (event) =>
               parseCustomizedEnvelope(event.message).cdp.result?.params
-                ?.marker === entry.label,
+                ?.marker === entry.label
           ),
         2500,
-        `${entry.label} response`,
+        `${entry.label} response`
       );
     });
     const frontendResponses = selectedFrontends.map((entry) =>
-      waitForSocketMessage(entry.frontend.socket, (value) => {
-        return (
-          value?.event === "Customized" &&
-          parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
-            ?.marker === entry.label
-        );
-      }, 2500),
+      waitForSocketMessage(
+        entry.frontend.socket,
+        (value) => {
+          return (
+            value?.event === "Customized" &&
+            parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
+              ?.marker === entry.label
+          );
+        },
+        2500
+      )
     );
 
     for (const entry of selectedConnectors) {
       entry.connector.sendMessageToApp(
         targetClientId,
-        createCustomizedEnvelope(targetClientId, 17, entry.label),
+        createCustomizedEnvelope(targetClientId, 17, entry.label)
       );
     }
     for (const entry of selectedFrontends) {
       entry.frontend.socket.send(
-        createCustomizedEnvelope(targetClientId, 17, entry.label),
+        createCustomizedEnvelope(targetClientId, 17, entry.label)
       );
     }
 
@@ -628,16 +636,16 @@ async function runLargeRandomFrontendChurnFlow() {
     assert.deepStrictEqual(
       controlReceived.map(
         (event) =>
-          parseCustomizedEnvelope(event.message).cdp.result.params.marker,
+          parseCustomizedEnvelope(event.message).cdp.result.params.marker
       ),
-      selectedConnectors.map((entry) => entry.label),
+      selectedConnectors.map((entry) => entry.label)
     );
     assert.deepStrictEqual(
       webReceived.map(
         (message) =>
-          parseCustomizedEnvelope(message.text).cdp.result.params.marker,
+          parseCustomizedEnvelope(message.text).cdp.result.params.marker
       ),
-      selectedFrontends.map((entry) => entry.label),
+      selectedFrontends.map((entry) => entry.label)
     );
   } finally {
     await context.cleanup();
@@ -713,7 +721,7 @@ async function stopDaemon(discoveryPath) {
   await waitFor(
     () => !processExists(discovery.pid) || !fs.existsSync(discoveryPath),
     1000,
-    "daemon termination",
+    "daemon termination"
   ).catch(() => {
     try {
       process.kill(discovery.pid, "SIGKILL");
@@ -798,7 +806,9 @@ runWebSocketRoutingFlow()
   });
 
 function latestClientIds(messages) {
-  const clientLists = messages.filter((message) => message?.event === "ClientList");
+  const clientLists = messages.filter(
+    (message) => message?.event === "ClientList"
+  );
   if (clientLists.length === 0) {
     return [];
   }
@@ -812,10 +822,10 @@ async function waitForClientIds(frontends, expectedIds) {
   await waitFor(
     () =>
       frontends.every((frontend) =>
-        arraysEqual(latestClientIds(frontend.messages), expected),
+        arraysEqual(latestClientIds(frontend.messages), expected)
       ),
     2500,
-    `frontends latest ClientList to equal ${expected.join(",")}`,
+    `frontends latest ClientList to equal ${expected.join(",")}`
   );
 }
 
@@ -823,23 +833,23 @@ async function waitForFrontendAndConnectorState(
   frontendEntries,
   connectorEntries,
   activeDevices,
-  activeClients,
+  activeClients
 ) {
   const expectedClientIds = [...activeClients.keys()].sort(
-    (first, second) => first - second,
+    (first, second) => first - second
   );
   const expectedDeviceIds = [...activeDevices].sort();
   await Promise.all([
     waitForClientIds(
       openFrontends(frontendEntries).map((entry) => entry.frontend),
-      expectedClientIds,
+      expectedClientIds
     ),
     waitFor(
       () =>
         openConnectors(connectorEntries).every((entry) => {
           const deviceIds = [...entry.connector.devices.keys()].sort();
           const clientIds = [...entry.connector.usbClients.keys()].sort(
-            (first, second) => first - second,
+            (first, second) => first - second
           );
           return (
             arraysEqual(deviceIds, expectedDeviceIds) &&
@@ -847,7 +857,9 @@ async function waitForFrontendAndConnectorState(
           );
         }),
       8000,
-      `connectors snapshot devices=${expectedDeviceIds.join(",")} clients=${expectedClientIds.join(",")}`,
+      `connectors snapshot devices=${expectedDeviceIds.join(
+        ","
+      )} clients=${expectedClientIds.join(",")}`
     ),
   ]);
 }
@@ -862,7 +874,7 @@ function assertSameWebSocketPort(entries, expectedPort) {
     assert.strictEqual(
       entry.connector.wssPort,
       expectedPort,
-      `${entry.label} should still point at the shared websocket daemon port`,
+      `${entry.label} should still point at the shared websocket daemon port`
     );
   }
 }
@@ -872,21 +884,21 @@ function assertSingleStartedDaemon(context) {
     context
       .readLog()
       .filter((entry) => entry.event === "daemon-started")
-      .map((entry) => entry.pid),
+      .map((entry) => entry.pid)
   );
   assert.strictEqual(
     startedPids.size,
     1,
     `large churn flow should keep using a single daemon process, got ${[
       ...startedPids,
-    ].join(",")}`,
+    ].join(",")}`
   );
 }
 
 function openFrontends(entries) {
   return entries.filter(
     (entry) =>
-      !entry.closed && entry.frontend.socket.readyState === WebSocket.OPEN,
+      !entry.closed && entry.frontend.socket.readyState === WebSocket.OPEN
   );
 }
 

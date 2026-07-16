@@ -293,6 +293,11 @@ describe("DebugRouterConnector multiplexer facade", function () {
         multiplexerStartupTimeout: 333,
         multiplexerDaemonIdleTimeout: 444,
         multiplexerRpcTimeout: 555,
+        connectionTrace: {
+          enabled: true,
+          output: "relative-trace.ndjson",
+          bufferSize: 200,
+        },
         reportService,
       });
 
@@ -325,6 +330,14 @@ describe("DebugRouterConnector multiplexer facade", function () {
         port: 7777,
         roomId: "room-1",
       });
+      assert.deepStrictEqual(
+        state.managers[0].option.physicalConnectorOption.connectionTrace,
+        {
+          enabled: true,
+          output: path.resolve("relative-trace.ndjson"),
+          bufferSize: 200,
+        }
+      );
       assert.strictEqual(
         state.clients[0].option.daemonManager,
         state.managers[0]
@@ -388,6 +401,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
     try {
       const connector = new DebugRouterConnector({
         manualConnect: true,
+        enableWebSocket: true,
       });
       const connected = collect(connector, "device-connected");
       const disconnected = collect(connector, "device-disconnected");
@@ -619,7 +633,9 @@ describe("DebugRouterConnector multiplexer facade", function () {
     try {
       const connector = new DebugRouterConnector({
         manualConnect: true,
+        enableWebSocket: true,
       });
+      connector.webSocketServerStarted = true;
       const events = {
         deviceDisconnected: collect(connector, "device-disconnected"),
         clientDisconnected: collect(connector, "client-disconnected"),
@@ -666,6 +682,32 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.deepStrictEqual(events.clientDisconnected, [1]);
       assert.deepStrictEqual(events.appDisconnected, [1]);
 
+      connector.applySnapshot({
+        protocolVersion: 1,
+        generatedAt: 3,
+        devices: [],
+        clients: [],
+        websocketAppClients: [createWebSocketSnapshot({ id: 100 })],
+        websocketWebClients: [
+          createWebSocketSnapshot({ id: 200, type: "Driver" }),
+        ],
+      });
+      const websocketProxy = connector.getAllWebsocketAppClients()[0];
+      assert.strictEqual(websocketProxy.clientId(), 100);
+      assert.strictEqual(websocketProxy.type(), "runtime");
+      assert.strictEqual(typeof websocketProxy.sendMessage, "function");
+      assert.strictEqual(
+        typeof websocketProxy.sendCustomizedMessage,
+        "function"
+      );
+      assert.strictEqual(typeof websocketProxy.close, "function");
+      assert.strictEqual(
+        connector
+          .getAllAppClients()
+          .some((client) => client.clientId() === 100),
+        true
+      );
+
       connector.applyHostEvent({
         kind: "event",
         event: "ws-client-message",
@@ -711,15 +753,17 @@ describe("DebugRouterConnector multiplexer facade", function () {
         },
       ]);
       assert.deepStrictEqual(
-        connector.getAllWebsocketAppClients().map((client) => client.id),
+        connector
+          .getAllWebsocketAppClients()
+          .map((client) => client.clientId()),
         [100]
       );
       assert.deepStrictEqual(
-        events.websocketAppConnected.map((client) => client.id),
+        events.websocketAppConnected.map((client) => client.clientId()),
         [100]
       );
       assert.deepStrictEqual(
-        events.websocketWebConnected.map((client) => client.id),
+        events.websocketWebConnected.map((client) => client.clientId()),
         [200]
       );
 
@@ -741,6 +785,40 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.deepStrictEqual(connector.getAllWebsocketAppClients(), []);
       assert.deepStrictEqual(events.websocketAppDisconnected, [100]);
       assert.deepStrictEqual(events.websocketWebDisconnected, [200]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("ignores non-serializable connection trace output with a warning", function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
+    try {
+      const warnings = [];
+      defaultLogger.setOutput((level, ...messages) => {
+        if (level === "warn") {
+          warnings.push(messages.join(" "));
+        }
+      });
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        connectionTrace: {
+          enabled: true,
+          bufferSize: 100,
+          output: {
+            write() {},
+          },
+        },
+      });
+      assert.strictEqual(connector.getConnectionTrace, undefined);
+      assert.strictEqual(connector.onConnectionTrace, undefined);
+      assert.deepStrictEqual(
+        state.managers[0].option.physicalConnectorOption.connectionTrace,
+        { enabled: true, bufferSize: 100, output: undefined }
+      );
+      assert.strictEqual(
+        warnings.some((message) => message.includes("WritableStream")),
+        true
+      );
     } finally {
       restore();
     }
@@ -823,13 +901,21 @@ describe("DebugRouterConnector multiplexer facade", function () {
         clientEvents.push(args);
       });
 
-      connector.handleUsbMessage(
-        1,
-        createCustomizedMessage("Runtime.console", {
-          text: "hello",
-        })
-      );
-      connector.handleUsbMessage(404, "not-json");
+      connector.applyHostEvent({
+        kind: "event",
+        event: "usb-client-message",
+        data: {
+          id: 1,
+          message: createCustomizedMessage("Runtime.console", {
+            text: "hello",
+          }),
+        },
+      });
+      connector.applyHostEvent({
+        kind: "event",
+        event: "usb-client-message",
+        data: { id: 404, message: "not-json" },
+      });
       connector.handleWsMessage(404, createWebMessage("CDP", 3));
       connector.handleWsMessage(1, createWebMessage("UsbConnect", 3));
       connector.handleWsMessage(1, createWebMessage("UsbConnectAck", 3));
@@ -1067,6 +1153,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
         manualConnect: true,
         enableWebSocket: true,
       });
+      connector.webSocketServerStarted = true;
       connector.applySnapshot({
         protocolVersion: 1,
         generatedAt: 1,
@@ -1090,7 +1177,6 @@ describe("DebugRouterConnector multiplexer facade", function () {
       connector.wss = {
         wssPath: "ws://127.0.0.1:8888/mdevices/page/android",
       };
-      connector.webSocketServerStarted = true;
       connector.watchAllClientsStarted = true;
 
       const events = [];
@@ -1296,10 +1382,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
 
   it("handles fire-and-forget RPC rejections without throwing", async function () {
     const { DebugRouterConnector, state, restore } = loadConnectorWithFakes({
-      rejectMethods: [
-        "sendMessageToWeb",
-        "sendMessageToApp",
-      ],
+      rejectMethods: ["sendMessageToWeb", "sendMessageToApp"],
       results: [
         [
           "startWSServer",
@@ -1377,7 +1460,9 @@ describe("DebugRouterConnector multiplexer facade", function () {
     try {
       const connector = new DebugRouterConnector({
         manualConnect: true,
+        enableWebSocket: true,
       });
+      connector.webSocketServerStarted = true;
 
       connector.applySnapshot({
         protocolVersion: 1,
@@ -1403,6 +1488,196 @@ describe("DebugRouterConnector multiplexer facade", function () {
           ),
         [1, 100]
       );
+    } finally {
+      restore();
+    }
+  });
+
+  it("preserves the legacy websocket app lifecycle event order and payload identity", function () {
+    const { DebugRouterConnector, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: true,
+      });
+      connector.webSocketServerStarted = true;
+      const events = [];
+      connector.on("websocket-app-client-connected", (client) =>
+        events.push(["websocket-app-client-connected", client])
+      );
+      connector.on("app-client-connected", (client) =>
+        events.push(["app-client-connected", client])
+      );
+      connector.on("websocket-app-client-disconnected", (id) =>
+        events.push(["websocket-app-client-disconnected", id])
+      );
+      connector.on("app-client-disconnected", (id) =>
+        events.push(["app-client-disconnected", id])
+      );
+
+      connector.applyHostEvent({
+        kind: "event",
+        event: "websocket-app-client-connected",
+        data: createWebSocketSnapshot({ id: 100 }),
+      });
+      connector.applyHostEvent({
+        kind: "event",
+        event: "websocket-app-client-disconnected",
+        data: { id: 100 },
+      });
+
+      assert.deepStrictEqual(
+        events.map(([event]) => event),
+        [
+          "websocket-app-client-connected",
+          "app-client-connected",
+          "websocket-app-client-disconnected",
+          "app-client-disconnected",
+        ]
+      );
+      assert.strictEqual(events[0][1], events[1][1]);
+      assert.strictEqual(events[0][1].clientId(), 100);
+      assert.strictEqual(events[2][1], 100);
+      assert.strictEqual(events[3][1], 100);
+    } finally {
+      restore();
+    }
+  });
+
+  it("preserves legacy Driver handleListClients behavior through the websocket proxy", async function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: true,
+      });
+      connector.webSocketServerStarted = true;
+      connector.applySnapshot({
+        protocolVersion: 1,
+        generatedAt: 1,
+        devices: [createDeviceSnapshot()],
+        clients: [createClientSnapshot()],
+        websocketAppClients: [
+          createWebSocketSnapshot({ id: 100, app: "wifi-app" }),
+        ],
+        websocketWebClients: [
+          createWebSocketSnapshot({ id: 200, type: "Driver" }),
+        ],
+      });
+
+      connector.websocketWebClients.get(200).handleListClients();
+      await nextTick();
+
+      const call = state.clients[0].calls.find(
+        (candidate) => candidate.method === "sendMessage"
+      );
+      assert(call);
+      assert.strictEqual(call.params.clientId, 200);
+      const message = JSON.parse(call.params.message);
+      assert.strictEqual(message.event, "ClientList");
+      assert.deepStrictEqual(
+        message.data.map((client) => [
+          client.id,
+          client.type,
+          client.info.network,
+        ]),
+        [
+          [100, "runtime", "WiFi"],
+          [1, "runtime", "USB"],
+        ]
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps websocket clients out of getAllAppClients when websocket support is disabled", function () {
+    const { DebugRouterConnector, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: false,
+      });
+
+      connector.applySnapshot({
+        protocolVersion: 1,
+        generatedAt: 1,
+        devices: [createDeviceSnapshot()],
+        clients: [createClientSnapshot()],
+      });
+      connector.getAllWebsocketAppClients = () => [
+        {
+          clientId: () => 100,
+        },
+      ];
+
+      assert.deepStrictEqual(
+        connector.getAllAppClients().map((client) => client.clientId()),
+        [1]
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("hides shared websocket state until this facade starts its websocket server", async function () {
+    const { DebugRouterConnector, restore } = loadConnectorWithFakes({
+      results: [
+        [
+          "startWSServer",
+          {
+            port: 8888,
+            host: "127.0.0.1:8888",
+          },
+        ],
+      ],
+    });
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: true,
+      });
+      const connected = collect(connector, "websocket-app-client-connected");
+      const messages = collect(connector, "ws-client-message");
+      const snapshot = {
+        protocolVersion: 1,
+        generatedAt: 1,
+        devices: [],
+        clients: [],
+        websocketAppClients: [createWebSocketSnapshot({ id: 100 })],
+        websocketWebClients: [],
+      };
+
+      connector.applySnapshot(snapshot);
+      connector.applyHostEvent({
+        kind: "event",
+        event: "ws-client-message",
+        data: { id: 100, message: "before-start" },
+      });
+      assert.deepStrictEqual(connector.getAllWebsocketAppClients(), []);
+      assert.deepStrictEqual(connector.getAllAppClients(), []);
+      assert.deepStrictEqual(connected, []);
+      assert.deepStrictEqual(messages, []);
+
+      await connector.startWSServer();
+      connector.applySnapshot(snapshot);
+      connector.applyHostEvent({
+        kind: "event",
+        event: "ws-client-message",
+        data: { id: 100, message: "after-start" },
+      });
+
+      assert.deepStrictEqual(
+        connector
+          .getAllWebsocketAppClients()
+          .map((client) => client.clientId()),
+        [100]
+      );
+      assert.deepStrictEqual(
+        connected.map((client) => client.clientId()),
+        [100]
+      );
+      assert.deepStrictEqual(messages, [{ id: 100, message: "after-start" }]);
     } finally {
       restore();
     }

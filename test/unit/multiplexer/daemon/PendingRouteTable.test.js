@@ -210,6 +210,39 @@ describe("PendingRouteTable", function () {
     assert.strictEqual(table.get(4), null);
   });
 
+  it("clears every route targeting a disconnected runtime client", function () {
+    const timers = createTimers();
+    const table = new PendingRouteTable({
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout,
+    });
+    const control = table.add(1, {
+      kind: "control",
+      controlId: 10,
+      originalId: 1,
+      clientId: 50,
+    });
+    const websocket = table.add(2, {
+      kind: "websocket",
+      webClientId: 20,
+      originalId: 2,
+      clientId: 50,
+    });
+    const other = table.add(3, {
+      kind: "control",
+      controlId: 11,
+      originalId: 3,
+      clientId: 51,
+    });
+
+    assert.deepStrictEqual(table.clearByClientId(50), [control, websocket]);
+    assert.strictEqual(table.size, 1);
+    assert.strictEqual(table.get(3), other);
+    assert.strictEqual(timers.timers[0].cleared, true);
+    assert.strictEqual(timers.timers[1].cleared, true);
+    assert.strictEqual(timers.timers[2].cleared, false);
+  });
+
   it("clear removes every route and timer in insertion order", function () {
     const timers = createTimers();
     const table = new PendingRouteTable({

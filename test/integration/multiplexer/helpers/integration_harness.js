@@ -35,7 +35,7 @@ const {
 
 const fakeDaemonEntry = path.join(
   __dirname,
-  "../fixtures/fake_daemon_entry.js",
+  "../fixtures/fake_daemon_entry.js"
 );
 
 const DEFAULT_STATE = {
@@ -68,7 +68,7 @@ const DEFAULT_TEST_DAEMON_IDLE_TIMEOUT = 30000;
 
 function createIntegrationContext(name, option = {}) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-${name}-`),
+    path.join(os.tmpdir(), `debug-router-${name}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
@@ -199,6 +199,7 @@ function createIntegrationContext(name, option = {}) {
           extra.multiplexerDaemonIdleTimeout ??
           option.multiplexerDaemonIdleTimeout ??
           DEFAULT_TEST_DAEMON_IDLE_TIMEOUT,
+        connectionTrace: extra.connectionTrace,
         reportService: null,
       });
       connectors.push(connector);
@@ -270,14 +271,14 @@ function writeFakeState(paths, state) {
   fs.mkdirSync(paths.dataDir, { recursive: true });
   fs.writeFileSync(
     path.join(paths.dataDir, "fake_physical_state.json"),
-    JSON.stringify(state, null, 2),
+    JSON.stringify(state, null, 2)
   );
 }
 
 function appendCommand(paths, command) {
   fs.appendFileSync(
     path.join(paths.dataDir, "fake_physical_commands.jsonl"),
-    `${JSON.stringify(command)}\n`,
+    `${JSON.stringify(command)}\n`
   );
 }
 
@@ -326,7 +327,7 @@ async function stopLoggedDaemons(paths) {
         .filter((entry) => entry.event === "daemon-started")
         .map((entry) => entry.pid)
         .filter((pid) => Number.isInteger(pid) && pid > 0)
-        .reverse(),
+        .reverse()
     ),
   ];
   for (const pid of pids) {
@@ -384,7 +385,9 @@ async function waitFor(predicate, timeout = 2000, interval = 20) {
   if (lastError) {
     throw lastError;
   }
-  throw new Error(`Timed out after ${effectiveTimeout}ms waiting for condition`);
+  throw new Error(
+    `Timed out after ${effectiveTimeout}ms waiting for condition`
+  );
 }
 
 function delay(ms) {
@@ -412,7 +415,7 @@ function getHealth(port) {
             body: JSON.parse(body),
           });
         });
-      },
+      }
     );
     request.on("timeout", () => {
       request.destroy(new Error("health request timed out"));
@@ -559,7 +562,7 @@ async function connectDriverWebSocket(url, option = {}) {
 
   const initialize = await waitFor(
     () => messages.find((value) => value?.event === "Initialize"),
-    1500,
+    1500
   );
   const id = initialize.data;
   socket.send(
@@ -576,16 +579,63 @@ async function connectDriverWebSocket(url, option = {}) {
           sdkVersion: "test",
         },
       },
-    }),
+    })
   );
   await waitFor(
     () => messages.find((value) => value?.event === "RoomJoined"),
-    1500,
+    1500
   );
   socket.send(JSON.stringify({ event: "ListClients" }));
   await waitFor(
     () => messages.find((value) => value?.event === "ClientList"),
-    1500,
+    1500
+  );
+  return { socket, id, messages };
+}
+
+async function connectRuntimeWebSocket(url, option = {}) {
+  const socket = new WebSocket(url);
+  const messages = [];
+  socket.on("message", (data) => {
+    const text = data.toString();
+    try {
+      messages.push(JSON.parse(text));
+    } catch (_error) {
+      messages.push(text);
+    }
+  });
+  await new Promise((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+
+  const initialize = await waitFor(
+    () => messages.find((value) => value?.event === "Initialize"),
+    1500
+  );
+  const id = initialize.data;
+  socket.send(
+    JSON.stringify({
+      event: "Register",
+      data: {
+        id,
+        type: option.type ?? "runtime",
+        info: {
+          app: option.app ?? `wifi-runtime-${id}`,
+          appVersion: option.appVersion ?? "test",
+          debugRouterVersion: option.debugRouterVersion ?? "test",
+          deviceModel: option.deviceModel ?? "wifi-device",
+          network: "WiFi",
+          osVersion: option.osVersion ?? "test",
+          sdkVersion: option.sdkVersion ?? "test",
+          ...option.rawInfo,
+        },
+      },
+    })
+  );
+  await waitFor(
+    () => messages.find((value) => value?.event === "RoomJoined"),
+    1500
   );
   return { socket, id, messages };
 }
@@ -604,6 +654,7 @@ module.exports = {
   assertSamePid,
   collectConnectorEvents,
   connectDriverWebSocket,
+  connectRuntimeWebSocket,
   createCustomizedEnvelope,
   createCustomizedResponseEnvelope,
   createIntegrationContext,

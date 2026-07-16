@@ -6,6 +6,8 @@ const assert = require("assert");
 const fs = require("fs");
 
 const {
+  connectDriverWebSocket,
+  connectRuntimeWebSocket,
   createIntegrationContext,
   platformTimeout,
   processExists,
@@ -27,40 +29,74 @@ describe("multiplexer integration legacy preemption", function () {
     }
   });
 
-  it("notifies facades, clears mirrors, and reacquires the legacy owner", async function () {
+  it("preserves Driver mirrors, removes devices and USB/WiFi runtimes, and reacquires the legacy owner", async function () {
     context = createIntegrationContext("legacy-preemption", {
       heartbeatInterval: 25,
       readyPollInterval: 10,
       staleTimeout: 500,
+      enableWebSocket: true,
+      websocketOption: {
+        port: 0,
+        roomId: "legacy-preemption",
+      },
     });
 
-    const connector = context.createConnector({ rpcTimeout: 3000 });
+    const connector = context.createConnector({
+      rpcTimeout: 3000,
+      enableWebSocket: true,
+    });
     const multiOpenStatuses = [];
     const disconnectedDevices = [];
     const disconnectedClients = [];
+    const disconnectedWifiRuntimes = [];
+    const disconnectedDrivers = [];
     connector.setMultiOpenCallback({
       statusChanged(status) {
         multiOpenStatuses.push(status);
       },
     });
     connector.on("device-disconnected", (device) =>
-      disconnectedDevices.push(device.serial),
+      disconnectedDevices.push(device.serial)
     );
     connector.on("client-disconnected", (id) => disconnectedClients.push(id));
+    connector.on("websocket-app-client-disconnected", (id) =>
+      disconnectedWifiRuntimes.push(id)
+    );
+    connector.on("websocket-web-client-disconnected", (id) =>
+      disconnectedDrivers.push(id)
+    );
 
     await connector.connectDevices(-1, null, true);
     await connector.connectUsbClients("device-1", -1, true, null);
     connector.startWatchAllClients(false);
     await waitFor(() => connector.watchAllClientsStarted, 2000);
+    await connector.startWSServer();
+    const websocketUrl = `ws://127.0.0.1:${connector.wssPort}/mdevices/page/android`;
+    const runtime = await connectRuntimeWebSocket(websocketUrl, {
+      app: "ownership-wifi-runtime",
+    });
+    const driver = await connectDriverWebSocket(websocketUrl, {
+      app: "ownership-driver",
+    });
+    context.trackSocket(runtime.socket);
+    context.trackSocket(driver.socket);
+    await waitFor(
+      () =>
+        connector
+          .getAllWebsocketAppClients()
+          .some((client) => client.clientId() === runtime.id) &&
+        connector.websocketWebClients.has(driver.id),
+      2000
+    );
 
     const daemonInfo = await waitFor(
       () => context.discovery.getReusableDiscovery(),
-      3000,
+      3000
     );
     assert(processExists(daemonInfo.pid), "daemon should be alive");
     await waitFor(
       () => readOwnerPid(context.legacyOwnerPath) === daemonInfo.pid,
-      3000,
+      3000
     );
 
     fs.mkdirSync(context.legacyDriverDir, { recursive: true });
@@ -68,17 +104,34 @@ describe("multiplexer integration legacy preemption", function () {
 
     await waitFor(
       () => multiOpenStatuses.includes(MultiOpenStatus.unattached),
-      3000,
+      3000
     );
+    await waitFor(() => connector.devices.size === 0, 3000);
+    await waitFor(() => connector.usbClients.size === 0, 3000);
+    await waitFor(() => connector.watchAllClientsStarted === false, 3000);
     await waitFor(
-      () =>
-        connector.devices.size === 0 &&
-        connector.usbClients.size === 0 &&
-        connector.watchAllClientsStarted === false,
-      3000,
+      () => connector.getAllWebsocketAppClients().length === 0,
+      3000
     );
+    await waitFor(() => connector.websocketWebClients.has(driver.id), 3000);
     assert.deepStrictEqual(disconnectedClients, [1]);
     assert.deepStrictEqual(disconnectedDevices, ["device-1"]);
+    assert.deepStrictEqual(disconnectedWifiRuntimes, [runtime.id]);
+    assert.deepStrictEqual(disconnectedDrivers, []);
+    await waitFor(() => runtime.socket.readyState === 3, 2000);
+    assert.strictEqual(driver.socket.readyState, 1);
+
+    const clientListCount = driver.messages.filter(
+      (message) => message?.event === "ClientList"
+    ).length;
+    driver.socket.send(JSON.stringify({ event: "ListClients" }));
+    const emptyClientList = await waitFor(() => {
+      const lists = driver.messages.filter(
+        (message) => message?.event === "ClientList"
+      );
+      return lists.length > clientListCount ? lists[lists.length - 1] : null;
+    }, 2000);
+    assert.deepStrictEqual(emptyClientList.data, []);
     assert.strictEqual(readOwnerPid(context.legacyOwnerPath), process.pid);
 
     context.appendCommand({
@@ -105,7 +158,7 @@ describe("multiplexer integration legacy preemption", function () {
       return (
         log.some(
           (entry) =>
-            entry.event === "device-added" && entry.serial === "device-2",
+            entry.event === "device-added" && entry.serial === "device-2"
         ) &&
         log.some((entry) => entry.event === "client-added" && entry.id === 2)
       );
@@ -118,7 +171,7 @@ describe("multiplexer integration legacy preemption", function () {
       () =>
         multiOpenStatuses.includes(MultiOpenStatus.attached) &&
         connector.watchAllClientsStarted,
-      3000,
+      3000
     );
     assert.strictEqual(readOwnerPid(context.legacyOwnerPath), daemonInfo.pid);
 
@@ -127,16 +180,36 @@ describe("multiplexer integration legacy preemption", function () {
       "device-2",
       -1,
       true,
-      null,
+      null
     );
     assert(
       devices.some((device) => device.serial === "device-2"),
-      "device-2 should be discoverable after daemon reacquires legacy owner",
+      "device-2 should be discoverable after daemon reacquires legacy owner"
     );
     assert.deepStrictEqual(
       clients.map((client) => client.clientId()),
-      [2],
+      [2]
     );
+    const recoveredClientListCount = driver.messages.filter(
+      (message) => message?.event === "ClientList"
+    ).length;
+    driver.socket.send(JSON.stringify({ event: "ListClients" }));
+    const recoveredClientList = await waitFor(() => {
+      const lists = driver.messages.filter(
+        (message) => message?.event === "ClientList"
+      );
+      return lists.length > recoveredClientListCount
+        ? lists[lists.length - 1]
+        : null;
+    }, 2000);
+    assert.deepStrictEqual(
+      recoveredClientList.data.map((client) => [
+        client.id,
+        client.info.network,
+      ]),
+      [[2, "USB"]]
+    );
+    assert.strictEqual(driver.socket.readyState, 1);
   });
 });
 

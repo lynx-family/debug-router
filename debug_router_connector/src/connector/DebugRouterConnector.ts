@@ -10,11 +10,6 @@ import {
   DriverReportService,
   setDriverReportService,
 } from "../report/interface/DriverReportService";
-import {
-  ConnectionTraceNode,
-  ConnectionTraceRecorder,
-  createConnectionTraceRecorder,
-} from "../trace/ConnectionTraceRecorder";
 import { DeviceManager } from "../device/DeviceManager";
 import type { PhysicalConnectorOption } from "../physical/PhysicalConnector";
 import { defaultLogger } from "../utils/logger";
@@ -38,6 +33,7 @@ import {
 } from "../multiplexer/client/MultiplexerDaemonManager";
 import { MultiplexerDiscovery } from "../multiplexer/client/MultiplexerDiscovery";
 import { MultiplexerDevice, MultiplexerUsbClient } from "../multiplexer/client";
+import { MultiplexerWebSocketClient } from "../multiplexer/client/MultiplexerWebSocketClient";
 import { createMultiplexerPaths } from "../multiplexer/utils/paths";
 
 const DEFAULT_DEV_SERVE_PORT = 19783;
@@ -71,7 +67,6 @@ export class DebugRouterConnector {
   readonly usbClients: Map<number, MultiplexerUsbClient> = new Map();
   readonly enableWebSocket;
   reportService: DriverReportService | null = null;
-  readonly traceRecorder: ConnectionTraceRecorder | null = null;
   wssPort: number;
   wssHost: string | undefined;
   roomId: string | undefined;
@@ -83,11 +78,11 @@ export class DebugRouterConnector {
   private selectedClient: MultiplexerUsbClient | undefined;
   private readonly websocketAppClients: Map<
     number,
-    WebSocketClientSnapshot
+    MultiplexerWebSocketClient
   > = new Map();
   private readonly websocketWebClients: Map<
     number,
-    WebSocketClientSnapshot
+    MultiplexerWebSocketClient
   > = new Map();
   private nextClientId = 0;
   private multiOpenCallback: MultiOpenCallback | undefined;
@@ -133,11 +128,6 @@ export class DebugRouterConnector {
         { option: msg },
       );
     }
-
-    this.traceRecorder = createConnectionTraceRecorder(
-      option.connectionTrace,
-      process.env.DriverConnectionTracePath,
-    );
 
     this.enableWebSocket = option.enableWebSocket;
     this.wssPort = option.websocketOption?.port ?? DEFAULT_DEV_SERVE_PORT;
@@ -303,18 +293,6 @@ export class DebugRouterConnector {
     this.events.off(event, callback);
   }
 
-  getConnectionTrace(limit?: number): ConnectionTraceNode[] {
-    return this.traceRecorder?.getRecentNodes(limit) ?? [];
-  }
-
-  onConnectionTrace(listener: (node: ConnectionTraceNode) => void): () => void {
-    if (!this.traceRecorder) {
-      return () => {};
-    }
-
-    return this.traceRecorder.addListener(listener);
-  }
-
   async close(): Promise<void> {
     if (this.closed) {
       return;
@@ -328,35 +306,12 @@ export class DebugRouterConnector {
     this.clearDesiredRecoveryTimer();
     await this.daemonClient.close();
     this.clearWSServerMirror();
-    await this.traceRecorder?.close();
   }
 
   emit<Event extends keyof DebugerRouterDriverEvents>(
     event: Event,
     payload: DebugerRouterDriverEvents[Event],
   ): void {
-    if (event === "app-client-connected") {
-      this.traceRecorder?.recordAppClientConnected(payload as Client);
-    }
-    if (event === "app-client-disconnected") {
-      this.traceRecorder?.recordAppClientDisconnected(payload as number);
-    }
-    if (event === "websocket-app-client-connected") {
-      this.traceRecorder?.recordWebsocketAppClientConnected(payload as any);
-    }
-    if (event === "websocket-app-client-disconnected") {
-      this.traceRecorder?.recordWebsocketAppClientDisconnected(
-        payload as number,
-      );
-    }
-    if (event === "websocket-web-client-connected") {
-      this.traceRecorder?.recordWebsocketWebClientConnected(payload as any);
-    }
-    if (event === "websocket-web-client-disconnected") {
-      this.traceRecorder?.recordWebsocketWebClientDisconnected(
-        payload as number,
-      );
-    }
     this.events.emit(event, payload);
   }
 
@@ -369,10 +324,6 @@ export class DebugRouterConnector {
 
     defaultLogger.debug("register new device:" + device.serial);
     this.devices.set(device.serial, device);
-    this.traceRecorder?.recordDeviceRegistered(device.serial, {
-      os: device.info.os,
-      title: device.info.title,
-    });
     this.emit("device-connected", device as any);
   }
 
@@ -393,7 +344,6 @@ export class DebugRouterConnector {
     this.usbClients.set(client.clientId(), client);
     this.emit("client-connected", client as any);
     this.emit("app-client-connected", client as any);
-    this.handleUsbClienChange();
   }
 
   unregiserUsbClient(id: number): void {
@@ -511,23 +461,17 @@ export class DebugRouterConnector {
       });
   }
 
-  handleUsbClienChange(): void {
-    // Client-list fanout is owned by the daemon-side WebSocket controller.
-  }
-
-  handleUsbDeviceChange(): void {
-    // Device-list fanout is owned by the daemon-side WebSocket controller.
-  }
-
-  getAllWebsocketAppClients(): WebSocketClientSnapshot[] {
+  getAllWebsocketAppClients(): MultiplexerWebSocketClient[] {
     return Array.from(this.websocketAppClients.values());
   }
 
   getAllAppClients(): Client[] {
     const clients: Client[] = [...Array.from(this.usbClients.values())];
-    this.getAllWebsocketAppClients().forEach((client) => {
-      clients.push(client as any);
-    });
+    if (this.shouldExposeWebSocketState()) {
+      this.getAllWebsocketAppClients().forEach((client) => {
+        clients.push(client);
+      });
+    }
     return clients;
   }
 
@@ -575,6 +519,7 @@ export class DebugRouterConnector {
     try {
       await this.ensureWSServerStarted();
     } catch (error) {
+      this.clearWebSocketClientMirrors();
       this.scheduleDesiredRecovery();
       throw error;
     }
@@ -620,6 +565,13 @@ export class DebugRouterConnector {
     this.webSocketServerStarted = false;
   }
 
+  private shouldExposeWebSocketState(): boolean {
+    return Boolean(
+      this.enableWebSocket &&
+        (this.webSocketServerStarted || this.startingWSServer),
+    );
+  }
+
   private handleDaemonDisconnected(): void {
     this.clearDaemonMirrors();
     this.scheduleDesiredRecovery();
@@ -635,13 +587,12 @@ export class DebugRouterConnector {
 
     this.desiredRecoveryTimer = setTimeout(() => {
       this.desiredRecoveryTimer = null;
-      void this.restoreDesiredState()
-        .catch((error: Error) => {
-          defaultLogger.warn(
-            `Failed to restore desired multiplexer state after daemon reconnect: ${error.message}`,
-          );
-          this.scheduleDesiredRecovery();
-        });
+      void this.restoreDesiredState().catch((error: Error) => {
+        defaultLogger.warn(
+          `Failed to restore desired multiplexer state after daemon reconnect: ${error.message}`,
+        );
+        this.scheduleDesiredRecovery();
+      });
     }, DESIRED_RECOVERY_RETRY_DELAY_MS);
   }
 
@@ -686,15 +637,7 @@ export class DebugRouterConnector {
     for (const id of Array.from(this.usbClients.keys())) {
       this.unregisterUsbClientInternal(id, true);
     }
-    for (const id of Array.from(this.websocketAppClients.keys())) {
-      this.websocketAppClients.delete(id);
-      this.emit("websocket-app-client-disconnected", id as any);
-      this.emit("app-client-disconnected", id as any);
-    }
-    for (const id of Array.from(this.websocketWebClients.keys())) {
-      this.websocketWebClients.delete(id);
-      this.emit("websocket-web-client-disconnected", id as any);
-    }
+    this.clearWebSocketClientMirrors();
     for (const serial of Array.from(this.devices.keys())) {
       this.unregisterDeviceInternal(serial, false);
     }
@@ -707,6 +650,12 @@ export class DebugRouterConnector {
   applySnapshot(snapshot: Snapshot): void {
     this.syncDeviceSnapshots(snapshot.devices);
     this.syncClientSnapshots(snapshot.clients);
+    if (this.shouldExposeWebSocketState() && snapshot.websocketAppClients) {
+      this.syncWebSocketAppSnapshots(snapshot.websocketAppClients);
+    }
+    if (this.shouldExposeWebSocketState() && snapshot.websocketWebClients) {
+      this.syncWebSocketWebSnapshots(snapshot.websocketWebClients);
+    }
   }
 
   applyHostEvent(event: ControlEvent): void {
@@ -743,26 +692,41 @@ export class DebugRouterConnector {
         this.handleUsbMessage(event.data.id, event.data.message);
         break;
       case "ws-client-message":
+        if (!this.shouldExposeWebSocketState()) {
+          break;
+        }
         this.emit("ws-client-message", event.data as any);
         break;
       case "ws-web-message":
+        if (!this.shouldExposeWebSocketState()) {
+          break;
+        }
         this.emit("ws-web-message", event.data as any);
         break;
       case "websocket-app-client-connected":
-        this.websocketAppClients.set(event.data.id, event.data);
-        this.emit("websocket-app-client-connected", event.data as any);
-        this.emit("app-client-connected", event.data as any);
+        if (!this.shouldExposeWebSocketState()) {
+          break;
+        }
+        this.upsertWebSocketAppSnapshot(event.data, true);
         break;
       case "websocket-app-client-disconnected":
+        if (!this.shouldExposeWebSocketState()) {
+          break;
+        }
         this.websocketAppClients.delete(event.data.id);
         this.emit("websocket-app-client-disconnected", event.data.id as any);
         this.emit("app-client-disconnected", event.data.id as any);
         break;
       case "websocket-web-client-connected":
-        this.websocketWebClients.set(event.data.id, event.data);
-        this.emit("websocket-web-client-connected", event.data as any);
+        if (!this.shouldExposeWebSocketState()) {
+          break;
+        }
+        this.upsertWebSocketWebSnapshot(event.data, true);
         break;
       case "websocket-web-client-disconnected":
+        if (!this.shouldExposeWebSocketState()) {
+          break;
+        }
         this.websocketWebClients.delete(event.data.id);
         this.emit("websocket-web-client-disconnected", event.data.id as any);
         break;
@@ -780,9 +744,7 @@ export class DebugRouterConnector {
     }
   }
 
-  private applyLegacyOwnershipChange(
-    status: "attached" | "unattached",
-  ): void {
+  private applyLegacyOwnershipChange(status: "attached" | "unattached"): void {
     const nextStatus =
       status === "attached"
         ? MultiOpenStatus.attached
@@ -809,6 +771,136 @@ export class DebugRouterConnector {
         this.unregisterUsbClientInternal(id, true);
       }
     }
+  }
+
+  private syncWebSocketAppSnapshots(
+    snapshots: WebSocketClientSnapshot[],
+  ): void {
+    const activeIds = new Set(snapshots.map((snapshot) => snapshot.id));
+    for (const snapshot of snapshots) {
+      this.upsertWebSocketAppSnapshot(snapshot, true);
+    }
+    for (const id of Array.from(this.websocketAppClients.keys())) {
+      if (activeIds.has(id)) {
+        continue;
+      }
+      this.websocketAppClients.delete(id);
+      this.emit("websocket-app-client-disconnected", id as any);
+      this.emit("app-client-disconnected", id as any);
+    }
+  }
+
+  private clearWebSocketClientMirrors(): void {
+    for (const id of Array.from(this.websocketAppClients.keys())) {
+      this.websocketAppClients.delete(id);
+      this.emit("websocket-app-client-disconnected", id as any);
+      this.emit("app-client-disconnected", id as any);
+    }
+    for (const id of Array.from(this.websocketWebClients.keys())) {
+      this.websocketWebClients.delete(id);
+      this.emit("websocket-web-client-disconnected", id as any);
+    }
+  }
+
+  private syncWebSocketWebSnapshots(
+    snapshots: WebSocketClientSnapshot[],
+  ): void {
+    const activeIds = new Set(snapshots.map((snapshot) => snapshot.id));
+    for (const snapshot of snapshots) {
+      this.upsertWebSocketWebSnapshot(snapshot, true);
+    }
+    for (const id of Array.from(this.websocketWebClients.keys())) {
+      if (activeIds.has(id)) {
+        continue;
+      }
+      this.websocketWebClients.delete(id);
+      this.emit("websocket-web-client-disconnected", id as any);
+    }
+  }
+
+  private upsertWebSocketAppSnapshot(
+    snapshot: WebSocketClientSnapshot,
+    emitConnected: boolean,
+  ): MultiplexerWebSocketClient {
+    const existing = this.websocketAppClients.get(snapshot.id);
+    if (existing) {
+      existing.updateFromSnapshot(snapshot);
+      return existing;
+    }
+    const client = MultiplexerWebSocketClient.fromSnapshot(
+      snapshot,
+      this.daemonClient,
+    );
+    this.websocketAppClients.set(snapshot.id, client);
+    if (emitConnected) {
+      this.emit("websocket-app-client-connected", client as any);
+      this.emit("app-client-connected", client as any);
+    }
+    return client;
+  }
+
+  private upsertWebSocketWebSnapshot(
+    snapshot: WebSocketClientSnapshot,
+    emitConnected: boolean,
+  ): MultiplexerWebSocketClient {
+    const existing = this.websocketWebClients.get(snapshot.id);
+    if (existing) {
+      existing.updateFromSnapshot(snapshot);
+      return existing;
+    }
+    const client = MultiplexerWebSocketClient.fromSnapshot(
+      snapshot,
+      this.daemonClient,
+      () => this.sendClientListToWebSocketClient(snapshot.id),
+    );
+    this.websocketWebClients.set(snapshot.id, client);
+    if (emitConnected) {
+      this.emit("websocket-web-client-connected", client as any);
+    }
+    return client;
+  }
+
+  private sendClientListToWebSocketClient(webClientId: number): void {
+    const webClient = this.websocketWebClients.get(webClientId);
+    if (!webClient || webClient.type() !== "Driver") {
+      return;
+    }
+
+    const data: Array<{
+      id: number;
+      type: string;
+      info: Record<string, unknown>;
+    }> = [];
+    for (const client of this.websocketAppClients.values()) {
+      data.push({
+        id: client.clientId(),
+        type: client.info.type,
+        info: {
+          ...(client.info.raw_info as Record<string, unknown>),
+          network: "WiFi",
+        },
+      });
+    }
+    for (const client of this.usbClients.values()) {
+      data.push({
+        id: client.clientId(),
+        type: "runtime",
+        info: {
+          ...(client.info.query.raw_info as Record<string, unknown>),
+          deviceName: client.info.query.device,
+          osType: client.info.query.os,
+          deviceModel: client.info.query.device_model,
+          network: "USB",
+        },
+      });
+    }
+
+    webClient.sendMessage(
+      JSON.stringify({
+        event: "ClientList",
+        data,
+      }),
+    );
   }
 
   private upsertDeviceSnapshots(
@@ -921,10 +1013,6 @@ export class DebugRouterConnector {
     }
 
     defaultLogger.debug("unregisterDevice:" + serial);
-    this.traceRecorder?.recordDeviceUnregistered(serial, {
-      os: device.info.os,
-      title: device.info.title,
-    });
     this.devices.delete(serial);
     if (disconnect) {
       device.disConnect();
@@ -949,7 +1037,6 @@ export class DebugRouterConnector {
     if (emitEvent) {
       this.emit("client-disconnected", id as any);
       this.emit("app-client-disconnected", id as any);
-      this.handleUsbClienChange();
     }
   }
 }
@@ -1008,6 +1095,26 @@ function resolveTransitivePackagePath(
 function createDaemonPhysicalConnectorOption(
   option: DebugRouterConnectorOption,
 ): PhysicalConnectorOption {
+  const connectionTrace = option.connectionTrace
+  ? {
+      enabled: option.connectionTrace.enabled,
+      bufferSize: option.connectionTrace.bufferSize,
+      output:
+        typeof option.connectionTrace?.output === "string"
+          ? path.resolve(option.connectionTrace?.output)
+          : undefined,
+    }
+  : undefined;
+
+  if (
+    option.connectionTrace?.output !== undefined &&
+    typeof option.connectionTrace.output !== "string"
+  ) {
+    defaultLogger.warn(
+      "Multiplexer connectionTrace.output only supports a serializable string path; WritableStream output is ignored.",
+    );
+  }
+
   return {
     manualConnect: option.manualConnect,
     enableWebSocket: option.enableWebSocket,
@@ -1021,5 +1128,6 @@ function createDaemonPhysicalConnectorOption(
     usbConnectOpt: option.usbConnectOpt,
     networkDeviceOpt: option.networkDeviceOpt,
     reportService: null,
+    connectionTrace,
   };
 }

@@ -8,6 +8,7 @@ import { UsbClient } from "../usb/Client";
 import { BaseDevice } from "../device/BaseDevice";
 import { getDriverReportService } from "../report/interface/DriverReportService";
 import { DebugerRouterDriverEvents } from "../utils/type";
+import { defaultLogger } from "../utils/logger";
 
 export type WebSocketControllerHost = {
   createClientId(): number;
@@ -92,9 +93,9 @@ export class WebSocketController {
     this.server?.close();
   }
 
-  handleDisconnect(id: number) {
+  handleDisconnect(id: number, sourceClient?: WebSocketClient) {
     const client = this.websocketAppClients.get(id);
-    if (client) {
+    if (client && (!sourceClient || sourceClient === client)) {
       this.websocketAppClients.delete(id);
       this.controllerHost.emit?.("websocket-app-client-disconnected", id);
       this.controllerHost.emit?.("app-client-disconnected", id);
@@ -104,7 +105,7 @@ export class WebSocketController {
       );
     }
     const webClient = this.webClients.get(id);
-    if (webClient) {
+    if (webClient && (!sourceClient || sourceClient === webClient)) {
       this.webClients.delete(id);
       this.controllerHost.emit?.("websocket-web-client-disconnected", id);
       this.controllerHost.handleWebSocketClientDisconnected?.(
@@ -113,6 +114,34 @@ export class WebSocketController {
       );
     }
 
+    this.sendClientList();
+  }
+
+  closeAllWebsocketAppClients() {
+    const appClients = Array.from(this.websocketAppClients.values());
+    this.websocketAppClients.clear();
+
+    appClients.forEach((client) => {
+      const id = client.clientId();
+      this.controllerHost.emit?.("websocket-app-client-disconnected", id);
+      this.controllerHost.emit?.("app-client-disconnected", id);
+      this.controllerHost.handleWebSocketClientDisconnected?.(
+        id,
+        client.type(),
+      );
+    });
+
+    appClients.forEach((client) => {
+      try {
+        client.close();
+      } catch (error: any) {
+        defaultLogger.warn(
+          `Failed to close WebSocket app client ${client.clientId()}: ${
+            error?.message ?? String(error)
+          }`,
+        );
+      }
+    });
     this.sendClientList();
   }
 

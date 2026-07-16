@@ -193,6 +193,17 @@ describe("multiplexer protocol validation", function () {
 
   it("validates snapshot DTOs and permits unknown fields", function () {
     assert.strictEqual(isSnapshot(createSnapshot()), true);
+    assert.strictEqual(
+      isSnapshot({
+        ...createSnapshot(),
+        websocketAppClients: [createWebSocketClientSnapshot()],
+        websocketWebClients: [
+          { ...createWebSocketClientSnapshot(), id: 11, type: "Driver" },
+        ],
+        futureField: [{ nested: true }],
+      }),
+      true
+    );
     assert.strictEqual(isDeviceSnapshot(createDeviceSnapshot()), true);
     assert.strictEqual(isClientSnapshot(createClientSnapshot()), true);
     assert.strictEqual(
@@ -245,6 +256,31 @@ describe("multiplexer protocol validation", function () {
         capabilities: ["control", 1],
       }),
       false
+    );
+    assert.strictEqual(
+      isSnapshot({
+        ...createSnapshot(),
+        websocketAppClients: [
+          { ...createWebSocketClientSnapshot(), network: "USB" },
+        ],
+      }),
+      false
+    );
+    // connectionTrace is no longer a snapshot field. It is ignored here like
+    // any other forward-compatible unknown field and validated on RPC/events.
+    assert.strictEqual(
+      isSnapshot({
+        ...createSnapshot(),
+        connectionTrace: [
+          {
+            sequence: "1",
+            event: "client_watch_started",
+            timestamp: "2026-07-15T00:00:00.000Z",
+            traceSchemaVersion: "0.1",
+          },
+        ],
+      }),
+      true
     );
     assert.strictEqual(isDeviceSnapshot(null), false);
     assert.strictEqual(
@@ -520,6 +556,9 @@ describe("multiplexer protocol validation", function () {
       }),
       createRpcRequest("sendMessage", { message: "hello" }),
       createRpcRequest("closeClient", { clientId: "1" }),
+      createRpcRequest("getConnectionTrace", {}),
+      createRpcRequest("subscribeConnectionTrace", {}),
+      createRpcRequest("unsubscribeConnectionTrace", {}),
     ];
 
     for (const request of invalidCases) {
@@ -753,6 +792,12 @@ describe("multiplexer protocol validation", function () {
         })()
       ),
       createEvent("websocket-web-client-disconnected", { id: "1" }),
+      createEvent("connection-trace-node", {
+        sequence: 1,
+        event: "client_watch_started",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        traceSchemaVersion: "0.1",
+      }),
     ];
 
     for (const event of invalidEvents) {

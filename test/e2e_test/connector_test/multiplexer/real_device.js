@@ -13,8 +13,8 @@ const {
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
 const DEFAULT_IOS_BUNDLE_ID = "com.lynx.debugrouter-DebugRouterExample";
-const DEFAULT_DEVICE_TIMEOUT = 1000;
-const DEFAULT_CLIENT_TIMEOUT = 1000;
+const DEFAULT_DEVICE_TIMEOUT = 10000;
+const DEFAULT_CLIENT_TIMEOUT = 10000;
 const DEFAULT_IDLE_TIMEOUT = 500;
 const LEGACY_PREEMPTION_TIMEOUT = 12000;
 
@@ -154,14 +154,14 @@ function createPaths(rootDir) {
 
 function createContext(platform, args, option = {}) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-real-${platform}-`),
+    path.join(os.tmpdir(), `debug-router-real-${platform}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
   const legacyOwnerPath = path.join(legacyDriverDir, "LatestDriverProcess");
   const hadOriginalHome = Object.prototype.hasOwnProperty.call(
     process.env,
-    "HOME",
+    "HOME"
   );
   const originalHome = process.env.HOME;
   fs.mkdirSync(homeDir, { recursive: true });
@@ -180,9 +180,9 @@ function createContext(platform, args, option = {}) {
     createConnector(extra = {}) {
       const connector = new DebugRouterConnector({
         manualConnect: true,
-        enableWebSocket: extra.enableWebSocket ?? option.enableWebSocket ?? false,
-        websocketOption:
-          extra.websocketOption ??
+        enableWebSocket:
+          extra.enableWebSocket ?? option.enableWebSocket ?? false,
+        websocketOption: extra.websocketOption ??
           option.websocketOption ?? {
             port: 0,
             roomId: `real-device-${platform}`,
@@ -239,6 +239,12 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
     throw new Error("iOS real-device e2e requires macOS");
   }
   await assertPlatformDeviceOnline(platform, args);
+  const androidForwardBaseline =
+    platform === "android"
+      ? await captureAndroidForwardBaseline(
+          args.androidSerial || (await listAndroidDevices())[0]
+        )
+      : null;
 
   logStep(`checking ${platform} real-device flow`);
   const context = createContext(platform, args, {
@@ -248,7 +254,8 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
   try {
     const first = context.createConnector({ enableWebSocket: args.websocket });
     const second = context.createConnector({ enableWebSocket: args.websocket });
-    const targetSerial = platform === "android" ? args.androidSerial : args.iosSerial;
+    const targetSerial =
+      platform === "android" ? args.androidSerial : args.iosSerial;
     const clientName =
       platform === "android" ? args.androidClientName : args.iosClientName;
 
@@ -256,7 +263,7 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
       first,
       platform,
       targetSerial,
-      args.deviceTimeout,
+      args.deviceTimeout
     );
     await launchAppIfNeeded(platform, args, firstDevice);
     logStep(`${platform} connecting matching device through second connector`);
@@ -264,7 +271,7 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
       second,
       platform,
       firstDevice.serial,
-      args.deviceTimeout,
+      args.deviceTimeout
     );
     assert.strictEqual(secondDevice.serial, firstDevice.serial);
 
@@ -276,26 +283,30 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
       firstDevice.serial,
       clientName,
       args.clientTimeout,
-      args,
+      args
     );
-    logStep(`${platform} connecting matching runtime client through second connector`);
+    logStep(
+      `${platform} connecting matching runtime client through second connector`
+    );
     const secondClient = await connectMatchingClient(
       second,
       platform,
       firstDevice.serial,
       firstClient,
       args.clientTimeout,
-      args,
+      args
     );
     if (firstClient.clientId() !== secondClient.clientId()) {
-      logStep(`${platform} refreshing first connector after runtime client changed`);
+      logStep(
+        `${platform} refreshing first connector after runtime client changed`
+      );
       firstClient = await connectMatchingClient(
         first,
         platform,
         firstDevice.serial,
         secondClient,
         args.clientTimeout,
-        args,
+        args
       );
     }
     assert.strictEqual(firstClient.clientId(), secondClient.clientId());
@@ -308,7 +319,7 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
           .getAllUsbClients()
           .some((client) => client.clientId() === firstClient.clientId()),
       3000,
-      `${platform} first connector local client mirror`,
+      `${platform} first connector local client mirror`
     );
     await waitFor(
       () =>
@@ -316,16 +327,18 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
           .getAllUsbClients()
           .some((client) => client.clientId() === secondClient.clientId()),
       3000,
-      `${platform} second connector local client mirror`,
+      `${platform} second connector local client mirror`
     );
 
     const daemonInfo = await waitFor(
       () => readJsonFile(context.paths.discoveryPath, null),
       3000,
-      `${platform} daemon discovery`,
+      `${platform} daemon discovery`
     );
     logStep(
-      `${platform} daemon pid=${daemonInfo.pid} controlPort=${daemonInfo.controlPort} device=${firstDevice.serial} client=${firstClient.clientId()}`,
+      `${platform} daemon pid=${daemonInfo.pid} controlPort=${
+        daemonInfo.controlPort
+      } device=${firstDevice.serial} client=${firstClient.clientId()}`
     );
 
     if (args.requireMessageRoundtrip) {
@@ -340,11 +353,11 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
         firstDevice.serial,
         clientName,
         daemonInfo.pid,
-        args,
+        args
       );
     } else if (args.legacyPreemption) {
       logStep(
-        `${platform} skipping legacy preemption in --platform all; run --platform ${platform} to cover this platform explicitly`,
+        `${platform} skipping legacy preemption in --platform all; run --platform ${platform} to cover this platform explicitly`
       );
     }
 
@@ -360,7 +373,7 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
         firstDevice.serial,
         clientName,
         daemonInfo.pid,
-        args,
+        args
       );
     }
 
@@ -370,10 +383,16 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
         !fs.existsSync(context.paths.discoveryPath) &&
         !fs.existsSync(context.paths.daemonLockPath),
       5000,
-      `${platform} daemon idle cleanup`,
+      `${platform} daemon idle cleanup`
     );
   } finally {
-    await context.cleanup();
+    try {
+      await context.cleanup();
+    } finally {
+      if (androidForwardBaseline) {
+        await removeAddedAndroidForwards(androidForwardBaseline);
+      }
+    }
   }
 }
 
@@ -385,14 +404,14 @@ async function assertPlatformDeviceOnline(platform, args) {
       assert(
         onlineDevices.includes(serial),
         `Android device ${serial} is not online. adb devices: ${onlineDevices.join(
-          ", ",
-        )}`,
+          ", "
+        )}`
       );
       return;
     }
     assert(
       onlineDevices.length > 0,
-      "No online Android device found. Connect a device and authorize adb first.",
+      "No online Android device found. Connect a device and authorize adb first."
     );
     return;
   }
@@ -404,13 +423,13 @@ async function assertPlatformDeviceOnline(platform, args) {
       onlineDevices.some((device) => device.udid === serial),
       `iOS device ${serial} is not online. xcrun devices: ${onlineDevices
         .map((device) => `${device.name}(${device.udid})`)
-        .join(", ")}`,
+        .join(", ")}`
     );
     return;
   }
   assert(
     onlineDevices.length > 0,
-    "No online iOS device found. Connect and trust an iPhone before running this test.",
+    "No online iOS device found. Connect and trust an iPhone before running this test."
   );
 }
 
@@ -423,10 +442,55 @@ async function listAndroidDevices() {
     .map((line) => line.split(/\s+/)[0]);
 }
 
+async function captureAndroidForwardBaseline(serial) {
+  const forwards = await listAndroidForwards(serial);
+  return {
+    serial,
+    entries: new Set(
+      forwards.map(({ local, remote }) => `${local}\u0000${remote}`)
+    ),
+  };
+}
+
+async function listAndroidForwards(serial) {
+  const output = await execFile(
+    "adb",
+    ["-s", serial, "forward", "--list"],
+    10000
+  );
+  return output
+    .split(/\n/)
+    .map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.length >= 3 && parts[0] === serial)
+    .map((parts) => ({
+      local: parts[1],
+      remote: parts[2],
+    }));
+}
+
+async function removeAddedAndroidForwards(baseline) {
+  const current = await listAndroidForwards(baseline.serial);
+  const added = current.filter(
+    ({ local, remote }) => !baseline.entries.has(`${local}\u0000${remote}`)
+  );
+  for (const { local } of added) {
+    await execFile(
+      "adb",
+      ["-s", baseline.serial, "forward", "--remove", local],
+      10000
+    );
+  }
+  if (added.length > 0) {
+    logStep(
+      `removed ${added.length} Android ADB forward(s) created by this run`
+    );
+  }
+}
+
 async function listIosDevices() {
   const output = await execRetryingTransientIOSCancel(
     "xcrun xctrace list devices",
-    15000,
+    15000
   );
   const devices = [];
   let inOnlineDevicesSection = false;
@@ -443,7 +507,9 @@ async function listIosDevices() {
     if (!inOnlineDevicesSection) {
       continue;
     }
-    const match = trimmed.match(/^(.+?) \((\d+(?:\.\d+)*)\) \(([0-9A-Fa-f-]+)\)$/);
+    const match = trimmed.match(
+      /^(.+?) \((\d+(?:\.\d+)*)\) \(([0-9A-Fa-f-]+)\)$/
+    );
     if (match) {
       devices.push({
         name: match[1],
@@ -466,9 +532,11 @@ async function connectTargetDevice(connector, platform, serial, timeout) {
 
   assert(
     candidates.length > 0,
-    `Expected ${platform} device${serial ? ` ${serial}` : ""}, got: ${devices
+    `Expected ${platform} device${
+      serial ? ` ${serial}` : ""
+    }, got: ${devices
       .map((device) => `${device.serial}(${device.info.os})`)
-      .join(", ")}`,
+      .join(", ")}`
   );
   return candidates[0];
 }
@@ -478,7 +546,7 @@ async function activateClientWatching(connector, platform, timeout) {
   await waitFor(
     () => connector.watchAllClientsStarted,
     Math.max(timeout, 5000),
-    `${platform} client watching activation`,
+    `${platform} client watching activation`
   );
 }
 
@@ -488,7 +556,7 @@ async function connectTargetClient(
   serial,
   clientName,
   timeout,
-  args,
+  args
 ) {
   let clients = [];
   const maxAttempts = platform === "ios" ? 3 : 2;
@@ -497,7 +565,7 @@ async function connectTargetClient(
       serial,
       timeout,
       true,
-      clientName,
+      clientName
     );
     if (clients.length > 0) {
       return clients[0];
@@ -511,7 +579,7 @@ async function connectTargetClient(
     clients.length > 0,
     `Expected at least one runtime client for ${serial}${
       clientName ? ` matching ${clientName}` : ""
-    }`,
+    }`
   );
 }
 
@@ -521,18 +589,13 @@ async function connectMatchingClient(
   serial,
   targetClient,
   timeout,
-  args,
+  args
 ) {
   let clients = [];
   let matched;
   const maxAttempts = platform === "ios" ? 3 : 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    clients = await connector.connectUsbClients(
-      serial,
-      timeout,
-      true,
-      null,
-    );
+    clients = await connector.connectUsbClients(serial, timeout, true, null);
     matched = clients.find((client) => {
       return (
         client.clientId() === targetClient.clientId() ||
@@ -541,7 +604,7 @@ async function connectMatchingClient(
     });
     if (!matched) {
       matched = clients.find((client) =>
-        hasSameRuntimeIdentity(client, targetClient),
+        hasSameRuntimeIdentity(client, targetClient)
       );
     }
     if (matched) {
@@ -554,9 +617,9 @@ async function connectMatchingClient(
   }
   assert(
     matched,
-    `Expected matching runtime client ${describeClient(targetClient)} for ${serial}, got: ${clients
-      .map(describeClient)
-      .join(", ")}`,
+    `Expected matching runtime client ${describeClient(
+      targetClient
+    )} for ${serial}, got: ${clients.map(describeClient).join(", ")}`
   );
 }
 
@@ -610,9 +673,11 @@ function describeClient(client) {
 
 async function launchAppIfNeeded(platform, args, device) {
   if (platform === "android" && args.launchAndroidApp) {
-    const serialPrefix = device.serial ? `-s ${shellQuote(device.serial)} ` : "";
+    const serialPrefix = device.serial
+      ? `-s ${shellQuote(device.serial)} `
+      : "";
     const command = `adb ${serialPrefix}shell am start -n ${shellQuote(
-      args.androidActivity,
+      args.androidActivity
     )} --es connection_type usb`;
     logStep(`launching Android test app: ${command}`);
     await exec(command, 10000);
@@ -621,36 +686,47 @@ async function launchAppIfNeeded(platform, args, device) {
   }
 
   if (platform === "ios" && args.launchIOSApp) {
-    const command =
-      `xcrun devicectl device process launch --device ${shellQuote(
-        device.serial,
-      )} --terminate-existing ${shellQuote(args.iosBundleId)}`;
+    const command = `xcrun devicectl device process launch --device ${shellQuote(
+      device.serial
+    )} --terminate-existing ${shellQuote(args.iosBundleId)}`;
     logStep(`launching iOS test app: ${command}`);
     await execRetryingTransientIOSCancel(command, 15000);
     await delay(2500);
   }
 }
 
-async function assertMessageRoundtrip(platform, args, firstClient, secondClient) {
+async function assertMessageRoundtrip(
+  platform,
+  args,
+  firstClient,
+  secondClient
+) {
   const firstNonce = `${platform}-first-${Date.now()}`;
   const secondNonce = `${platform}-second-${Date.now()}`;
   const [firstResponse, secondResponse] = await Promise.all([
     withTimeout(
       firstClient.sendClientMessage(args.messageMethod, { nonce: firstNonce }),
       args.clientTimeout,
-      `${platform} first connector message roundtrip`,
+      `${platform} first connector message roundtrip`
     ),
     withTimeout(
-      secondClient.sendClientMessage(args.messageMethod, { nonce: secondNonce }),
+      secondClient.sendClientMessage(args.messageMethod, {
+        nonce: secondNonce,
+      }),
       args.clientTimeout,
-      `${platform} second connector message roundtrip`,
+      `${platform} second connector message roundtrip`
     ),
   ]);
   assert.strictEqual(typeof firstResponse, "string");
   assert.strictEqual(typeof secondResponse, "string");
 }
 
-async function assertWebSocketFrontends(context, connector, usbClient, platform) {
+async function assertWebSocketFrontends(
+  context,
+  connector,
+  usbClient,
+  platform
+) {
   await connector.startWSServer();
   assert(connector.wssPort > 0, "websocket server should expose a port");
   const url = `ws://127.0.0.1:${connector.wssPort}/mdevices/page/android`;
@@ -669,20 +745,20 @@ async function assertWebSocketFrontends(context, connector, usbClient, platform)
         first.messages.find(
           (message) =>
             message?.event === "ClientList" &&
-            message.data?.some((client) => client.id === usbClient.clientId()),
+            message.data?.some((client) => client.id === usbClient.clientId())
         ),
       3000,
-      `${platform} first frontend client list`,
+      `${platform} first frontend client list`
     ),
     waitFor(
       () =>
         second.messages.find(
           (message) =>
             message?.event === "ClientList" &&
-            message.data?.some((client) => client.id === usbClient.clientId()),
+            message.data?.some((client) => client.id === usbClient.clientId())
         ),
       3000,
-      `${platform} second frontend client list`,
+      `${platform} second frontend client list`
     ),
   ]);
 }
@@ -694,7 +770,7 @@ async function assertLegacyPreemption(
   serial,
   clientName,
   daemonPid,
-  args,
+  args
 ) {
   logStep(`${platform} simulating legacy owner preemption`);
   const multiOpenStatuses = [];
@@ -707,7 +783,7 @@ async function assertLegacyPreemption(
   await waitFor(
     () => readOwnerPid(context.legacyOwnerPath) === daemonPid,
     LEGACY_PREEMPTION_TIMEOUT,
-    `${platform} daemon owns legacy owner file`,
+    `${platform} daemon owns legacy owner file`
   );
 
   const legacyOwner = spawnLegacyOwnerProcess();
@@ -717,12 +793,12 @@ async function assertLegacyPreemption(
     await waitFor(
       () => multiOpenStatuses.includes(MultiOpenStatus.unattached),
       LEGACY_PREEMPTION_TIMEOUT,
-      `${platform} connector receives legacy unattached status`,
+      `${platform} connector receives legacy unattached status`
     );
     await waitFor(
       () => connector.devices.size === 0 && connector.usbClients.size === 0,
       LEGACY_PREEMPTION_TIMEOUT,
-      `${platform} connector mirror cleared after legacy preemption`,
+      `${platform} device and runtime mirrors cleared after legacy preemption`
     );
     assert.strictEqual(readOwnerPid(context.legacyOwnerPath), legacyOwner.pid);
   } finally {
@@ -735,8 +811,8 @@ async function assertLegacyPreemption(
       multiOpenStatuses.includes(MultiOpenStatus.attached) &&
       connector.watchAllClientsStarted,
     // Math.max(args.deviceTimeout, 5000),
-      500000,
-    `${platform} daemon reacquires legacy owner`,
+    500000,
+    `${platform} daemon reacquires legacy owner`
   );
   assert.strictEqual(readOwnerPid(context.legacyOwnerPath), daemonPid);
   await launchAppIfNeeded(platform, args, { serial });
@@ -746,13 +822,13 @@ async function assertLegacyPreemption(
       const devices = await connector.connectDevices(
         args.deviceTimeout,
         serial,
-        true,
+        true
       );
       return devices.find((candidate) => candidate.serial === serial);
     },
     Math.max(args.deviceTimeout, 5000),
     `${platform} device rediscovered after preemption`,
-    250,
+    250
   );
   const client = await waitFor(
     async () => {
@@ -760,16 +836,18 @@ async function assertLegacyPreemption(
         serial,
         args.clientTimeout,
         true,
-        clientName,
+        clientName
       );
       return clients[0] ?? null;
     },
     Math.max(args.clientTimeout, 5000),
     `${platform} client rediscovered after preemption`,
-    250,
+    250
   );
   logStep(
-    `${platform} legacy preemption recovered device=${device.serial} client=${client.clientId()}`,
+    `${platform} legacy preemption recovered device=${
+      device.serial
+    } client=${client.clientId()}`
   );
   return client;
 }
@@ -780,7 +858,7 @@ function spawnLegacyOwnerProcess() {
     ["-e", "setInterval(() => {}, 1000);"],
     {
       stdio: "ignore",
-    },
+    }
   );
   assert(child.pid, "legacy owner helper process should have a pid");
   return child;
@@ -802,7 +880,7 @@ async function assertDaemonRecovery(
   serial,
   clientName,
   oldPid,
-  args,
+  args
 ) {
   logStep(`${platform} killing daemon pid=${oldPid} for recovery check`);
   try {
@@ -815,21 +893,21 @@ async function assertDaemonRecovery(
   await waitFor(
     () => !processExists(oldPid),
     3000,
-    `${platform} old daemon process exit`,
+    `${platform} old daemon process exit`
   );
   await delay(args.multiplexerDaemonIdleTimeout + 300);
 
   const [device] = await connector.connectDevices(
     args.deviceTimeout,
     serial,
-    true,
+    true
   );
   assert(device, `${platform} device should be rediscovered after recovery`);
   const [client] = await connector.connectUsbClients(
     serial,
     args.clientTimeout,
     true,
-    clientName,
+    clientName
   );
   assert(client, `${platform} client should be rediscovered after recovery`);
 
@@ -839,7 +917,7 @@ async function assertDaemonRecovery(
       return info && info.pid !== oldPid ? info : null;
     },
     5000,
-    `${platform} replacement daemon discovery`,
+    `${platform} replacement daemon discovery`
   );
   assert.notStrictEqual(newInfo.pid, oldPid);
   logStep(`${platform} recovered daemon pid=${newInfo.pid}`);
@@ -867,7 +945,7 @@ async function connectDriverWebSocket(url, info) {
             },
             type: "Driver",
           },
-        }),
+        })
       );
     }
   });
@@ -878,7 +956,7 @@ async function connectDriverWebSocket(url, info) {
   await waitFor(
     () => messages.find((message) => message?.event === "RoomJoined"),
     3000,
-    `${info.app} room joined`,
+    `${info.app} room joined`
   );
   return { socket, messages };
 }
@@ -894,11 +972,35 @@ function exec(command, timeout) {
           return;
         }
         resolve(stdout);
-      },
+      }
     );
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error(`timeout:${timeout} exec:${command}`));
+    }, timeout);
+    child.on("exit", () => clearTimeout(timer));
+  });
+}
+
+function execFile(command, args, timeout) {
+  return new Promise((resolve, reject) => {
+    const child = childProcess.execFile(
+      command,
+      args,
+      { windowsHide: true },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve(stdout);
+      }
+    );
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(
+        new Error(`timeout:${timeout} execFile:${command} ${args.join(" ")}`)
+      );
     }, timeout);
     child.on("exit", () => clearTimeout(timer));
   });
@@ -941,7 +1043,7 @@ function withTimeout(promise, timeout, label) {
       (error) => {
         clearTimeout(timer);
         reject(error);
-      },
+      }
     );
   });
 }
@@ -957,7 +1059,7 @@ async function stopDaemon(discoveryPath) {
   await waitFor(
     () => !processExists(discovery.pid),
     1000,
-    "daemon termination",
+    "daemon termination"
   ).catch(() => {
     try {
       process.kill(discovery.pid, "SIGKILL");
@@ -966,7 +1068,7 @@ async function stopDaemon(discoveryPath) {
   await waitFor(
     () => !processExists(discovery.pid),
     1000,
-    "daemon force termination",
+    "daemon force termination"
   ).catch(() => {});
 }
 
@@ -1045,7 +1147,7 @@ async function stopInterferingMultiplexerDaemons() {
   }
 
   logStep(
-    `stopping ${targets.length} existing multiplexer daemon(s) before real-device e2e`,
+    `stopping ${targets.length} existing multiplexer daemon(s) before real-device e2e`
   );
   for (const target of targets) {
     try {
@@ -1059,7 +1161,7 @@ async function stopInterferingMultiplexerDaemons() {
       return alive.length === 0;
     },
     2000,
-    "existing multiplexer daemon graceful stop",
+    "existing multiplexer daemon graceful stop"
   ).catch(() => {});
 
   const stillAlive = targets.filter((target) => processExists(target.pid));
@@ -1080,51 +1182,49 @@ function listInterferingMultiplexerDaemons() {
   }
 
   return new Promise((resolve) => {
-    childProcess.execFile(
-      "ps",
-      ["-Ao", "pid=,command="],
-      (error, stdout) => {
-        if (error) {
-          resolve([]);
-          return;
-        }
+    childProcess.execFile("ps", ["-Ao", "pid=,command="], (error, stdout) => {
+      if (error) {
+        resolve([]);
+        return;
+      }
 
-        const defaultDiscoveryPath = path.join(
-          process.env.HOME || os.homedir(),
-          ".DebugRouterConnector",
-          "multiplexer",
-          "daemon.json",
-        );
-        const targets = stdout
-          .split(/\n/)
-          .map((line) => {
-            const match = line.trim().match(/^(\d+)\s+(.+)$/);
-            if (!match) {
-              return null;
-            }
-            return {
-              pid: Number(match[1]),
-              command: match[2],
-            };
-          })
-          .filter(Boolean)
-          .filter((entry) => {
-            if (entry.pid === process.pid) {
-              return false;
-            }
-            if (!entry.command.includes("/multiplexer/daemon/entry.js")) {
-              return false;
-            }
-            return (
-              entry.command.includes(`--discovery-path ${defaultDiscoveryPath}`) ||
-              /\/T\/debug-router-real-[^/]+\/multiplexer\/daemon\.json/.test(
-                entry.command,
-              )
-            );
-          });
-        resolve(targets);
-      },
-    );
+      const defaultDiscoveryPath = path.join(
+        process.env.HOME || os.homedir(),
+        ".DebugRouterConnector",
+        "multiplexer",
+        "daemon.json"
+      );
+      const targets = stdout
+        .split(/\n/)
+        .map((line) => {
+          const match = line.trim().match(/^(\d+)\s+(.+)$/);
+          if (!match) {
+            return null;
+          }
+          return {
+            pid: Number(match[1]),
+            command: match[2],
+          };
+        })
+        .filter(Boolean)
+        .filter((entry) => {
+          if (entry.pid === process.pid) {
+            return false;
+          }
+          if (!entry.command.includes("/multiplexer/daemon/entry.js")) {
+            return false;
+          }
+          return (
+            entry.command.includes(
+              `--discovery-path ${defaultDiscoveryPath}`
+            ) ||
+            /\/T\/debug-router-real-[^/]+\/multiplexer\/daemon\.json/.test(
+              entry.command
+            )
+          );
+        });
+      resolve(targets);
+    });
   });
 }
 

@@ -148,6 +148,12 @@ export function isWebSocketClientSnapshot(
   );
 }
 
+function isWebSocketClientSnapshotArray(
+  value: unknown,
+): value is WebSocketClientSnapshot[] {
+  return Array.isArray(value) && value.every(isWebSocketClientSnapshot);
+}
+
 export function isSnapshot(value: unknown): value is Snapshot {
   return (
     isRecord(value) &&
@@ -157,6 +163,8 @@ export function isSnapshot(value: unknown): value is Snapshot {
     value.devices.every(isDeviceSnapshot) &&
     Array.isArray(value.clients) &&
     value.clients.every(isClientSnapshot) &&
+    isOptional(value.websocketAppClients, isWebSocketClientSnapshotArray) &&
+    isOptional(value.websocketWebClients, isWebSocketClientSnapshotArray) &&
     isOptional(value.daemonVersion, isString) &&
     isOptional(value.capabilities, isStringArray)
   );

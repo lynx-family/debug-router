@@ -13,6 +13,8 @@ export type Snapshot = {
   generatedAt: number;
   devices: DeviceSnapshot[];
   clients: ClientSnapshot[];
+  websocketAppClients?: WebSocketClientSnapshot[];
+  websocketWebClients?: WebSocketClientSnapshot[];
   daemonVersion?: string;
   capabilities?: string[];
 };
@@ -24,7 +26,7 @@ export type DeviceSnapshot = DeviceDescription & {
 
 export type ClientSnapshot = ClientDescription;
 
-export type WebSocketClientSnapshot = { // Will be used in the future
+export type WebSocketClientSnapshot = {
   id: number;
   app: string;
   debugRouterVersion: string;
