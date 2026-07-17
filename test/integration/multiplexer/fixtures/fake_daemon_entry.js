@@ -461,7 +461,8 @@ class FakePhysicalConnector {
           throw new Error("control socket error hook is unavailable");
         }
         emitControlSocketError(
-          command.message ?? "fake daemon control socket error"
+          command.message ?? "fake daemon control socket error",
+          command.controlId
         );
         break;
       default:
@@ -503,10 +504,41 @@ async function main() {
     PhysicalConnectorCtor: FakePhysicalConnector,
     discoveryPathForFake: entryOption.discoveryPath,
   });
-  emitControlSocketError = (message) => {
-    const connection = host.controlServer?.connections.values().next().value;
+  const handleControlConnected = host.handleControlConnected.bind(host);
+  const handleControlDisconnected = host.handleControlDisconnected.bind(host);
+  host.handleControlConnected = (controlId) => {
+    handleControlConnected(controlId);
+    appendJsonLine(logPath, {
+      event: "control-connected-callback",
+      pid: process.pid,
+      at: Date.now(),
+      monotonicAtNs: process.hrtime.bigint().toString(),
+      controlId,
+      activeControlCount: host.activeControlIds.size,
+    });
+  };
+  host.handleControlDisconnected = (controlId) => {
+    handleControlDisconnected(controlId);
+    appendJsonLine(logPath, {
+      event: "control-disconnected-callback",
+      pid: process.pid,
+      at: Date.now(),
+      monotonicAtNs: process.hrtime.bigint().toString(),
+      controlId,
+      activeControlCount: host.activeControlIds.size,
+    });
+  };
+  emitControlSocketError = (message, controlId) => {
+    const connection =
+      controlId === undefined
+        ? host.controlServer?.connections.values().next().value
+        : host.controlServer?.connections.get(controlId);
     if (!connection) {
-      throw new Error("no active control socket to fail");
+      throw new Error(
+        controlId === undefined
+          ? "no active control socket to fail"
+          : `control socket ${controlId} is unavailable`
+      );
     }
     connection.socket.emit("error", new Error(message));
   };

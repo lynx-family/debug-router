@@ -123,6 +123,27 @@ describe("multiplexer integration daemon lifecycle", function () {
     );
   });
 
+  it("stops the daemon when its forceRespawnDaemon Connector closes", async function () {
+    context = createIntegrationContext("daemon-force-close", {
+      heartbeatInterval: 25,
+      multiplexerDaemonIdleTimeout: 30000,
+      staleTimeout: 500,
+    });
+
+    const connector = context.createConnector({
+      forceRespawnDaemon: true,
+    });
+    await connector.connectDevices(-1, null, false);
+    const info = readJsonFile(context.paths.discoveryPath, null);
+    assert(info && processExists(info.pid), "forced daemon should be running");
+
+    await connector.close();
+
+    await waitFor(() => !fs.existsSync(context.paths.discoveryPath), 2000);
+    await waitFor(() => !fs.existsSync(context.paths.daemonLockPath), 2000);
+    await waitFor(() => !processExists(info.pid), 2000);
+  });
+
   it("keeps the daemon and other controls alive when one control WebSocket errors", async function () {
     context = createIntegrationContext("daemon-control-socket-error", {
       heartbeatInterval: 25,

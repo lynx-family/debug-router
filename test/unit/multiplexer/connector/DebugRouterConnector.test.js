@@ -136,6 +136,7 @@ function loadConnectorWithFakes(config = {}) {
     unsubscribeConnectionCalls: 0,
     closeCalls: 0,
     connectCalls: 0,
+    forceStopCalls: 0,
   };
 
   class FakeMultiplexerDiscovery {
@@ -152,6 +153,10 @@ function loadConnectorWithFakes(config = {}) {
       this.option = option;
       state.managers.push(this);
     }
+
+    async forceStopDaemon() {
+      state.forceStopCalls++;
+    }
   }
 
   class FakeMultiplexerDaemonClient {
@@ -160,15 +165,18 @@ function loadConnectorWithFakes(config = {}) {
       this.calls = [];
       this.connectCalls = 0;
       this.closeCalls = 0;
+      this.ready = false;
       state.clients.push(this);
     }
 
     async connect() {
+      this.ready = true;
       this.connectCalls++;
       state.connectCalls++;
     }
 
     async call(method, params) {
+      this.ready = true;
       this.calls.push({
         method,
         params,
@@ -184,6 +192,10 @@ function loadConnectorWithFakes(config = {}) {
         return [];
       }
       return undefined;
+    }
+
+    async forceStopDaemon() {
+      await this.option.daemonManager.forceStopDaemon();
     }
 
     subscribe(listener) {
@@ -225,6 +237,7 @@ function loadConnectorWithFakes(config = {}) {
     }
 
     async close() {
+      this.ready = false;
       this.closeCalls++;
       state.closeCalls++;
     }
@@ -280,7 +293,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
 
       const connector = new DebugRouterConnector({
         manualConnect: true,
-        enableWebSocket: true,
+        enableWebSocket: false,
         websocketOption: {
           port: 7777,
           roomId: "room-1",
@@ -293,6 +306,16 @@ describe("DebugRouterConnector multiplexer facade", function () {
         multiplexerStartupTimeout: 333,
         multiplexerDaemonIdleTimeout: 444,
         multiplexerRpcTimeout: 555,
+        forceRespawnDaemon: true,
+        enableAndroid: false,
+        enableIOS: false,
+        enableHarmony: false,
+        enableDesktop: false,
+        enableNetworkDevice: false,
+        networkDeviceOpt: {
+          ip: "127.0.0.1",
+          port: [9100],
+        },
         connectionTrace: {
           enabled: true,
           output: "relative-trace.ndjson",
@@ -301,7 +324,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
         reportService,
       });
 
-      assert.strictEqual(connector.enableWebSocket, true);
+      assert.strictEqual(connector.enableWebSocket, false);
       assert.strictEqual(connector.wssPort, 7777);
       assert.strictEqual(connector.roomId, "room-1");
       assert.strictEqual(state.discoveries.length, 1);
@@ -326,10 +349,46 @@ describe("DebugRouterConnector multiplexer facade", function () {
         state.managers[0].option.multiplexerDaemonIdleTimeout,
         444
       );
+      assert.strictEqual(state.managers[0].option.forceRespawnDaemon, true);
+      assert.strictEqual(state.managers[0].option.enableWebSocket, false);
       assert.deepStrictEqual(state.managers[0].option.websocketOption, {
         port: 7777,
         roomId: "room-1",
       });
+      assert.deepStrictEqual(
+        {
+          manualConnect:
+            state.managers[0].option.physicalConnectorOption.manualConnect,
+          enableWebSocket:
+            state.managers[0].option.physicalConnectorOption.enableWebSocket,
+          enableAndroid:
+            state.managers[0].option.physicalConnectorOption.enableAndroid,
+          enableIOS: state.managers[0].option.physicalConnectorOption.enableIOS,
+          enableHarmony:
+            state.managers[0].option.physicalConnectorOption.enableHarmony,
+          enableDesktop:
+            state.managers[0].option.physicalConnectorOption.enableDesktop,
+          enableNetworkDevice:
+            state.managers[0].option.physicalConnectorOption
+              .enableNetworkDevice,
+        },
+        {
+          manualConnect: true,
+          enableWebSocket: false,
+          enableAndroid: false,
+          enableIOS: false,
+          enableHarmony: false,
+          enableDesktop: false,
+          enableNetworkDevice: false,
+        }
+      );
+      assert.deepStrictEqual(
+        state.managers[0].option.physicalConnectorOption.networkDeviceOpt,
+        {
+          ip: "127.0.0.1",
+          port: [9100],
+        }
+      );
       assert.deepStrictEqual(
         state.managers[0].option.physicalConnectorOption.connectionTrace,
         {
@@ -347,6 +406,57 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.deepStrictEqual(
         reports.map((item) => item.event),
         ["init", "DebugRouterConnectorInit"]
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("uses full daemon capabilities by default without forceRespawnDaemon", function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
+    try {
+      new DebugRouterConnector({
+        manualConnect: true,
+        enableWebSocket: false,
+        enableAndroid: false,
+        enableIOS: false,
+        enableHarmony: false,
+        enableDesktop: false,
+        enableNetworkDevice: false,
+        networkDeviceOpt: {
+          ip: "127.0.0.1",
+          port: [9100],
+        },
+      });
+
+      assert.strictEqual(state.managers[0].option.forceRespawnDaemon, false);
+      assert.strictEqual(state.managers[0].option.enableWebSocket, true);
+      assert.deepStrictEqual(
+        {
+          manualConnect:
+            state.managers[0].option.physicalConnectorOption.manualConnect,
+          enableWebSocket:
+            state.managers[0].option.physicalConnectorOption.enableWebSocket,
+          enableAndroid:
+            state.managers[0].option.physicalConnectorOption.enableAndroid,
+          enableIOS: state.managers[0].option.physicalConnectorOption.enableIOS,
+          enableHarmony:
+            state.managers[0].option.physicalConnectorOption.enableHarmony,
+          enableDesktop:
+            state.managers[0].option.physicalConnectorOption.enableDesktop,
+          enableNetworkDevice:
+            state.managers[0].option.physicalConnectorOption
+              .enableNetworkDevice,
+        },
+        {
+          manualConnect: false,
+          enableWebSocket: true,
+          enableAndroid: true,
+          enableIOS: true,
+          enableHarmony: true,
+          enableDesktop: true,
+          enableNetworkDevice: true,
+        }
       );
     } finally {
       restore();
@@ -381,6 +491,89 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.deepStrictEqual(Array.from(connector.devices.keys()), [
         "device-1",
       ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("logs auto-connect failures and keeps them in the desired recovery path", async function () {
+    const { DebugRouterConnector, restore } = loadConnectorWithFakes({
+      rejectMethods: ["reacquireLegacyOwnership"],
+    });
+    const warnings = [];
+    defaultLogger.setOutput((level, ...messages) => {
+      if (level === "warn") {
+        warnings.push(messages.join(" "));
+      }
+    });
+
+    const connector = new DebugRouterConnector({
+      manualConnect: false,
+    });
+    try {
+      await nextTick();
+
+      assert.strictEqual(
+        warnings.some((message) =>
+          message.includes("Failed to auto-connect multiplexer devices")
+        ),
+        true
+      );
+      assert.notStrictEqual(connector.desiredRecoveryTimer, null);
+    } finally {
+      await connector.close();
+      restore();
+    }
+  });
+
+  it("keeps device capability flags local to each Connector", function () {
+    const { DebugRouterConnector, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableAndroid: false,
+        enableIOS: true,
+        enableHarmony: false,
+        enableDesktop: false,
+        enableNetworkDevice: false,
+      });
+      const usbMessages = collect(connector, "usb-client-message");
+
+      connector.applySnapshot({
+        protocolVersion: 1,
+        generatedAt: 1,
+        devices: [
+          createDeviceSnapshot({ serial: "android", os: "Android" }),
+          createDeviceSnapshot({ serial: "ios", os: "iOS" }),
+          createDeviceSnapshot({ serial: "harmony", os: "Harmony" }),
+          createDeviceSnapshot({ serial: "desktop", os: "Mac" }),
+          createDeviceSnapshot({ serial: "network", os: "Network" }),
+        ],
+        clients: [
+          createClientSnapshot({ id: 1, deviceId: "android" }),
+          createClientSnapshot({ id: 2, deviceId: "ios", os: "iOS" }),
+          createClientSnapshot({ id: 3, deviceId: "harmony" }),
+          createClientSnapshot({ id: 4, deviceId: "desktop" }),
+          createClientSnapshot({ id: 5, deviceId: "network" }),
+        ],
+      });
+      connector.applyHostEvent({
+        kind: "event",
+        event: "usb-client-message",
+        data: { id: 1, message: "hidden" },
+      });
+      connector.applyHostEvent({
+        kind: "event",
+        event: "usb-client-message",
+        data: { id: 2, message: "visible" },
+      });
+
+      assert.deepStrictEqual(Array.from(connector.devices.keys()), ["ios"]);
+      assert.deepStrictEqual(Array.from(connector.usbClients.keys()), [2]);
+      assert.deepStrictEqual(
+        usbMessages.map((event) => event.id),
+        [2]
+      );
     } finally {
       restore();
     }
@@ -1715,9 +1908,51 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.strictEqual(state.closeCalls, 1);
       assert.strictEqual(state.unsubscribeCalls, 1);
       assert.strictEqual(state.unsubscribeConnectionCalls, 1);
+      assert.strictEqual(state.forceStopCalls, 0);
       assert.strictEqual(connector.webSocketServerStarted, false);
       assert.strictEqual(connector.wss, null);
       assert.strictEqual(connector.devices.size, 0);
+    } finally {
+      restore();
+    }
+  });
+
+  it("stops the connected daemon when a forceRespawnDaemon Connector closes", async function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        forceRespawnDaemon: true,
+      });
+      await connector.connectDevices();
+
+      await connector.close();
+      await connector.close();
+
+      assert.strictEqual(
+        state.clients[0].calls.some((call) => call.method === "shutdownDaemon"),
+        false
+      );
+      assert.strictEqual(state.forceStopCalls, 1);
+      assert.strictEqual(state.closeCalls, 1);
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not start a daemon only to stop an unused forceRespawnDaemon Connector", async function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
+    try {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        forceRespawnDaemon: true,
+      });
+
+      await connector.close();
+
+      assert.deepStrictEqual(state.clients[0].calls, []);
+      assert.strictEqual(state.forceStopCalls, 1);
+      assert.strictEqual(state.closeCalls, 1);
     } finally {
       restore();
     }

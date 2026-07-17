@@ -54,8 +54,8 @@ export type MultiplexerDaemonConnectionState =
   | { state: "disconnected"; error: Error };
 
 export class MultiplexerDaemonClient {
-  readonly daemonManager: MultiplexerDaemonManager;
   readonly pendingRpc: Map<number, PendingRpc> = new Map();
+  private readonly daemonManager: MultiplexerDaemonManager;
   private readonly controlPath: string;
   private readonly rpcTimeout: number;
   private readonly protocolVersion: number;
@@ -207,6 +207,10 @@ export class MultiplexerDaemonClient {
       new Error("Multiplexer control socket reconnecting"),
     );
     await this.connect();
+  }
+
+  async forceStopDaemon(): Promise<void> {
+    await this.daemonManager.forceStopDaemon();
   }
 
   async close(): Promise<void> {

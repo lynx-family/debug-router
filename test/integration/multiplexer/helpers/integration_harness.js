@@ -178,11 +178,12 @@ function createIntegrationContext(name, option = {}) {
     createConnector(extra = {}) {
       const connector = new DebugRouterConnector({
         manualConnect: true,
-        enableAndroid: false,
-        enableIOS: false,
-        enableHarmony: false,
-        enableDesktop: false,
-        enableNetworkDevice: false,
+        forceRespawnDaemon: extra.forceRespawnDaemon ?? false,
+        enableAndroid: extra.enableAndroid ?? true,
+        enableIOS: extra.enableIOS ?? false,
+        enableHarmony: extra.enableHarmony ?? false,
+        enableDesktop: extra.enableDesktop ?? false,
+        enableNetworkDevice: extra.enableNetworkDevice ?? false,
         enableWebSocket: extra.enableWebSocket ?? option.enableWebSocket,
         websocketOption: extra.websocketOption ?? option.websocketOption,
         multiplexerRootDir: rootDir,

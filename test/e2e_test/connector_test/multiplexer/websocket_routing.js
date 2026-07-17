@@ -92,7 +92,7 @@ function createContext(name, state = defaultState()) {
           port: 0,
           roomId: "no-device-e2e",
         },
-        enableAndroid: false,
+        enableAndroid: true,
         enableIOS: false,
         enableHarmony: false,
         enableDesktop: false,

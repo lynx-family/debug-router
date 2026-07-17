@@ -38,7 +38,9 @@ export type MultiplexerDaemonReplaceReason =
   | "daemon-protocol-older-than-connector"
   | "unhealthy-daemon"
   | "stale-daemon"
-  | "invalid-discovery";
+  | "invalid-discovery"
+  | "force-respawn"
+  | "force-stop";
 
 export type SpawnedDaemonProcess = {
   pid?: number;
@@ -71,6 +73,7 @@ export type MultiplexerDaemonManagerOption = {
   capabilities?: string[];
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
+  forceRespawnDaemon?: boolean;
   enableWebSocket?: boolean;
   websocketOption?: {
     port?: number;
@@ -119,6 +122,7 @@ export class MultiplexerDaemonManager {
   private readonly isProcessAlive: (pid: number) => boolean;
   private readonly sleepFor: (duration: number) => Promise<void>;
   private readonly now: () => number;
+  private forceRespawnDaemonPending: boolean;
   private daemonClient?: MultiplexerDaemonControlClient;
 
   constructor(option: MultiplexerDaemonManagerOption) {
@@ -143,6 +147,7 @@ export class MultiplexerDaemonManager {
     this.capabilities = option.capabilities;
     this.legacyDriverDir = option.legacyDriverDir;
     this.multiplexerDaemonIdleTimeout = option.multiplexerDaemonIdleTimeout;
+    this.forceRespawnDaemonPending = option.forceRespawnDaemon ?? false;
     this.enableWebSocket = option.enableWebSocket;
     this.websocketOption = option.websocketOption;
     this.physicalConnectorOption = option.physicalConnectorOption;
@@ -168,7 +173,22 @@ export class MultiplexerDaemonManager {
   }
 
   async ensureDaemon(): Promise<MultiplexerDiscoveryInfo> {
+    if (this.forceRespawnDaemonPending) {
+      return this.forceRespawnDaemon();
+    }
     return this.handleDiscoveryValidation(this.discovery.validateDiscovery());
+  }
+
+  async forceStopDaemon(): Promise<void> {
+    while (!this.acquireSpawnLock()) {
+      await this.sleepFor(this.readyPollInterval);
+    }
+
+    try {
+      await this.cleanupDaemonBeforeSpawn("force-stop");
+    } finally {
+      this.releaseSpawnLock();
+    }
   }
 
   async handleDiscoveryValidation(
@@ -344,6 +364,27 @@ export class MultiplexerDaemonManager {
     }
   }
 
+  private async forceRespawnDaemon(): Promise<MultiplexerDiscoveryInfo> {
+    while (!this.acquireSpawnLock()) {
+      await this.waitUntilReady(this.startupTimeout);
+      await this.sleepFor(this.readyPollInterval);
+    }
+
+    try {
+      // forceRespawnDaemon is intended for serialized debug/test use.
+      // Concurrent force requests can sequentially replace the daemon that
+      // another request has just started, even though spawn.lock prevents the
+      // replacement steps themselves from running at the same time.
+      this.forceRespawnDaemonPending = false;
+      await this.cleanupDaemonBeforeSpawn("force-respawn");
+
+      await this.spawnDaemon();
+      return this.waitUntilReady(this.startupTimeout);
+    } finally {
+      this.releaseSpawnLock();
+    }
+  }
+
   private async getHealthyDiscovery(): Promise<MultiplexerDiscoveryInfo | null> {
     const validation = this.discovery.validateDiscovery();
     if (validation.status !== "usable") {
@@ -376,13 +417,19 @@ export class MultiplexerDaemonManager {
     return null;
   }
 
-  private async cleanupDaemonBeforeSpawn(): Promise<void> {
+  private async cleanupDaemonBeforeSpawn(
+    reason?: MultiplexerDaemonReplaceReason,
+  ): Promise<void> {
     const validation = this.discovery.validateDiscovery();
     const info = "info" in validation ? validation.info ?? null : null;
     let stoppedPid: number | null = null;
 
     if (info && this.isProcessAlive(info.pid)) {
-      await this.forceStopDaemonProcess(info);
+      if (reason) {
+        await this.stopDaemonProcessForCleanup(info, reason);
+      } else {
+        await this.forceStopDaemonProcess(info);
+      }
       stoppedPid = info.pid;
     }
 

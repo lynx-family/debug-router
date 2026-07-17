@@ -76,7 +76,7 @@ function createContext(name, state, option = {}) {
       const connector = new DebugRouterConnector({
         manualConnect: true,
         enableWebSocket: extra.enableWebSocket ?? false,
-        enableAndroid: false,
+        enableAndroid: true,
         enableIOS: false,
         enableHarmony: false,
         enableDesktop: false,

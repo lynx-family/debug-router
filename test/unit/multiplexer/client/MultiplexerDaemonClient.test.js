@@ -77,6 +77,7 @@ function createWebSocketCtor() {
 function createDaemonManager(info = {}) {
   const state = {
     ensureCalls: 0,
+    forceStopCalls: 0,
     daemonClient: null,
   };
   return {
@@ -94,6 +95,9 @@ function createDaemonManager(info = {}) {
           heartbeat: 1000,
           ...info,
         };
+      },
+      async forceStopDaemon() {
+        state.forceStopCalls++;
       },
     },
   };
@@ -162,6 +166,15 @@ describe("MultiplexerDaemonClient", function () {
     assert.strictEqual(daemonManagerState.ensureCalls, 1);
     assert.strictEqual(WebSocketCtor.instances.length, 1);
     assert.strictEqual(socket.url, "ws://127.0.0.1:12345/custom-control");
+  });
+
+  it("forwards forceStopDaemon to the daemon manager", async function () {
+    const { client, daemonManagerState } = createClient();
+
+    await client.forceStopDaemon();
+
+    assert.strictEqual(daemonManagerState.forceStopCalls, 1);
+    assert.strictEqual(daemonManagerState.ensureCalls, 0);
   });
 
   it("shares an in-flight connect attempt", async function () {

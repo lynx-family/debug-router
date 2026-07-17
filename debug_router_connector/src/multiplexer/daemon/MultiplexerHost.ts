@@ -642,13 +642,17 @@ export class MultiplexerHost
   }
 
   createSnapshot(): Snapshot {
+    const physicalDevices = this.legacyOwnershipAttached
+      ? Array.from(this.physicalConnector.devices.values())
+      : [];
+    const physicalClients = this.legacyOwnershipAttached
+      ? this.physicalConnector.getAllUsbClients()
+      : [];
     const snapshot: Snapshot = {
       protocolVersion: this.protocolVersion,
       generatedAt: this.now(),
-      devices: this.serializeDevices(
-        Array.from(this.physicalConnector.devices.values()),
-      ),
-      clients: this.serializeClients(this.physicalConnector.getAllUsbClients()),
+      devices: this.serializeDevices(physicalDevices),
+      clients: this.serializeClients(physicalClients),
       daemonVersion: this.option.daemonVersion,
       capabilities: this.option.capabilities
         ? [...this.option.capabilities]
@@ -696,12 +700,7 @@ export class MultiplexerHost
     serial: string | null = null,
   ): Promise<BaseDevice[]> {
     if (!this.legacyOwnershipAttached) {
-      const devices = Array.from(this.physicalConnector.devices.values());
-      return Promise.resolve(
-        serial === null
-          ? devices
-          : devices.filter((device) => device.serial === serial),
-      );
+      return Promise.resolve([]);
     }
 
     return this.physicalConnector.getDevices(timeout, serial);
@@ -1410,7 +1409,6 @@ export class MultiplexerHost
       new Error("Multiplexer legacy owner was preempted"),
     );
     this.physicalConnector.disableAllClients();
-    this.physicalConnector.devices.clear();
     this.physicalConnector.usbClients.clear();
     this.physicalConnector.selectedClient = undefined;
     this.webSocketController?.closeAllWebsocketAppClients?.();

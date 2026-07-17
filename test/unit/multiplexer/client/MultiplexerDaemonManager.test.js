@@ -165,6 +165,7 @@ function createManager(tempDir, overrides = {}) {
     daemonVersion: overrides.daemonVersion,
     capabilities: overrides.capabilities,
     legacyDriverDir: overrides.legacyDriverDir,
+    forceRespawnDaemon: overrides.forceRespawnDaemon,
     physicalConnectorOption: overrides.physicalConnectorOption,
     readyPollInterval: overrides.readyPollInterval ?? 10,
     replacementTimeout: overrides.replacementTimeout ?? 20,
@@ -401,6 +402,82 @@ describe("MultiplexerDaemonManager", function () {
         retryTime: 5000,
       },
     });
+  });
+
+  it("force-respawns a healthy daemon once with the local daemon entry and options", async function () {
+    class ForceRespawnManager extends HealthReadyManager {
+      async requestDaemonYield(info, reason) {
+        this.yieldCalls = this.yieldCalls ?? [];
+        this.yieldCalls.push({ info, reason });
+        return true;
+      }
+    }
+
+    const oldInfo = createInfo({ pid: 210 });
+    const readyInfo = createInfo({ pid: 211 });
+    const discovery = createSequenceDiscovery(
+      path.join(tempDir, "daemon.json"),
+      [usable(oldInfo), usable(readyInfo), usable(readyInfo)]
+    );
+    const { manager, spawnRecorder } = createManager(tempDir, {
+      ManagerClass: ForceRespawnManager,
+      discovery,
+      forceRespawnDaemon: true,
+      isProcessAlive: (pid) => pid === oldInfo.pid,
+    });
+
+    assert.deepStrictEqual(await manager.ensureDaemon(), readyInfo);
+    assert.deepStrictEqual(manager.yieldCalls, [
+      {
+        info: oldInfo,
+        reason: "force-respawn",
+      },
+    ]);
+    assert.strictEqual(spawnRecorder.calls.length, 1);
+    assert.strictEqual(
+      spawnRecorder.calls[0].args[0],
+      "/tmp/multiplexer-entry.js"
+    );
+
+    assert.deepStrictEqual(await manager.ensureDaemon(), readyInfo);
+    assert.strictEqual(spawnRecorder.calls.length, 1);
+    assert.strictEqual(manager.yieldCalls.length, 1);
+  });
+
+  it("force-stops the daemon and removes discovery and daemon lock artifacts", async function () {
+    class ForceStopManager extends HealthReadyManager {
+      async requestDaemonYield(info, reason) {
+        this.yieldCalls = this.yieldCalls ?? [];
+        this.yieldCalls.push({ info, reason });
+        return true;
+      }
+    }
+
+    const oldInfo = createInfo({ pid: 212 });
+    const discoveryPath = path.join(tempDir, "daemon.json");
+    const daemonLockPath = path.join(tempDir, "daemon.lock");
+    fs.writeFileSync(discoveryPath, JSON.stringify(oldInfo));
+    fs.mkdirSync(daemonLockPath);
+    const discovery = createSequenceDiscovery(discoveryPath, [usable(oldInfo)]);
+    const { manager, spawnRecorder } = createManager(tempDir, {
+      ManagerClass: ForceStopManager,
+      discovery,
+      daemonLockPath,
+      isProcessAlive: (pid) => pid === oldInfo.pid,
+    });
+
+    await manager.forceStopDaemon();
+
+    assert.deepStrictEqual(manager.yieldCalls, [
+      {
+        info: oldInfo,
+        reason: "force-stop",
+      },
+    ]);
+    assert.deepStrictEqual(spawnRecorder.calls, []);
+    assert.strictEqual(fs.existsSync(discoveryPath), false);
+    assert.strictEqual(fs.existsSync(daemonLockPath), false);
+    assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
   });
 
   it("waits for an in-flight spawn when spawn lock is held elsewhere", async function () {

@@ -1140,7 +1140,7 @@ describe("MultiplexerHost", function () {
     });
   });
 
-  it("removes devices and runtimes, keeps Driver clients, and publishes one real state after ownership loss", async function () {
+  it("hides devices, removes runtimes, keeps Driver clients, and publishes one real state after ownership loss", async function () {
     const { host, physical } = createHost({
       now: () => 3000,
     });
@@ -1166,7 +1166,7 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(physical.disableAllClientsCalls, 1);
     assert.strictEqual(device.state.stopWatchCalls, 1);
     assert.strictEqual(client.state.closeCalls, 1);
-    assert.strictEqual(physical.devices.size, 0);
+    assert.strictEqual(physical.devices.size, 1);
     assert.strictEqual(physical.usbClients.size, 0);
     assert.deepStrictEqual(await host.getDevices(), []);
     assert.deepStrictEqual(host.getAllUsbClients(), []);
@@ -1314,7 +1314,7 @@ describe("MultiplexerHost", function () {
       1,
       createRpcRequest("reacquireLegacyOwnership", {})
     );
-    physical.devices.set(device.serial, device);
+    assert.deepStrictEqual(await host.getDevices(), [device]);
     await host.handleControlRpc(
       1,
       createRpcRequest("startWatchAllClients", {
