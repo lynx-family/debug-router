@@ -342,6 +342,11 @@ std::shared_ptr<RemoteDebugProtocolBody> Parse(const Json::Value &value) {
         const Json::Value &message_type = data[kKeyType];
         const Json::Value &sender = data[kKeySender];
         const Json::Value &payload = data[kKeyData];
+        const Json::Value &request_id = data[kKeyId];
+        int32_t parsed_id = -1;
+        if (request_id.isInt()) {
+          parsed_id = request_id.asInt();
+        }
         if (message_type.isString() && sender.isInt()) {
           // parsing custom data 4 stop at entry & stop lepus at entry
           if (message_type.asString().compare(
@@ -435,8 +440,10 @@ std::shared_ptr<RemoteDebugProtocolBody> Parse(const Json::Value &value) {
                 Json::FastWriter fastWriter;
                 cdp->message_ = fastWriter.write(message);
               }
-              return CreateProtocolBody4Custom(message_type.asString(),
+              auto body = CreateProtocolBody4Custom(message_type.asString(),
                                                sender.asInt(), cdp);
+              body->AsCustom()->id_ = parsed_id;
+              return body;
             }
           }
         }

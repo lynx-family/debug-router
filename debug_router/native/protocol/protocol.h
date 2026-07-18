@@ -316,6 +316,9 @@ struct RemoteDebugProtocolBodyData4Custom : public Stringifiable {
   bool should_stop_at_entry_;
   bool should_stop_lepus_at_entry_;
   RemoteDebugPrococolClientId client_id_;
+  // Optional request-response correlation id. When >= 0, the response
+  // echoes it back so the caller can match request to response (like CDP).
+  int32_t id_ = -1;
 
   ~RemoteDebugProtocolBodyData4Custom() = default;
 
@@ -323,6 +326,9 @@ struct RemoteDebugProtocolBodyData4Custom : public Stringifiable {
     Json::Value v(Json::objectValue);
     v[kKeyType] = type_;
     v[kKeySender] = client_id_;
+    if (id_ >= 0) {
+      v[kKeyId] = id_;
+    }
 
     if (Is4SessionList()) {
       this->session_data_list_->Stringify(v[kKeyData]);

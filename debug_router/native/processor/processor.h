@@ -44,6 +44,11 @@ class Processor {
   debugrouter::protocol::RemoteDebugPrococolClientId client_id_;
   std::unique_ptr<MessageHandler> message_handler_;
   bool is_reconnect_;
+  // Stores the id from the most recently received extension/CDP request so
+  // that WrapCustomizedMessage can echo it back in the response. Reset to -1
+  // after each use. This works because the request→handler→response path is
+  // synchronous within a single Process() call.
+  int32_t last_request_id_ = -1;
 
   void process(const Json::Value &root);
 };

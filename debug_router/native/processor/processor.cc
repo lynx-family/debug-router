@@ -92,7 +92,9 @@ void Processor::process(const Json::Value &root) {
       LOGI("extension");
       auto ext = custom->AsExtension();
       if (ext->client_id_ == client_id_) {
+        last_request_id_ = custom->id_;
         processMessage(custom->type_, ext->session_id_, ext->message_);
+        last_request_id_ = -1;
       }
     }
   }
@@ -127,6 +129,10 @@ std::string Processor::WrapCustomizedMessage(const std::string &type,
   std::shared_ptr<protocol::RemoteDebugProtocolBody> custom =
       protocol::RemoteDebugProtocol::CreateProtocolBody4Custom(type, client_id_,
                                                                cdp_data);
+  // Echo back the request id (if any) so the caller can correlate the response.
+  if (last_request_id_ >= 0) {
+    custom->AsCustom()->id_ = last_request_id_;
+  }
   return protocol::RemoteDebugProtocol::Stringify(custom, mark);
 }
 
