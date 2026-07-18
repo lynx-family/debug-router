@@ -24,13 +24,14 @@ class Processor {
                                     const std::string &message, int mark,
                                     bool isObject = false);
   void FlushSessionList();
+  void FlushSessionList(int32_t id);
   void SetIsReconnect(bool is_reconnect);
 
  private:
   void registerDevice();
   void joinRoom();
   void reportError(const std::string &error);
-  void sessionList();
+  void sessionList(int32_t id = -1);
   void changeRoomServer(const std::string &url, const std::string &room);
   void openCard(const std::string &url);
   void processMessage(const std::string &type, int session_id,

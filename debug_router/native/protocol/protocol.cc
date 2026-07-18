@@ -342,6 +342,11 @@ std::shared_ptr<RemoteDebugProtocolBody> Parse(const Json::Value &value) {
         const Json::Value &message_type = data[kKeyType];
         const Json::Value &sender = data[kKeySender];
         const Json::Value &payload = data[kKeyData];
+        const Json::Value &request_id = data[kKeyId];
+        int32_t parsed_id = -1;
+        if (request_id.isInt()) {
+          parsed_id = request_id.asInt();
+        }
         if (message_type.isString() && sender.isInt()) {
           // parsing custom data 4 stop at entry & stop lepus at entry
           if (message_type.asString().compare(
@@ -388,6 +393,7 @@ std::shared_ptr<RemoteDebugProtocolBody> Parse(const Json::Value &value) {
             custom_data->list_session_data_ = list_session;
             custom_data->type_ =
                 kRemoteDebugProtocolBodyData4Custom4ListSession;
+            custom_data->id_ = parsed_id;
             auto body = std::make_shared<RemoteDebugProtocolBody>(eventStr,
                                                                   custom_data);
             return body;

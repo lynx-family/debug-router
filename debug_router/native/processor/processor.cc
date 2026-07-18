@@ -84,7 +84,7 @@ void Processor::process(const Json::Value &root) {
       openCard(custom->AsOpenCardData()->url);
     } else if (custom->Is4ListSession()) {
       LOGI("FlushSessionList");
-      FlushSessionList();
+      FlushSessionList(custom->id_);
     } else if (custom->Is4MessageHandler()) {
       LOGI("HandleAppAction");
       HandleAppAction(custom);
@@ -132,6 +132,8 @@ std::string Processor::WrapCustomizedMessage(const std::string &type,
 
 void Processor::FlushSessionList() { sessionList(); }
 
+void Processor::FlushSessionList(int32_t id) { sessionList(id); }
+
 void Processor::SetIsReconnect(bool is_reconnect) {
   is_reconnect_ = is_reconnect;
 }
@@ -163,7 +165,7 @@ void Processor::reportError(const std::string &error) {
   }
 }
 
-void Processor::sessionList() {
+void Processor::sessionList(int32_t id) {
   if (message_handler_) {
     std::unique_ptr<protocol::CustomData4SessionList> session_list =
         std::make_unique<protocol::CustomData4SessionList>();
@@ -191,6 +193,10 @@ void Processor::sessionList() {
         protocol::RemoteDebugProtocol::CreateProtocolBody4Custom(
             protocol::kRemoteDebugProtocolBodyData4Custom4SessionList,
             client_id_, std::move(session_list));
+    // Echo back the request id so the caller can correlate the response.
+    if (id >= 0) {
+      body->AsCustom()->id_ = id;
+    }
     message_handler_->SendMessage(
         protocol::RemoteDebugProtocol::Stringify(body));
   }
