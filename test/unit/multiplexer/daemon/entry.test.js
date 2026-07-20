@@ -29,6 +29,13 @@ const {
 const {
   defaultLogger,
 } = require("../../../../debug_router_connector/src/utils/logger");
+const {
+  DriverReportServiceImpl,
+} = require("../../../../debug_router_connector/src/report/interface/DriverReportServiceImpl");
+const {
+  getDriverReportService,
+  setDriverReportService,
+} = require("../../../../debug_router_connector/src/report/interface/DriverReportService");
 
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-entry-"));
@@ -36,6 +43,13 @@ function createTempDir() {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function assertDefaultReportServiceInstalled() {
+  const reportService = getDriverReportService();
+  assert(reportService instanceof DriverReportServiceImpl);
+  reportService.init(false);
+  reportService.report("test", null, null);
 }
 
 function nextTick() {
@@ -135,6 +149,7 @@ describe("multiplexer daemon entry", function () {
   });
 
   afterEach(function () {
+    setDriverReportService(null);
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -306,6 +321,7 @@ describe("multiplexer daemon entry", function () {
       { connectionTrace: { output: { stream: true } } },
       { connectionTrace: { bufferSize: -1 } },
       { traceRecorder: {} },
+      { reportService: {} },
     ]) {
       assert.throws(
         () =>
@@ -402,6 +418,7 @@ describe("multiplexer daemon entry", function () {
     assert.strictEqual(info.minSupportedProtocolVersion, 2);
     assert.strictEqual(info.daemonVersion, "0.0.3");
     assert.deepStrictEqual(info.capabilities, ["control", "snapshot"]);
+    assertDefaultReportServiceInstalled();
     assert.deepStrictEqual(daemon.host.option, {
       controlPort: 9333,
       protocolVersion: 3,
@@ -425,6 +442,7 @@ describe("multiplexer daemon entry", function () {
     });
 
     assert.ok(daemon.host instanceof MultiplexerHost);
+    assertDefaultReportServiceInstalled();
     assert.deepStrictEqual(daemon.host.option, {
       controlPort: 9001,
       protocolVersion: 1,
@@ -465,22 +483,26 @@ describe("multiplexer daemon entry", function () {
       );
 
       assert.strictEqual(FakeEntryHost.instances.length, 1);
-      assert.deepStrictEqual(FakeEntryHost.instances[0].option, {
-        controlPort: 9444,
-        protocolVersion: 4,
-        minSupportedProtocolVersion: 2,
-        daemonVersion: "0.0.4",
-        capabilities: ["control", "routing"],
-        legacyDriverDir: "/tmp/legacy-driver",
-        manualConnect: true,
-        enableAndroid: true,
-        enableIOS: false,
-        enableHarmony: false,
-        enableNetworkDevice: false,
-        usbConnectOpt: {
-          retryTime: 5000,
-        },
-      });
+      assertDefaultReportServiceInstalled();
+      assert.deepStrictEqual(
+        FakeEntryHost.instances[0].option,
+        {
+          controlPort: 9444,
+          protocolVersion: 4,
+          minSupportedProtocolVersion: 2,
+          daemonVersion: "0.0.4",
+          capabilities: ["control", "routing"],
+          legacyDriverDir: "/tmp/legacy-driver",
+          manualConnect: true,
+          enableAndroid: true,
+          enableIOS: false,
+          enableHarmony: false,
+          enableNetworkDevice: false,
+          usbConnectOpt: {
+            retryTime: 5000,
+          },
+        }
+      );
     } finally {
       restoreHost();
     }
@@ -554,13 +576,17 @@ describe("multiplexer daemon entry", function () {
       ]);
 
       assert.strictEqual(FakeEntryHost.instances.length, 1);
-      assert.deepStrictEqual(FakeEntryHost.instances[0].option, {
-        controlPort: 9555,
-        protocolVersion: 1,
-        minSupportedProtocolVersion: 1,
-        daemonVersion: "0.0.6",
-        capabilities: ["control", "snapshot"],
-      });
+      assertDefaultReportServiceInstalled();
+      assert.deepStrictEqual(
+        FakeEntryHost.instances[0].option,
+        {
+          controlPort: 9555,
+          protocolVersion: 1,
+          minSupportedProtocolVersion: 1,
+          daemonVersion: "0.0.6",
+          capabilities: ["control", "snapshot"],
+        }
+      );
       assert.deepStrictEqual(
         processOnce.registrations.map((item) => item.event),
         [

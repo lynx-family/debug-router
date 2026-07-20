@@ -17,6 +17,9 @@ const DEFAULT_DEVICE_TIMEOUT = 10000;
 const DEFAULT_CLIENT_TIMEOUT = 10000;
 const DEFAULT_IDLE_TIMEOUT = 500;
 const LEGACY_PREEMPTION_TIMEOUT = 12000;
+const E2E_CDP_PING_METHOD = "ConnectorRealDeviceE2E.CDP.Ping";
+const E2E_CDP_NOTIFICATION_METHOD =
+  "ConnectorRealDeviceE2E.CDP.Notification";
 
 function parseArgs(argv) {
   const args = {
@@ -343,6 +346,13 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
 
     if (args.requireMessageRoundtrip) {
       await assertMessageRoundtrip(platform, args, firstClient, secondClient);
+      if (platform === "android") {
+        await assertUsbNotificationOnce(
+          args,
+          firstClient,
+          secondClient
+        );
+      }
     }
 
     if (scenarioOption.legacyPreemption) {
@@ -719,6 +729,62 @@ async function assertMessageRoundtrip(
   ]);
   assert.strictEqual(typeof firstResponse, "string");
   assert.strictEqual(typeof secondResponse, "string");
+}
+
+async function assertUsbNotificationOnce(args, firstClient, secondClient) {
+  const marker = `android-usb-notification-${Date.now()}`;
+  const firstNotifications = [];
+  const secondNotifications = [];
+  const firstHandler = (params) => {
+    if (params?.marker === marker) {
+      firstNotifications.push(params);
+    }
+  };
+  const secondHandler = (params) => {
+    if (params?.marker === marker) {
+      secondNotifications.push(params);
+    }
+  };
+
+  firstClient.on(E2E_CDP_NOTIFICATION_METHOD, firstHandler);
+  secondClient.on(E2E_CDP_NOTIFICATION_METHOD, secondHandler);
+  try {
+    const response = JSON.parse(
+      await withTimeout(
+        firstClient.sendCustomizedMessage(
+          E2E_CDP_PING_METHOD,
+          { marker },
+          1,
+          "CDP"
+        ),
+        args.clientTimeout,
+        "Android real USB CDP notification trigger"
+      )
+    );
+    assert.strictEqual(response.result?.ok, true);
+    await waitFor(
+      () =>
+        firstNotifications.length >= 1 &&
+        secondNotifications.length >= 1,
+      args.clientTimeout,
+      "Android real USB notification reaches both connector mirrors"
+    );
+    await delay(300);
+    assert.strictEqual(
+      firstNotifications.length,
+      1,
+      "first Connector must observe the real USB notification exactly once"
+    );
+    assert.strictEqual(
+      secondNotifications.length,
+      1,
+      "second Connector must observe the real USB notification exactly once"
+    );
+    logStep("PASS: real Android USB notification observed exactly once");
+  } finally {
+    firstClient.off(E2E_CDP_NOTIFICATION_METHOD, firstHandler);
+    secondClient.off(E2E_CDP_NOTIFICATION_METHOD, secondHandler);
+  }
 }
 
 async function assertWebSocketFrontends(

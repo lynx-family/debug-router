@@ -14,6 +14,8 @@ import {
   MultiplexerDaemonOption,
 } from "./MultiplexerDaemon";
 import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
+import { setDriverReportService } from "../../report/interface/DriverReportService";
+import { DriverReportServiceImpl } from "../../report/interface/DriverReportServiceImpl";
 import { MultiplexerHost } from "./MultiplexerHost";
 
 const ENTRY_CLEANUP_TIMEOUT = 3000;
@@ -187,6 +189,8 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
 function createEntryHost(
   entryOption: MultiplexerDaemonEntryOption,
 ): MultiplexerDaemonHost {
+  const reportService = new DriverReportServiceImpl();
+  setDriverReportService(reportService);
   const hostOption = {
     controlPort: entryOption.controlPort,
     protocolVersion: entryOption.protocolVersion,
@@ -469,6 +473,11 @@ function parsePhysicalConnectorOption(
   if ("traceRecorder" in (parsed as Record<string, unknown>)) {
     throw new Error(
       "Invalid multiplexer daemon option physicalConnectorOption.traceRecorder: recorder instances are not serializable",
+    );
+  }
+  if ("reportService" in (parsed as Record<string, unknown>)) {
+    throw new Error(
+      "Invalid multiplexer daemon option physicalConnectorOption.reportService: report service implementations are daemon-local and not serializable",
     );
   }
 

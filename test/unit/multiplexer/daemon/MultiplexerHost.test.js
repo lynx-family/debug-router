@@ -1027,8 +1027,6 @@ describe("MultiplexerHost", function () {
             createCustomizedEnvelope({
               id: 10,
               result: { value: 43 },
-              clientId: 23,
-              sender: 23,
               messageAsString: false,
             })
           ),
@@ -2336,10 +2334,14 @@ describe("MultiplexerHost", function () {
     );
 
     assert.strictEqual(runtime.state.sendMessageCalls.length, 1);
-    const routedId = readCustomizedInner(
-      JSON.parse(runtime.state.sendMessageCalls[0])
-    ).id;
+    const routedEnvelope = JSON.parse(runtime.state.sendMessageCalls[0]);
+    const routedId = readCustomizedInner(routedEnvelope).id;
     assert.notStrictEqual(routedId, 44);
+    assert.strictEqual(
+      routedEnvelope.data.data.client_id,
+      90,
+      "WiFi runtimes must receive the positive id assigned by Initialize"
+    );
 
     host.handleWebSocketAppMessage(
       90,
@@ -2449,9 +2451,9 @@ describe("MultiplexerHost", function () {
         type: "App",
       })
     );
-    const routedRequest = readCustomizedInner(
-      JSON.parse(runtime.state.sendMessageCalls[1])
-    );
+    const routedEnvelope = JSON.parse(runtime.state.sendMessageCalls[1]);
+    const routedRequest = readCustomizedInner(routedEnvelope);
+    assert.strictEqual(routedEnvelope.data.data.client_id, 93);
     host.handleWebSocketAppMessage(
       93,
       JSON.stringify(
@@ -2867,6 +2869,226 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(client.state.sendMessageCalls.length, 2);
   });
 
+  it("broadcasts idless GetGlobalSwitch responses to every control frontend", function () {
+    const frontendCount = 30;
+    const { host, physical } = createHost();
+    const client = createClient(240);
+    const controlServer = attachControlServer(host);
+    physical.usbClients.set(client.clientId(), client);
+    const request = JSON.stringify({
+      event: "Customized",
+      data: {
+        type: "GetGlobalSwitch",
+        data: {
+          client_id: client.clientId(),
+          session_id: -1,
+          message: JSON.stringify({
+            global_key: "enable_devtool",
+            id: 10000,
+          }),
+        },
+        sender: client.clientId(),
+      },
+    });
+
+    for (let controlId = 1; controlId <= frontendCount; controlId++) {
+      host.sendMessageToApp(
+        client.clientId(),
+        request,
+        undefined,
+        controlId
+      );
+    }
+
+    assert.strictEqual(client.state.sendMessageCalls.length, frontendCount);
+
+    const response = JSON.stringify({
+      event: "Customized",
+      data: {
+        type: "GetGlobalSwitch",
+        data: {
+          client_id: client.clientId(),
+          session_id: -1,
+          message: "true",
+        },
+        sender: 0,
+      },
+    });
+    for (let index = 0; index < frontendCount; index++) {
+      host.handlePhysicalMessage(client.clientId(), response);
+    }
+
+    assert.strictEqual(controlServer.targeted.length, 0);
+    assert.strictEqual(controlServer.broadcasts.length, frontendCount);
+    assert.strictEqual(
+      controlServer.broadcasts.length * frontendCount,
+      frontendCount * frontendCount
+    );
+  });
+
+  it("targets SetGlobalSwitch responses that preserve the request id", function () {
+    const frontendCount = 30;
+    const { host, physical } = createHost();
+    const client = createClient(241);
+    const controlServer = attachControlServer(host);
+    physical.usbClients.set(client.clientId(), client);
+    const request = JSON.stringify({
+      event: "Customized",
+      data: {
+        type: "SetGlobalSwitch",
+        data: {
+          client_id: client.clientId(),
+          session_id: -1,
+          message: JSON.stringify({
+            global_key: "enable_devtool",
+            global_value: true,
+            id: 10000,
+          }),
+        },
+        sender: client.clientId(),
+      },
+    });
+
+    for (let controlId = 1; controlId <= frontendCount; controlId++) {
+      host.sendMessageToApp(
+        client.clientId(),
+        request,
+        undefined,
+        controlId
+      );
+    }
+    for (const outbound of client.state.sendMessageCalls) {
+      host.handlePhysicalMessage(
+        client.clientId(),
+        JSON.stringify(outbound)
+      );
+    }
+
+    assert.strictEqual(controlServer.broadcasts.length, 0);
+    assert.strictEqual(controlServer.targeted.length, frontendCount);
+    assert.deepStrictEqual(
+      controlServer.targeted.map(({ controlId }) => controlId),
+      Array.from({ length: frontendCount }, (_, index) => index + 1)
+    );
+    assert.deepStrictEqual(
+      controlServer.targeted.map(({ event }) =>
+        readCustomizedInner(event.data.message)
+      ),
+      Array.from({ length: frontendCount }, () => ({
+        global_key: "enable_devtool",
+        global_value: true,
+        id: 10000,
+      }))
+    );
+  });
+
+  it("broadcasts idless SetGlobalSwitch responses to every control frontend", function () {
+    const frontendCount = 30;
+    const { host, physical } = createHost();
+    const client = createClient(243);
+    const controlServer = attachControlServer(host);
+    physical.usbClients.set(client.clientId(), client);
+    const request = JSON.stringify({
+      event: "Customized",
+      data: {
+        type: "SetGlobalSwitch",
+        data: {
+          client_id: client.clientId(),
+          session_id: -1,
+          message: JSON.stringify({
+            global_key: "enable_devtool",
+            global_value: true,
+            id: 10000,
+          }),
+        },
+        sender: client.clientId(),
+      },
+    });
+
+    for (let controlId = 1; controlId <= frontendCount; controlId++) {
+      host.sendMessageToApp(
+        client.clientId(),
+        request,
+        undefined,
+        controlId
+      );
+    }
+
+    const response = JSON.stringify({
+      event: "Customized",
+      data: {
+        type: "SetGlobalSwitch",
+        data: {
+          client_id: client.clientId(),
+          session_id: -1,
+          message: "true",
+        },
+        sender: 0,
+      },
+    });
+    for (let index = 0; index < frontendCount; index++) {
+      host.handlePhysicalMessage(client.clientId(), response);
+    }
+
+    assert.strictEqual(controlServer.targeted.length, 0);
+    assert.strictEqual(controlServer.broadcasts.length, frontendCount);
+    assert.strictEqual(
+      controlServer.broadcasts.length * frontendCount,
+      frontendCount * frontendCount
+    );
+  });
+
+  it("broadcasts every SessionList notification produced after OpenCard commands", function () {
+    const frontendCount = 30;
+    const { host, physical } = createHost();
+    const client = createClient(242);
+    const controlServer = attachControlServer(host);
+    physical.usbClients.set(client.clientId(), client);
+
+    for (let controlId = 1; controlId <= frontendCount; controlId++) {
+      host.sendMessageToApp(
+        client.clientId(),
+        JSON.stringify({
+          event: "Customized",
+          data: {
+            type: "OpenCard",
+            data: {
+              type: "url",
+              url: `app://card-${controlId}`,
+            },
+            sender: client.clientId(),
+          },
+        }),
+        undefined,
+        controlId
+      );
+    }
+
+    assert.strictEqual(client.state.sendMessageCalls.length, frontendCount);
+    assert.strictEqual(controlServer.broadcasts.length, 0);
+
+    for (let sessionCount = 1; sessionCount <= frontendCount; sessionCount++) {
+      host.handlePhysicalMessage(
+        client.clientId(),
+        createSessionListMessage(
+          client.clientId(),
+          Array.from({ length: sessionCount }, (_, index) => ({
+            session_id: index + 1,
+            type: "web",
+            url: `app://card-${index + 1}`,
+          }))
+        )
+      );
+    }
+
+    assert.strictEqual(controlServer.targeted.length, 0);
+    assert.strictEqual(controlServer.broadcasts.length, frontendCount);
+    assert.strictEqual(
+      controlServer.broadcasts.length * frontendCount,
+      frontendCount * frontendCount
+    );
+  });
+
   it("clears memoized query state on runtime disconnect and send failure", function () {
     const { host, physical } = createHost();
     const disconnectedClient = createClient(25);
@@ -3077,8 +3299,6 @@ describe("MultiplexerHost", function () {
                 result: {
                   value: 42,
                 },
-                clientId: 22,
-                sender: 22,
                 messageAsString: false,
               })
             ),
@@ -3188,7 +3408,99 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(controlServer.broadcasts[1].data.id, 32);
     assert.strictEqual(
       controlServer.broadcasts[0].data.message,
+      JSON.stringify({
+        event: "Customized",
+        data: {
+          type: "CDP",
+          data: {
+            client_id: -1,
+            message: JSON.stringify({
+              method: "Runtime.consoleAPICalled",
+            }),
+          },
+          sender: 0,
+        },
+      })
+    );
+    assert.notStrictEqual(
+      controlServer.broadcasts[0].data.message,
       webMessages[0]
+    );
+  });
+
+  it("drops responses from the wrong runtime without consuming the pending route", function () {
+    const { host, physical } = createHost();
+    const expectedClient = createClient(33);
+    const wrongClient = createClient(34);
+    physical.usbClients.set(expectedClient.clientId(), expectedClient);
+    physical.usbClients.set(wrongClient.clientId(), wrongClient);
+    const controlServer = attachControlServer(host);
+    const warnings = [];
+    defaultLogger.setOutput((level, ...messages) => {
+      if (level === "warn") {
+        warnings.push(messages.join(" "));
+      }
+    });
+
+    host.sendMessageToApp(
+      33,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: 19,
+          clientId: 33,
+          method: "Runtime.evaluate",
+          messageAsString: true,
+        })
+      ),
+      undefined,
+      70
+    );
+    const globalId = readCustomizedInner(
+      expectedClient.state.sendMessageCalls[0]
+    ).id;
+
+    host.handlePhysicalMessage(
+      34,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: globalId,
+          result: { spoofed: true },
+          messageAsString: true,
+        })
+      )
+    );
+
+    assert.strictEqual(host.pendingRoutes.size, 1);
+    assert.deepStrictEqual(controlServer.targeted, []);
+    assert(
+      warnings.some(
+        (message) =>
+          message.includes(`global message id ${globalId}`) &&
+          message.includes("runtime 34") &&
+          message.includes("expected runtime 33")
+      )
+    );
+
+    host.handlePhysicalMessage(
+      33,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: globalId,
+          result: { value: 42 },
+          messageAsString: true,
+        })
+      )
+    );
+
+    assert.strictEqual(host.pendingRoutes.size, 0);
+    assert.strictEqual(controlServer.targeted.length, 1);
+    assert.strictEqual(controlServer.targeted[0].controlId, 70);
+    assert.deepStrictEqual(
+      readCustomizedInner(controlServer.targeted[0].event.data.message),
+      {
+        id: 19,
+        result: { value: 42 },
+      }
     );
   });
 

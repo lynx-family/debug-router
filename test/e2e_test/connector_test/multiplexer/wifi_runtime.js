@@ -98,6 +98,9 @@ async function runRegistrationDiscoveryCase() {
       "public Driver client proxy"
     );
     assert.strictEqual(driverProxy instanceof WebSocketClient, true);
+    // Exclude automatic connection-time ClientList broadcasts from the
+    // baseline so this assertion validates handleListClients() itself.
+    await delay(100);
     const previousClientListCount = driver.messages.filter(
       (message) => message?.event === "ClientList"
     ).length;
@@ -395,6 +398,11 @@ async function runDriverRoundTripCase() {
       createCustomizedEnvelope(runtime.id, 71, "driver-to-wifi")
     );
     const routed = parseCustomizedEnvelope((await request).text);
+    assert.strictEqual(
+      routed.envelope.data.data.client_id,
+      runtime.id,
+      "WiFi CDP requests must keep the runtime id assigned during Initialize"
+    );
 
     const response = waitForSocketMessage(first.socket, (value) => {
       return (
@@ -450,6 +458,11 @@ async function runConnectorRoundTripCase() {
       createCustomizedEnvelope(runtime.id, 81, "connector-to-wifi")
     );
     const routed = parseCustomizedEnvelope((await request).text);
+    assert.strictEqual(
+      routed.envelope.data.data.client_id,
+      runtime.id,
+      "Connector CDP requests must keep the WiFi runtime id"
+    );
     runtime.socket.send(
       createCustomizedResponseEnvelope(
         runtime.id,
@@ -508,6 +521,11 @@ async function runPublicProxyCase() {
       "CDP"
     );
     const request = parseCustomizedEnvelope((await runtimeRequest).text);
+    assert.strictEqual(
+      request.envelope.data.data.client_id,
+      runtime.id,
+      "WiFi proxy CDP requests must keep the runtime id"
+    );
     runtime.socket.send(
       createCustomizedResponseEnvelope(
         runtime.id,

@@ -17,6 +17,7 @@ const DEFAULT_ANDROID_ACTIVITY =
 const DEFAULT_TIMEOUT = 10000;
 const DEFAULT_IDLE_TIMEOUT = 30000;
 const DEFAULT_MESSAGE_METHOD = "ConnectorRealDeviceE2E.Ping";
+const DEFAULT_CDP_MESSAGE_METHOD = "ConnectorRealDeviceE2E.CDP.Ping";
 const adbCommand = process.env.DEBUG_ROUTER_E2E_ADB ?? "adb";
 const fakeDaemonEntry = path.resolve(
   __dirname,
@@ -27,6 +28,11 @@ const cases = [
   ["registration", "real Android WiFi registration", runRegistrationCase],
   ["lifecycle", "public WiFi lifecycle and mirrors", runPublicLifecycleCase],
   ["roundtrip", "Driver to real Android WiFi roundtrip", runRoundTripCase],
+  [
+    "cdp-roundtrip",
+    "Driver to real Android WiFi session CDP roundtrip",
+    runCdpRoundTripCase,
+  ],
   [
     "proxy",
     "Connector proxy to real Android WiFi roundtrip",
@@ -230,6 +236,41 @@ async function runRoundTripCase(args, serial) {
   });
 }
 
+async function runCdpRoundTripCase(args, serial) {
+  await withConnectedRuntime("cdp-roundtrip", args, serial, async (state) => {
+    const requestId = 92001;
+    const marker = `android-wifi-cdp-${Date.now()}`;
+    const responseWait = waitForSocketMessage(
+      state.driver.socket,
+      (message) => {
+        if (message?.event !== "Customized" || message?.data?.type !== "CDP") {
+          return false;
+        }
+        const payload = parseCustomizedPayload(message);
+        return payload?.id === requestId;
+      },
+      args.timeout,
+      "real Android WiFi session CDP response"
+    );
+
+    state.driver.socket.send(
+      createCdpEnvelope(
+        state.runtime.id,
+        requestId,
+        DEFAULT_CDP_MESSAGE_METHOD,
+        marker
+      )
+    );
+    const response = await responseWait;
+    const payload = parseCustomizedPayload(response);
+    logStep(`cdp-roundtrip response=${JSON.stringify(payload)}`);
+    assert.strictEqual(payload.id, requestId);
+    assert.strictEqual(payload.result?.ok, true);
+    assert.strictEqual(payload.result?.method, DEFAULT_CDP_MESSAGE_METHOD);
+    assert.strictEqual(payload.result?.params?.marker, marker);
+  });
+}
+
 async function runProxyRoundTripCase(args, serial) {
   await withConnectedRuntime("proxy-roundtrip", args, serial, async (state) => {
     const proxy = await waitFor(
@@ -255,6 +296,23 @@ async function runProxyRoundTripCase(args, serial) {
     assert.strictEqual(result?.ok, true);
     assert.strictEqual(result?.method, args.messageMethod);
     assert.strictEqual(result?.params?.marker, marker);
+
+    const cdpMarker = `android-wifi-proxy-cdp-${Date.now()}`;
+    const cdpResponse = JSON.parse(
+      await proxy.sendCustomizedMessage(
+        DEFAULT_CDP_MESSAGE_METHOD,
+        { marker: cdpMarker },
+        1,
+        "CDP"
+      )
+    );
+    logStep(`proxy-cdp-roundtrip response=${JSON.stringify(cdpResponse)}`);
+    assert.strictEqual(cdpResponse.result?.ok, true);
+    assert.strictEqual(
+      cdpResponse.result?.method,
+      DEFAULT_CDP_MESSAGE_METHOD
+    );
+    assert.strictEqual(cdpResponse.result?.params?.marker, cdpMarker);
   });
 }
 
@@ -623,6 +681,25 @@ function createCustomizedEnvelope(clientId, id, method, marker) {
           method,
           params: { marker },
         },
+      },
+      sender: 0,
+    },
+  });
+}
+
+function createCdpEnvelope(clientId, id, method, marker) {
+  return JSON.stringify({
+    event: "Customized",
+    data: {
+      type: "CDP",
+      data: {
+        client_id: clientId,
+        session_id: 1,
+        message: JSON.stringify({
+          id,
+          method,
+          params: { marker },
+        }),
       },
       sender: 0,
     },

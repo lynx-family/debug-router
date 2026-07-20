@@ -70,6 +70,7 @@ export type RoutedMessage = {
   target: PendingRoute;
   clientId: number;
   message: string;
+  externalMessage: string;
 };
 
 type CustomizedPayload = {
@@ -769,18 +770,21 @@ export class MultiplexerHost
     message: string,
     event: "usb-client-message" | "ws-client-message",
   ): void {
-    const routed = this.restoreInboundMessage(message);
+    const routed = this.restoreInboundMessage(message, clientId);
     if (routed) {
       if (routed.target.kind === "control") {
         if (routed.target.resolve) {
           routed.target.resolve(extractCustomizedMessage(routed.message));
         } else {
+          // Connector facade events are a legacy compatibility surface.
+          // externalMessage restores the caller's original request id without
+          // exposing the sender/client_id rewrite used for Web routing.
           this.sendToControl(routed.target.controlId, {
             kind: "event",
             event,
             data: {
               id: routed.clientId,
-              message: routed.message,
+              message: routed.externalMessage,
             },
           });
         }
@@ -797,6 +801,10 @@ export class MultiplexerHost
       return;
     }
 
+    // Web frontends and the notification cache need the daemon-assigned
+    // runtime identity for routing. Connector facades instead receive the
+    // runtime's original string below, preserving the legacy event payload
+    // byte-for-byte for idless notifications.
     const broadcastMessage = rewriteRuntimeClientId(message, clientId);
     this.memoizedNotificationQueryTable.recordNotification(
       clientId,
@@ -810,7 +818,7 @@ export class MultiplexerHost
       event,
       data: {
         id: clientId,
-        message: broadcastMessage,
+        message,
       },
     });
   }
@@ -867,7 +875,10 @@ export class MultiplexerHost
     return JSON.stringify(data);
   }
 
-  restoreInboundMessage(message: string): RoutedMessage | null {
+  restoreInboundMessage(
+    message: string,
+    sourceClientId?: number,
+  ): RoutedMessage | null {
     const data = parseJsonMessageOrNull(message);
     if (!data) {
       return null;
@@ -876,6 +887,19 @@ export class MultiplexerHost
     const customized = getCustomizedPayload(data);
     const globalMessageId = getValidMessageId(customized?.message);
     if (globalMessageId === null) {
+      return null;
+    }
+
+    const pendingTarget = this.pendingRoutes.get(globalMessageId);
+    if (
+      pendingTarget &&
+      sourceClientId !== undefined &&
+      pendingTarget.clientId !== sourceClientId
+    ) {
+      defaultLogger.warn(
+        `Drop multiplexer response with global message id ${globalMessageId} ` +
+          `from runtime ${sourceClientId}; expected runtime ${pendingTarget.clientId}`,
+      );
       return null;
     }
 
@@ -888,12 +912,14 @@ export class MultiplexerHost
       customized.message.id = target.originalId;
       writeCustomizedMessage(customized);
     }
+    const externalMessage = JSON.stringify(data);
     rewriteRuntimeClientIdData(data, target.clientId);
 
     return {
       target,
       clientId: target.clientId,
       message: JSON.stringify(data),
+      externalMessage,
     };
   }
 
@@ -1467,7 +1493,7 @@ export class MultiplexerHost
       return;
     }
     if (data?.data?.data?.client_id) {
-      data.data.data.client_id = -1;
+      data.data.data.client_id = websocketClient ? clientId : -1;
     }
 
     const memoizedQuery = this.memoizedNotificationQueryTable.query(

@@ -5,11 +5,7 @@
 import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
-import {
-  getDriverReportService,
-  DriverReportService,
-  setDriverReportService,
-} from "../report/interface/DriverReportService";
+import type { DriverReportService } from "../report/interface/DriverReportService";
 import { DeviceManager } from "../device/DeviceManager";
 import type { PhysicalConnectorOption } from "../physical/PhysicalConnector";
 import { defaultLogger } from "../utils/logger";
@@ -67,6 +63,13 @@ type WebSocketServerCompat = {
  */
 
 export type DebugRouterConnectorOption = PhysicalConnectorOption & {
+  /**
+   * Retained for source compatibility with the legacy Connector, but ignored
+   * by the multiplexer Connector because service objects cannot cross the
+   * daemon process boundary. Configure the daemon-local implementation in
+   * DriverReportServiceImpl.ts instead.
+   */
+  reportService?: DriverReportService | null;
   forceRespawnDaemon?: boolean;
   multiplexerDaemonIdleTimeout?: number;
   multiplexerStartupTimeout?: number;
@@ -155,22 +158,8 @@ export class DebugRouterConnector {
       reportService: null,
     },
   ) {
-    setDriverReportService(option.reportService ?? null);
-    getDriverReportService()?.init(option.manualConnect);
     const msg = "DebugRouterOption:" + JSON.stringify(option);
     defaultLogger.debug(msg);
-    getDriverReportService()?.report(
-      "DebugRouterConnectorInit",
-      {},
-      { option: msg },
-    );
-    if (!option.manualConnect) {
-      getDriverReportService()?.report(
-        "DriverInitOfNoManualConnect",
-        {},
-        { option: msg },
-      );
-    }
 
     this.enableWebSocket = option.enableWebSocket ?? false;
     this.enableAndroid = option.enableAndroid ?? true;
@@ -998,7 +987,10 @@ export class DebugRouterConnector {
       });
     }
 
-    webClient.sendMessage(
+    // The control protocol does not carry a target client kind, and Driver ids
+    // can collide with runtime ids. Reuse the existing Driver broadcast RPC so
+    // handleListClients() cannot accidentally route ClientList to a runtime.
+    this.sendMessageToWeb(
       JSON.stringify({
         event: "ClientList",
         data,
@@ -1285,7 +1277,6 @@ function createDaemonPhysicalConnectorOption(
     hdcHostPort: option.hdcHostPort,
     usbConnectOpt: option.usbConnectOpt,
     networkDeviceOpt: option.networkDeviceOpt,
-    reportService: null,
     connectionTrace,
   };
 }

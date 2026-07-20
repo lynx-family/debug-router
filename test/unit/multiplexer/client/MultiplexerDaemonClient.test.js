@@ -468,13 +468,19 @@ describe("MultiplexerDaemonClient", function () {
     ]);
   });
 
-  it("reports unknown structured control messages", async function () {
+  it("logs unknown structured control messages without reporting from the Connector process", async function () {
     const reports = [];
+    const warnings = [];
     setDriverReportService({
       init() {},
       report(...args) {
         reports.push(args);
       },
+    });
+    defaultLogger.setOutput((level, ...messages) => {
+      if (level === "warn") {
+        warnings.push(messages.join(" "));
+      }
     });
     const { client, WebSocketCtor } = createClient();
     const socket = await openClient(client, WebSocketCtor);
@@ -489,25 +495,28 @@ describe("MultiplexerDaemonClient", function () {
       })
     );
 
-    assert.strictEqual(reports.length, 1);
-    assert.strictEqual(reports[0][0], "multiplexer_unknown_control_message");
-    assert.deepStrictEqual(reports[0][2], {
-      kind: "future-kind",
-      event: "future-event",
-      id: 10,
-      parseResult: "object",
-      messagePreview:
-        '{"kind":"future-kind","event":"future-event","id":10,"data":{}}',
-    });
+    assert.deepStrictEqual(reports, []);
+    assert.strictEqual(warnings.length, 1);
+    assert(
+      warnings[0].includes(
+        '"kind":"future-kind","event":"future-event","id":10'
+      )
+    );
   });
 
-  it("reports invalid unknown messages with truncated previews", async function () {
+  it("logs invalid unknown messages with truncated previews without reporting", async function () {
     const reports = [];
+    const warnings = [];
     setDriverReportService({
       init() {},
       report(...args) {
         reports.push(args);
       },
+    });
+    defaultLogger.setOutput((level, ...messages) => {
+      if (level === "warn") {
+        warnings.push(messages.join(" "));
+      }
     });
     const { client, WebSocketCtor } = createClient();
     const socket = await openClient(client, WebSocketCtor);
@@ -516,14 +525,10 @@ describe("MultiplexerDaemonClient", function () {
 
     socket.emit("message", bytes.buffer);
 
-    assert.strictEqual(reports.length, 1);
-    assert.deepStrictEqual(reports[0][2], {
-      kind: undefined,
-      event: undefined,
-      id: undefined,
-      parseResult: "invalid-json",
-      messagePreview: `${"x".repeat(500)}...`,
-    });
+    assert.deepStrictEqual(reports, []);
+    assert.strictEqual(warnings.length, 1);
+    assert(warnings[0].includes('"parseResult":"invalid-json"'));
+    assert(warnings[0].includes(`"messagePreview":"${"x".repeat(500)}..."`));
   });
 
   it("rejects pending RPCs and removes listeners when the socket closes", async function () {

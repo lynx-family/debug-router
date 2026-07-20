@@ -4,7 +4,6 @@
 
 import { WebSocket } from "ws";
 import type { RawData } from "ws";
-import { getDriverReportService } from "../../report/interface/DriverReportService";
 import { defaultLogger } from "../../utils/logger";
 import {
   ControlRpcError,
@@ -446,11 +445,6 @@ export class MultiplexerDaemonClient {
 
     defaultLogger.warn(
       `Unknown multiplexer control message: ${JSON.stringify(categories)}`,
-    );
-    getDriverReportService()?.report(
-      "multiplexer_unknown_control_message",
-      null,
-      categories,
     );
   }
 }

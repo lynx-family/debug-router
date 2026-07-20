@@ -61,6 +61,9 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
       () => webConnected.find((client) => clientIdOf(client) === driver.id),
       2000
     );
+    // Let the daemon's automatic lifecycle ClientList broadcasts settle before
+    // proving that this explicit compatibility call causes a fresh delivery.
+    await delay(100);
     const previousClientListCount = driver.messages.filter(
       (message) => message?.event === "ClientList"
     ).length;
@@ -257,6 +260,11 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
     );
     const request = await runtimeRequest;
     const routed = parseCustomizedEnvelope(request.text);
+    assert.strictEqual(
+      routed.envelope.data.data.client_id,
+      runtime.id,
+      "the native WiFi Processor drops CDP messages addressed to another client id"
+    );
 
     const driverResponse = waitForSocketMessage(driver.socket, (value) => {
       if (value?.event !== "Customized") {
@@ -307,6 +315,11 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
       createCustomizedEnvelope(runtime.id, 51, "connector-to-wifi")
     );
     const request = parseCustomizedEnvelope((await runtimeRequest).text);
+    assert.strictEqual(
+      request.envelope.data.data.client_id,
+      runtime.id,
+      "WiFi proxy requests built with client_id -1 must be addressed to the runtime"
+    );
     runtime.socket.send(
       createCustomizedResponseEnvelope(
         runtime.id,

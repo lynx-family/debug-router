@@ -398,15 +398,16 @@ describe("DebugRouterConnector multiplexer facade", function () {
         }
       );
       assert.strictEqual(
+        "reportService" in state.managers[0].option.physicalConnectorOption,
+        false
+      );
+      assert.strictEqual(
         state.clients[0].option.daemonManager,
         state.managers[0]
       );
       assert.strictEqual(state.clients[0].option.rpcTimeout, 555);
       assert.deepStrictEqual(state.clients[0].calls, []);
-      assert.deepStrictEqual(
-        reports.map((item) => item.event),
-        ["init", "DebugRouterConnectorInit"]
-      );
+      assert.deepStrictEqual(reports, []);
     } finally {
       restore();
     }
@@ -1762,10 +1763,10 @@ describe("DebugRouterConnector multiplexer facade", function () {
       await nextTick();
 
       const call = state.clients[0].calls.find(
-        (candidate) => candidate.method === "sendMessage"
+        (candidate) => candidate.method === "sendMessageToWeb"
       );
       assert(call);
-      assert.strictEqual(call.params.clientId, 200);
+      assert.strictEqual("clientId" in call.params, false);
       const message = JSON.parse(call.params.message);
       assert.strictEqual(message.event, "ClientList");
       assert.deepStrictEqual(

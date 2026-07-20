@@ -10,6 +10,7 @@ const {
   PhysicalConnector,
 } = require("../../../debug_router_connector/src/physical/PhysicalConnector");
 const {
+  getDriverReportService,
   setDriverReportService,
 } = require("../../../debug_router_connector/src/report/interface/DriverReportService");
 
@@ -136,15 +137,20 @@ describe("PhysicalConnector", function () {
     setDriverReportService(null);
   });
 
-  it("initializes reporting, clamps retry time, and creates bounded client ids", function () {
+  it("uses the entry-installed report service without replacing it from options", function () {
     const reportService = createReportService();
+    const ignoredOptionReportService = createReportService();
+    setDriverReportService(reportService);
     const connector = createConnector({
       manualConnect: false,
-      reportService,
+      reportService: ignoredOptionReportService,
       usbConnectOpt: { retryTime: 1 },
     });
 
+    assert.strictEqual(getDriverReportService(), reportService);
     assert.deepStrictEqual(reportService.state.initCalls, [false]);
+    assert.deepStrictEqual(ignoredOptionReportService.state.initCalls, []);
+    assert.deepStrictEqual(ignoredOptionReportService.state.reports, []);
     assert.strictEqual(connector.usbConnectOpt.retryTime, 3000);
     assert(
       reportService.state.reports.some(
@@ -163,7 +169,8 @@ describe("PhysicalConnector", function () {
 
   it("starts added device managers and reports watch failures", async function () {
     const reportService = createReportService();
-    const connector = createConnector({ reportService });
+    setDriverReportService(reportService);
+    const connector = createConnector();
     const calls = [];
     connector.addDeviceManager({
       async watchDevices() {
@@ -180,7 +187,7 @@ describe("PhysicalConnector", function () {
     assert.deepStrictEqual(calls, ["first", "second"]);
     assert.deepStrictEqual(devices, []);
 
-    const failing = createConnector({ reportService });
+    const failing = createConnector();
     failing.addDeviceManager({
       async watchDevices() {
         throw new Error("adb down");
@@ -433,6 +440,7 @@ describe("PhysicalConnector", function () {
     });
     connector.regiserUsbClient(client);
 
+    connector.emit("usb-client-message", { id: 5, message: "payload" });
     connector.handleUsbMessage(5, "payload");
     connector.sendMessage(5, { method: "Runtime.enable" });
     assert.deepStrictEqual(messages, [{ id: 5, message: "payload" }]);

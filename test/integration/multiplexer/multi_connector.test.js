@@ -136,6 +136,8 @@ describe("multiplexer integration multi connector", function () {
     );
     assert.strictEqual(firstMessages[0].id, 2);
     assert.strictEqual(secondMessages[0].id, 2);
+    assert.strictEqual(firstMessages[0].message, notification);
+    assert.strictEqual(secondMessages[0].message, notification);
     assert.deepStrictEqual(
       parseCustomizedEnvelope(firstMessages[0].message).cdp.params,
       { marker: "broadcast" },

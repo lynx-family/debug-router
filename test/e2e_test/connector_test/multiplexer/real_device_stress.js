@@ -5,6 +5,7 @@
 const assert = require("assert");
 const childProcess = require("child_process");
 const fs = require("fs");
+const net = require("net");
 const os = require("os");
 const path = require("path");
 const { WebSocket } = require("ws");
@@ -27,6 +28,7 @@ const DEFAULT_DEVICE_TIMEOUT = 10000;
 const DEFAULT_CLIENT_TIMEOUT = 10000;
 const DEFAULT_IDLE_TIMEOUT = 10000;
 const DEFAULT_MESSAGE_METHOD = "ConnectorRealDeviceE2E.Ping";
+const DEFAULT_CDP_MESSAGE_METHOD = "ConnectorRealDeviceE2E.CDP.Ping";
 const DEFAULT_WEBSOCKET_MESSAGE_TYPE = "App";
 const DEFAULT_RECOVERY_PROBE_MESSAGES = 20;
 const LEGACY_PREEMPTION_TIMEOUT = 12000;
@@ -56,6 +58,7 @@ class StressError extends Error {
 function parseArgs(argv) {
   const args = {
     platform: "all",
+    transport: "usb",
     androidSerial: "",
     iosSerial: "",
     androidClientName: null,
@@ -95,6 +98,8 @@ function parseArgs(argv) {
 
     if (arg === "--platform") {
       args.platform = readValue();
+    } else if (arg === "--transport") {
+      args.transport = readValue();
     } else if (arg === "--android-serial") {
       args.androidSerial = readValue();
     } else if (arg === "--ios-serial") {
@@ -158,6 +163,15 @@ function parseArgs(argv) {
   if (!["android", "ios", "all"].includes(args.platform)) {
     throw new Error(`Unsupported --platform: ${args.platform}`);
   }
+  if (!["usb", "wifi"].includes(args.transport)) {
+    throw new Error(`Unsupported --transport: ${args.transport}`);
+  }
+  if (args.transport === "wifi" && args.platform !== "android") {
+    throw new Error("--transport wifi currently requires --platform android");
+  }
+  if (args.transport === "wifi" && !args.websocket) {
+    throw new Error("--transport wifi requires WebSocket to be enabled");
+  }
   for (const key of [
     "durationMs",
     "connectors",
@@ -188,7 +202,8 @@ function parseArgs(argv) {
 function printHelp() {
   console.log(`
 Usage:
-  node multiplexer/real_device_stress.js --platform android
+  node multiplexer/real_device_stress.js --platform android --transport usb
+  node multiplexer/real_device_stress.js --platform android --transport wifi
   node multiplexer/real_device_stress.js --platform ios
   node multiplexer/real_device_stress.js --platform all
 
@@ -197,6 +212,7 @@ It intentionally uses @lynx-js/debug-router-connector package entry.
 
 Options:
   --platform android|ios|all
+  --transport usb|wifi              default usb; wifi currently supports Android
   --android-serial <adb serial>
   --ios-serial <iOS UDID>
   --android-client-name <process name>
@@ -233,6 +249,7 @@ function createReport(platform, args) {
   }
   return {
     platform,
+    transport: args.transport,
     startedAt: new Date().toISOString(),
     durationTargetMs: args.durationMs,
     durationMs: 0,
@@ -243,6 +260,14 @@ function createReport(platform, args) {
     rounds: args.rounds,
     websocketMessageType: args.websocketMessageType,
     success: 0,
+    messagePaths: {
+      connector: { success: 0, failures: 0 },
+      websocket: { success: 0, failures: 0 },
+    },
+    churn: {
+      connectorReplacements: 0,
+      frontendReplacements: 0,
+    },
     failures,
     failureSamples: [],
     latencySamples: [],
@@ -270,13 +295,18 @@ async function runPlatformStressScenario(platform, args) {
   let context;
   let state;
   let androidForwardBaseline = null;
+  let selectedAndroidSerial = args.androidSerial;
 
   try {
     await stopInterferingMultiplexerDaemons();
     await assertPlatformDeviceOnline(platform, args);
     if (platform === "android") {
-      const serial = args.androidSerial || (await listAndroidDevices())[0];
-      androidForwardBaseline = await captureAndroidForwardBaseline(serial);
+      selectedAndroidSerial ||= (await listAndroidDevices())[0];
+    }
+    if (platform === "android" && args.transport === "usb") {
+      androidForwardBaseline = await captureAndroidForwardBaseline(
+        selectedAndroidSerial
+      );
     }
 
     logStep(platform, "creating isolated multiplexer stress context");
@@ -284,6 +314,9 @@ async function runPlatformStressScenario(platform, args) {
       enableWebSocket: args.websocket,
     });
     state = createScenarioState(platform, args);
+    if (platform === "android") {
+      state.serial = selectedAndroidSerial;
+    }
 
     const primary = context.createConnector({
       enableWebSocket: args.websocket,
@@ -295,33 +328,53 @@ async function runPlatformStressScenario(platform, args) {
       primary: true,
     });
 
-    const firstDevice = await connectTargetDevice(
-      primary,
-      platform,
-      state.serial,
-      args.deviceTimeout
-    );
-    state.serial = firstDevice.serial;
-    await launchAppIfNeeded(platform, args, firstDevice);
-    await createAdditionalConnectors(context, state, args);
-    await activateClientWatching(primary, platform, args.clientTimeout);
-    state.targetClient = await connectTargetClient(
-      primary,
-      platform,
-      state.serial,
-      state.clientName,
-      args.clientTimeout,
-      args
-    );
-
-    if (args.websocket) {
+    if (args.transport === "wifi") {
       await primary.startWSServer();
       state.websocketUrl = getWebSocketUrl(primary);
-    }
-
-    await prepareAdditionalConnectors(state, args);
-    if (args.websocket) {
+      state.mobileWebSocketUrl = getMobileWebSocketUrl(primary);
+      await createAdditionalConnectors(context, state, args);
+      await prepareAdditionalConnectors(state, args);
       await createFrontends(context, state, args.frontends, platform);
+      await launchAndroidWiFiApp(
+        state.serial,
+        args,
+        state.mobileWebSocketUrl,
+        primary.roomId
+      );
+      state.targetClient = await waitForWiFiRuntime(
+        primary,
+        args.clientTimeout,
+        "warmup real WiFi runtime"
+      );
+    } else {
+      const firstDevice = await connectTargetDevice(
+        primary,
+        platform,
+        state.serial,
+        args.deviceTimeout
+      );
+      state.serial = firstDevice.serial;
+      await launchAppIfNeeded(platform, args, firstDevice);
+      await createAdditionalConnectors(context, state, args);
+      await activateClientWatching(primary, platform, args.clientTimeout);
+      state.targetClient = await connectTargetClient(
+        primary,
+        platform,
+        state.serial,
+        state.clientName,
+        args.clientTimeout,
+        args
+      );
+
+      if (args.websocket) {
+        await primary.startWSServer();
+        state.websocketUrl = getWebSocketUrl(primary);
+      }
+
+      await prepareAdditionalConnectors(state, args);
+      if (args.websocket) {
+        await createFrontends(context, state, args.frontends, platform);
+      }
     }
     await refreshAndAssertState(context, state, args, report, "warmup");
 
@@ -335,9 +388,9 @@ async function runPlatformStressScenario(platform, args) {
     state.lastDaemonPid = daemonInfo.pid;
     logStep(
       platform,
-      `stress warmup ready daemon=${daemonInfo.pid} device=${
-        state.serial
-      } client=${state.targetClient.clientId()}`
+      `stress warmup ready transport=${args.transport} daemon=${
+        daemonInfo.pid
+      } device=${state.serial} client=${state.targetClient.clientId()}`
     );
 
     await runStressRounds(context, state, args, report);
@@ -354,6 +407,16 @@ async function runPlatformStressScenario(platform, args) {
     recordFailure(report, classifyError(error), error);
   } finally {
     try {
+      if (
+        args.transport === "wifi" &&
+        state?.serial &&
+        args.launchAndroidApp
+      ) {
+        await forceStopAndroidApp(
+          state.serial,
+          args.androidActivity
+        ).catch(() => {});
+      }
       await cleanupContext(context, state, args, report);
     } finally {
       if (androidForwardBaseline) {
@@ -377,6 +440,7 @@ function createScenarioState(platform, args) {
     connectors: [],
     frontends: [],
     websocketUrl: "",
+    mobileWebSocketUrl: "",
     lastDaemonPid: null,
   };
 }
@@ -416,8 +480,8 @@ function createContext(platform, args, option = {}) {
             port: 0,
             roomId: `real-device-stress-${platform}`,
           },
-        enableAndroid: platform === "android",
-        enableIOS: platform === "ios",
+        enableAndroid: args.transport === "usb" && platform === "android",
+        enableIOS: args.transport === "usb" && platform === "ios",
         enableHarmony: false,
         enableDesktop: false,
         enableNetworkDevice: false,
@@ -478,6 +542,10 @@ async function createAdditionalConnectors(context, state, args) {
       closed: false,
       primary: false,
     });
+    if (args.transport === "wifi") {
+      await connector.startWSServer();
+      continue;
+    }
     const device = await connectTargetDevice(
       connector,
       state.platform,
@@ -511,6 +579,19 @@ async function createFrontends(context, state, count, platform) {
 }
 
 async function prepareConnector(connector, state, args) {
+  if (args.transport === "wifi") {
+    await connector.startWSServer();
+    if (!state.targetClient) {
+      return null;
+    }
+    return waitForWiFiRuntime(
+      connector,
+      args.clientTimeout,
+      `matching WiFi runtime ${state.targetClient.clientId()}`,
+      state.targetClient.clientId()
+    );
+  }
+
   const device = await connectTargetDevice(
     connector,
     state.platform,
@@ -541,7 +622,16 @@ async function prepareConnector(connector, state, args) {
 
 async function refreshAndAssertState(context, state, args, report, label) {
   for (const entry of activeConnectors(state)) {
-    await prepareConnector(entry.connector, state, args);
+    const matched = await prepareConnector(entry.connector, state, args);
+    if (args.transport === "wifi") {
+      if (!matched) {
+        throw new StressError(
+          "empty_clients",
+          `${label}: connector ${entry.id} missing WiFi runtime`
+        );
+      }
+      continue;
+    }
     if (!entry.connector.devices.has(state.serial)) {
       throw new StressError(
         "empty_devices",
@@ -640,7 +730,9 @@ function createMessageTasks(state, args, round, offset, count) {
       const connectorEntry = connectors[absoluteIndex % connectors.length];
       tasks.push({
         path: "connector",
-        marker: `${state.platform}-round-${round + 1}-connector-${
+        marker: `${state.platform}-${args.transport}-round-${
+          round + 1
+        }-connector-${
           connectorEntry.id
         }-message-${absoluteIndex}`,
         connectorEntry,
@@ -650,7 +742,9 @@ function createMessageTasks(state, args, round, offset, count) {
       const frontendEntry = frontends[absoluteIndex % frontends.length];
       tasks.push({
         path: "websocket",
-        marker: `${state.platform}-round-${round + 1}-ws-${
+        marker: `${state.platform}-${args.transport}-round-${
+          round + 1
+        }-ws-${
           frontendEntry.id
         }-message-${absoluteIndex}`,
         frontendEntry,
@@ -670,8 +764,10 @@ async function runMessageTask(task, args, report) {
     } else {
       await sendWebSocketMessage(task, args);
     }
+    report.messagePaths[task.path].success++;
     recordSuccess(report, Date.now() - startedAt);
   } catch (error) {
+    report.messagePaths[task.path].failures++;
     recordFailure(report, classifyError(error), error);
   }
 }
@@ -683,18 +779,37 @@ async function sendConnectorMessage(task, args) {
       `${task.connectorEntry.id} is closed`
     );
   }
-  const client = task.connectorEntry.connector.usbClients.get(task.clientId);
+  const client =
+    args.transport === "wifi"
+      ? task.connectorEntry.connector
+          .getAllWebsocketAppClients()
+          .find((candidate) => candidate.clientId() === task.clientId)
+      : task.connectorEntry.connector.usbClients.get(task.clientId);
   if (!client) {
     throw new StressError(
       "empty_clients",
       `${task.connectorEntry.id} missing client ${task.clientId}`
     );
   }
-  const response = await withTimeout(
-    client.sendClientMessage(args.messageMethod, { marker: task.marker }),
-    args.clientTimeout,
-    `connector message ${task.marker}`
-  );
+  const response =
+    args.transport === "wifi"
+      ? await withTimeout(
+          client.sendCustomizedMessage(
+            stressMessageMethod(args),
+            { marker: task.marker },
+            args.websocketMessageType === "CDP" ? 1 : -1,
+            args.websocketMessageType
+          ),
+          args.clientTimeout,
+          `WiFi connector message ${task.marker}`
+        )
+      : await withTimeout(
+          client.sendClientMessage(args.messageMethod, {
+            marker: task.marker,
+          }),
+          args.clientTimeout,
+          `connector message ${task.marker}`
+        );
   if (!containsMarker(response, task.marker)) {
     throw new StressError(
       "marker_mismatch",
@@ -728,7 +843,7 @@ async function sendWebSocketMessage(task, args) {
     createCustomizedEnvelope(
       task.clientId,
       task.cdpId,
-      args.messageMethod,
+      stressMessageMethod(args),
       task.marker,
       args.websocketMessageType
     )
@@ -775,6 +890,7 @@ async function churnConnectorsAndFrontends(
     };
     await prepareConnector(replacement, state, args);
     state.connectors.push(replacementEntry);
+    report.churn.connectorReplacements++;
   }
 
   if (args.websocket) {
@@ -791,6 +907,7 @@ async function churnConnectorsAndFrontends(
         closed: false,
         ...replacement,
       });
+      report.churn.frontendReplacements++;
     }
   }
 }
@@ -827,23 +944,47 @@ async function runRecoveryProbe(context, state, args, report) {
       "primary connector missing"
     );
   }
-  await retryTransientDaemonReconnect(
-    () =>
-      primary.connector.connectDevices(args.deviceTimeout, state.serial, true),
-    `${state.platform} recovery connectDevices`
-  );
-  state.targetClient = await retryTransientDaemonReconnect(
-    () =>
-      connectTargetClient(
-        primary.connector,
-        state.platform,
-        state.serial,
-        state.clientName,
-        args.clientTimeout,
-        args
-      ),
-    `${state.platform} recovery connectTargetClient`
-  );
+  if (args.transport === "wifi") {
+    await retryTransientDaemonReconnect(
+      () => primary.connector.startWSServer(),
+      `${state.platform} recovery startWSServer`
+    );
+    state.websocketUrl = getWebSocketUrl(primary.connector);
+    state.mobileWebSocketUrl = getMobileWebSocketUrl(primary.connector);
+    await launchAndroidWiFiApp(
+      state.serial,
+      args,
+      state.mobileWebSocketUrl,
+      primary.connector.roomId
+    );
+    state.targetClient = await waitForWiFiRuntime(
+      primary.connector,
+      args.clientTimeout,
+      "recovery real WiFi runtime"
+    );
+  } else {
+    await retryTransientDaemonReconnect(
+      () =>
+        primary.connector.connectDevices(
+          args.deviceTimeout,
+          state.serial,
+          true
+        ),
+      `${state.platform} recovery connectDevices`
+    );
+    state.targetClient = await retryTransientDaemonReconnect(
+      () =>
+        connectTargetClient(
+          primary.connector,
+          state.platform,
+          state.serial,
+          state.clientName,
+          args.clientTimeout,
+          args
+        ),
+      `${state.platform} recovery connectTargetClient`
+    );
+  }
   if (args.websocket) {
     await primary.connector.startWSServer();
     state.websocketUrl = getWebSocketUrl(primary.connector);
@@ -922,9 +1063,17 @@ async function runLegacyPreemptionProbe(context, state, args, report) {
         `${state.platform} connector receives legacy unattached status`
       );
       await waitFor(
-        () =>
-          primary.connector.devices.size === 0 &&
-          primary.connector.usbClients.size === 0,
+        () => {
+          if (args.transport === "wifi") {
+            return (
+              primary.connector.getAllWebsocketAppClients().length === 0
+            );
+          }
+          return (
+            primary.connector.devices.size === 0 &&
+            primary.connector.usbClients.size === 0
+          );
+        },
         LEGACY_PREEMPTION_TIMEOUT,
         `${state.platform} device and runtime mirrors cleared after legacy preemption`
       );
@@ -940,7 +1089,26 @@ async function runLegacyPreemptionProbe(context, state, args, report) {
       Math.max(args.deviceTimeout, 5000),
       `${state.platform} daemon reacquires legacy owner`
     );
-    await launchAppIfNeeded(state.platform, args, { serial: state.serial });
+    if (args.transport === "wifi") {
+      await primary.connector.startWSServer();
+      state.websocketUrl = getWebSocketUrl(primary.connector);
+      state.mobileWebSocketUrl = getMobileWebSocketUrl(primary.connector);
+      await launchAndroidWiFiApp(
+        state.serial,
+        args,
+        state.mobileWebSocketUrl,
+        primary.connector.roomId
+      );
+      state.targetClient = await waitForWiFiRuntime(
+        primary.connector,
+        args.clientTimeout,
+        "legacy recovery real WiFi runtime"
+      );
+    } else {
+      await launchAppIfNeeded(state.platform, args, {
+        serial: state.serial,
+      });
+    }
     await refreshAndAssertState(context, state, args, report, "legacy");
   } catch (error) {
     recordFailure(report, "legacy_preemption_failed", error);
@@ -1333,6 +1501,95 @@ async function launchAppIfNeeded(platform, args, device) {
   }
 }
 
+async function launchAndroidWiFiApp(
+  serial,
+  args,
+  websocketUrl,
+  roomId
+) {
+  if (!args.launchAndroidApp) {
+    return;
+  }
+  const packageName = getAndroidPackageName(args.androidActivity);
+  const schema =
+    `lynx://remote_debug_lynx/enable?url=${encodeURIComponent(
+      websocketUrl
+    )}` + `&room=${encodeURIComponent(roomId ?? "")}`;
+  await execFile(
+    "adb",
+    ["-s", serial, "shell", "am", "force-stop", packageName],
+    10000
+  );
+  const output = await execFile(
+    "adb",
+    [
+      "-s",
+      serial,
+      "shell",
+      "am",
+      "start",
+      "-n",
+      args.androidActivity,
+      "--es",
+      "connection_type",
+      "websocket",
+      "--es",
+      "websocket_schema",
+      schema,
+    ],
+    15000
+  );
+  if (output.includes("Error:")) {
+    throw new StressError(
+      "empty_clients",
+      `Failed to launch Android WiFi app: ${output}`
+    );
+  }
+  logStep(
+    "android",
+    `launched Android WiFi runtime at ${websocketUrl}`
+  );
+}
+
+function forceStopAndroidApp(serial, activity) {
+  return execFile(
+    "adb",
+    [
+      "-s",
+      serial,
+      "shell",
+      "am",
+      "force-stop",
+      getAndroidPackageName(activity),
+    ],
+    10000
+  );
+}
+
+async function waitForWiFiRuntime(
+  connector,
+  timeout,
+  label,
+  expectedClientId
+) {
+  return waitFor(
+    () =>
+      connector.getAllWebsocketAppClients().find((client) => {
+        if (expectedClientId !== undefined) {
+          return client.clientId() === expectedClientId;
+        }
+        return (
+          client.type() === "runtime" &&
+          client.info?.network === "WiFi"
+        );
+      }),
+    timeout,
+    label
+  ).catch((error) => {
+    throw new StressError("empty_clients", error.message);
+  });
+}
+
 async function assertFrontendClientLists(state, args, label) {
   const clientId = state.targetClient.clientId();
   await waitFor(
@@ -1484,6 +1741,44 @@ function getWebSocketUrl(connector) {
   return `ws://127.0.0.1:${connector.wssPort}/mdevices/page/android`;
 }
 
+function getMobileWebSocketUrl(connector) {
+  if (!connector.wss?.wssPath) {
+    throw new StressError(
+      "client_list_missing",
+      "WebSocket server has no phone-reachable path"
+    );
+  }
+  const url = new URL(connector.wss.wssPath);
+  if (!net.isIP(url.hostname) || isLoopbackOrLinkLocal(url.hostname)) {
+    throw new StressError(
+      "empty_clients",
+      `Expected a LAN IP reachable by the phone, got ${url.hostname}`
+    );
+  }
+  return url.toString();
+}
+
+function isLoopbackOrLinkLocal(host) {
+  return (
+    host === "0.0.0.0" ||
+    host === "::" ||
+    host === "::1" ||
+    host.startsWith("127.") ||
+    host.startsWith("169.254.") ||
+    host.toLowerCase().startsWith("fe80:")
+  );
+}
+
+function stressMessageMethod(args) {
+  if (
+    args.websocketMessageType === "CDP" &&
+    args.messageMethod === DEFAULT_MESSAGE_METHOD
+  ) {
+    return DEFAULT_CDP_MESSAGE_METHOD;
+  }
+  return args.messageMethod;
+}
+
 function activeConnectors(state) {
   return state.connectors.filter((entry) => !entry.closed);
 }
@@ -1574,7 +1869,13 @@ function printReport(report) {
   const failures = totalFailures(report);
   logStep(
     report.platform,
-    `summary success=${report.success} failures=${failures} avg=${report.latencyMs.avg}ms p95=${report.latencyMs.p95}ms p99=${report.latencyMs.p99}ms daemonPidChanges=${report.daemon.pidChanges}`
+    `summary transport=${report.transport} success=${
+      report.success
+    } failures=${failures} avg=${report.latencyMs.avg}ms p95=${
+      report.latencyMs.p95
+    }ms p99=${report.latencyMs.p99}ms daemonPidChanges=${
+      report.daemon.pidChanges
+    }`
   );
   const nonZeroFailures = Object.entries(report.failures).filter(
     ([_category, count]) => count > 0

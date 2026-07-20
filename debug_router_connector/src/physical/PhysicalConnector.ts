@@ -17,7 +17,6 @@ import { defaultLogger } from "../utils/logger";
 import {
   getDriverReportService,
   DriverReportService,
-  setDriverReportService,
 } from "../report/interface/DriverReportService";
 import { PhysicalConnectorEvent } from "../utils/type";
 import {
@@ -99,11 +98,9 @@ export class PhysicalConnector {
       enableHarmony: true,
       enableDesktop: false,
       enableNetworkDevice: false,
-      reportService: null,
       traceRecorder: null,
     },
   ) {
-    setDriverReportService(option.reportService ?? null);
     getDriverReportService()?.init(option.manualConnect);
     const msg = "PhysicalConnectorOption:" + JSON.stringify(option);
     defaultLogger.debug(msg);
@@ -582,7 +579,9 @@ export class PhysicalConnector {
   }
 
   handleUsbMessage(id: number, message: string) {
-    this.emit("usb-client-message", { id, message });
+    // ClientAdapter has already emitted usb-client-message before invoking
+    // this compatibility hook. PhysicalConnector does not own a WebSocket
+    // server, so emitting again would duplicate every USB notification.
   }
 
   // unused methods, for future use:DaemonHost
