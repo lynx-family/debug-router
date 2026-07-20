@@ -74,6 +74,7 @@ unit_test("example_unittest") {
     "example_source_unittest.cc",
     "socket_server_posix_unittest.cc",
     "socket_util_unittest.cc",
+    "usb_client_unittest.cc",
   ]
   deps = [ ":example_testset" ]
 }
