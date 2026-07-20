@@ -1,5 +1,6 @@
 const assert = require("assert");
 const childProcess = require("child_process");
+const { EventEmitter } = require("events");
 const fs = require("fs");
 const net = require("net");
 const os = require("os");
@@ -7,6 +8,7 @@ const path = require("path");
 
 const {
   DebugRouterConnector,
+  WebSocketClient,
 } = require("@lynx-js/debug-router-connector");
 
 const DEFAULT_ANDROID_ACTIVITY =
@@ -199,6 +201,7 @@ async function startFakeDebugRouterAppServer() {
   const sockets = new Set();
   const receivedMessages = [];
   const appName = "connector-auto-test-app";
+  let listSessionRequestCount = 0;
 
   const server = net.createServer((socket) => {
     sockets.add(socket);
@@ -226,27 +229,85 @@ async function startFakeDebugRouterAppServer() {
         }
 
         if (message.event === "Customized") {
-          const requestMessage = message.data?.data?.message ?? {};
-          socket.write(
-            packMessage({
+          if (message.data?.type === "ListSession") {
+            listSessionRequestCount++;
+            const requestId = message.data.id;
+            const sessionListResponse = (id, sessionId) => ({
               event: "Customized",
               data: {
-                type: message.data?.type ?? "App",
-                data: {
-                  client_id: message.data?.data?.client_id ?? -1,
-                  session_id: message.data?.data?.session_id ?? -1,
-                  message: JSON.stringify({
-                    id: requestMessage.id,
-                    result: {
-                      ok: true,
-                      method: requestMessage.method,
-                      params: requestMessage.params,
-                    },
-                  }),
-                },
+                type: "SessionList",
+                data: [
+                  {
+                    session_id: sessionId,
+                    type: "lynx",
+                    url: `https://example.com/${sessionId}`,
+                  },
+                ],
                 sender: -1,
+                ...(id !== undefined ? { id } : {}),
               },
-            }),
+            });
+
+            if (listSessionRequestCount === 1) {
+              socket.write(packMessage(sessionListResponse(-1, -1)));
+              socket.write(packMessage(sessionListResponse(requestId + 1, -2)));
+              socket.write(packMessage(sessionListResponse(requestId, 1)));
+              socket.write(packMessage(sessionListResponse(-1, -3)));
+              socket.write(packMessage(sessionListResponse(requestId + 2, -4)));
+            } else if (listSessionRequestCount === 2) {
+              // Simulate an old SDK that cannot echo the request id.
+              socket.write(packMessage(sessionListResponse(undefined, 2)));
+            } else {
+              socket.write(packMessage(sessionListResponse(requestId, 3)));
+            }
+            return;
+          }
+
+          const requestMessage = message.data?.data?.message ?? {};
+          const customizedResponse = (id) => ({
+            event: "Customized",
+            data: {
+              type: message.data?.type ?? "App",
+              data: {
+                client_id: message.data?.data?.client_id ?? -1,
+                session_id: message.data?.data?.session_id ?? -1,
+                message: JSON.stringify({
+                  id,
+                  result: {
+                    ok: true,
+                    method: requestMessage.method,
+                    params: requestMessage.params,
+                  },
+                }),
+              },
+              sender: -1,
+            },
+          });
+          socket.write(
+            packMessage(customizedResponse(requestMessage.id + 1)),
+          );
+          if (message.data?.type === "CDP") {
+            socket.write(
+              packMessage({
+                event: "Customized",
+                data: {
+                  type: "CDP",
+                  data: {
+                    client_id: -1,
+                    session_id: message.data?.data?.session_id ?? -1,
+                    message: JSON.stringify({
+                      method: "Runtime.consoleAPICalled",
+                      params: { source: "connector-auto-test" },
+                    }),
+                  },
+                  sender: -1,
+                },
+              }),
+            );
+          }
+          socket.write(packMessage(customizedResponse(requestMessage.id)));
+          socket.write(
+            packMessage(customizedResponse(requestMessage.id + 2)),
           );
         }
       }),
@@ -361,6 +422,92 @@ async function runEmptyDiscoveryCheck() {
   }
 }
 
+function createFakeWebSocket() {
+  const socket = new EventEmitter();
+  socket.sentMessages = [];
+  socket.send = (message) => socket.sentMessages.push(message);
+  socket.close = () => {};
+  return socket;
+}
+
+async function runWebSocketCorrelationCheck() {
+  logStep("checking WebSocket request and response correlation");
+  const messagesToApp = [];
+  const messagesToWeb = [];
+  const server = {
+    emitEvent: () => {},
+    handleDisconnect: () => {},
+    sendMessageToApp: (id, message) => messagesToApp.push({ id, message }),
+    sendMessageToWeb: (message) => messagesToWeb.push(message),
+  };
+  const clientInfo = (id, type) => ({ id, type, raw_info: {} });
+
+  const driverSocket = createFakeWebSocket();
+  new WebSocketClient(server, clientInfo(1, "Driver"), driverSocket);
+  const driverRequest = {
+    event: "Customized",
+    data: {
+      type: "CDP",
+      data: {
+        client_id: 42,
+        session_id: 1,
+        message: { id: 1001, method: "Runtime.enable", params: {} },
+      },
+      sender: 1,
+    },
+  };
+  driverSocket.emit("message", Buffer.from(JSON.stringify(driverRequest)));
+  assert.strictEqual(messagesToApp.length, 1);
+  assert.strictEqual(messagesToApp[0].id, 42);
+
+  const runtimeSocket = createFakeWebSocket();
+  const runtimeClient = new WebSocketClient(
+    server,
+    clientInfo(2, "runtime"),
+    runtimeSocket,
+  );
+  runtimeClient.sendMessage(JSON.stringify(driverRequest));
+
+  const runtimeResponse = (message) =>
+    Buffer.from(
+      JSON.stringify({
+        event: "Customized",
+        data: {
+          type: "CDP",
+          data: {
+            client_id: 42,
+            session_id: 1,
+            message: JSON.stringify(message),
+          },
+          sender: 1,
+        },
+      }),
+    );
+
+  runtimeSocket.emit("message", runtimeResponse({ id: 1002, result: {} }));
+  runtimeSocket.emit(
+    "message",
+    runtimeResponse({
+      method: "Runtime.consoleAPICalled",
+      params: { source: "websocket-correlation-test" },
+    }),
+  );
+  runtimeSocket.emit("message", runtimeResponse({ id: 1001, result: {} }));
+  runtimeSocket.emit("message", runtimeResponse({ id: 1003, result: {} }));
+
+  assert.strictEqual(messagesToWeb.length, 2);
+  const forwardedMessages = messagesToWeb.map((message) =>
+    JSON.parse(JSON.parse(message).data.data.message),
+  );
+  assert.deepStrictEqual(forwardedMessages, [
+    {
+      method: "Runtime.consoleAPICalled",
+      params: { source: "websocket-correlation-test" },
+    },
+    { id: 1001, result: {} },
+  ]);
+}
+
 async function runFakeNetworkCheck() {
   logStep("checking no-device end-to-end flow with a local NetworkDevice");
   const fakeApp = await startFakeDebugRouterAppServer();
@@ -406,6 +553,24 @@ async function runFakeNetworkCheck() {
     assert.strictEqual(clients[0].info.query.app, fakeApp.appName);
     assert.strictEqual(driver.getAllUsbClients().length, 1);
 
+    const correlatedResponseIds = [];
+    const handleUsbClientMessage = ({ message }) => {
+      const responseMessage = JSON.parse(message);
+      if (
+        responseMessage.event !== "Customized" ||
+        !["App", "CDP"].includes(responseMessage.data?.type)
+      ) {
+        return;
+      }
+      const innerMessage = JSON.parse(responseMessage.data.data.message);
+      if (innerMessage.id !== undefined) {
+        correlatedResponseIds.push(
+          `${responseMessage.data.type}:${innerMessage.id}`,
+        );
+      }
+    };
+    driver.on("usb-client-message", handleUsbClientMessage);
+
     const nonce = `nonce-${Date.now()}`;
     const response = await withTimeout(
       clients[0].sendClientMessage("ConnectorAutoTest.Ping", { nonce }),
@@ -418,6 +583,93 @@ async function runFakeNetworkCheck() {
       method: "ConnectorAutoTest.Ping",
       params: { nonce },
     });
+
+    const cdpEvents = [];
+    const handleCdpEvent = (params) => cdpEvents.push(params);
+    clients[0].on("Runtime.consoleAPICalled", handleCdpEvent);
+    const cdpResponse = await withTimeout(
+      clients[0].sendCustomizedMessage("Runtime.enable", {}, 1, "CDP"),
+      3000,
+      "fake CDP response",
+    );
+    const cdpPayload = JSON.parse(cdpResponse);
+    assert.deepStrictEqual(cdpPayload.result, {
+      ok: true,
+      method: "Runtime.enable",
+      params: {},
+    });
+    await waitFor(
+      () => cdpEvents.length === 1,
+      1000,
+      "CDP event without id",
+    );
+    assert.deepStrictEqual(cdpEvents[0], { source: "connector-auto-test" });
+
+    const appRequest = fakeApp.receivedMessages.find(
+      (msg) => msg.data?.type === "App",
+    );
+    const cdpRequest = fakeApp.receivedMessages.find(
+      (msg) => msg.data?.type === "CDP",
+    );
+    assert.deepStrictEqual(correlatedResponseIds, [
+      `App:${appRequest.data.data.message.id}`,
+      `CDP:${cdpRequest.data.data.message.id}`,
+    ]);
+    clients[0].off("Runtime.consoleAPICalled", handleCdpEvent);
+
+    const sessionLists = [];
+    const handleSessionList = (sessions) => sessionLists.push(sessions);
+    clients[0].on("SessionList", handleSessionList);
+
+    const createListSessionRequest = () => ({
+      event: "Customized",
+      data: {
+        type: "ListSession",
+        data: { client_id: -1 },
+        sender: 0,
+      },
+    });
+
+    clients[0].sendMessage(createListSessionRequest());
+    await waitFor(
+      () => sessionLists.length === 1,
+      1000,
+      "correlated SessionList response",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.strictEqual(sessionLists.length, 1);
+    assert.strictEqual(sessionLists[0][0].session_id, 1);
+
+    const firstListSessionRequest = fakeApp.receivedMessages.find(
+      (msg) => msg.data?.type === "ListSession",
+    );
+    assert(Number.isInteger(firstListSessionRequest?.data?.id));
+    assert(firstListSessionRequest.data.id >= 0);
+
+    clients[0].sendMessage(createListSessionRequest());
+    await waitFor(
+      () => sessionLists.length === 2,
+      1000,
+      "legacy SessionList response without id",
+    );
+    assert.strictEqual(sessionLists[1][0].session_id, 2);
+
+    const explicitRequestId = 424242;
+    const requestWithId = createListSessionRequest();
+    requestWithId.data.id = explicitRequestId;
+    clients[0].sendMessage(requestWithId);
+    await waitFor(
+      () => sessionLists.length === 3,
+      1000,
+      "SessionList response with caller-provided id",
+    );
+    assert.strictEqual(sessionLists[2][0].session_id, 3);
+    const listSessionRequests = fakeApp.receivedMessages.filter(
+      (msg) => msg.data?.type === "ListSession",
+    );
+    assert.strictEqual(listSessionRequests[2].data.id, explicitRequestId);
+    clients[0].off("SessionList", handleSessionList);
+    driver.off("usb-client-message", handleUsbClientMessage);
 
     await waitFor(
       () => fakeApp.receivedMessages.some((msg) => msg.event === "Customized"),
@@ -608,6 +860,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.mode === "no-device") {
     await runEmptyDiscoveryCheck();
+    await runWebSocketCorrelationCheck();
     await runFakeNetworkCheck();
   } else {
     await runRealDeviceScenario(args);
