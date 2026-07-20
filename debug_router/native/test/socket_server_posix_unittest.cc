@@ -20,8 +20,10 @@
 #include <string>
 
 #include "debug_router/native/base/socket_guard.h"
+#include "debug_router/native/core/debug_router_core.h"
 #include "debug_router/native/socket/count_down_latch.h"
 #include "debug_router/native/socket/usb_client.h"
+#include "debug_router/native/thread/debug_router_executor.h"
 #include "gtest/gtest.h"
 
 namespace debugrouter {
@@ -50,6 +52,11 @@ class SocketServerPosixTestPeer {
                                 std::function<void()> task) {
     server.clean_executor_.submit(std::move(task));
   }
+
+  static bool HasTemporaryClient(SocketServerPosix &server) {
+    std::lock_guard<std::mutex> lock(server.client_lock_);
+    return static_cast<bool>(server.temp_usb_client_);
+  }
 };
 
 namespace {
@@ -62,6 +69,22 @@ class NoopListener final : public SocketServerConnectionListener {
   void OnStatusChanged(ConnectionStatus, int32_t,
                        const std::string &) override {}
   void OnMessage(const std::string &) override {}
+};
+
+class ErrorObservedClientListener final : public ClientListener {
+ public:
+  ErrorObservedClientListener(std::shared_ptr<SocketServer> server,
+                              std::shared_ptr<std::promise<void>> observed)
+      : ClientListener(std::move(server)), observed_(std::move(observed)) {}
+
+  void OnError(std::shared_ptr<UsbClient> client, int32_t code,
+               const std::string &message) override {
+    ClientListener::OnError(std::move(client), code, message);
+    observed_->set_value();
+  }
+
+ private:
+  std::shared_ptr<std::promise<void>> observed_;
 };
 
 class StopServerOnExit {
@@ -129,6 +152,58 @@ int ConnectToPort(uint16_t port) {
   return socket_fd;
 }
 
+void SendAll(SocketType socket, const std::string &data) {
+  size_t sent = 0;
+  while (sent < data.size()) {
+    const auto result =
+        base::SendNoSigPipe(socket, data.data() + sent, data.size() - sent);
+    ASSERT_GT(result, 0);
+    sent += static_cast<size_t>(result);
+  }
+}
+
+void ExpectStartupFailureReleasesTemporaryClient(
+    const std::string &startup_bytes) {
+  static_cast<void>(core::DebugRouterCore::GetInstance());
+  auto server =
+      std::make_shared<SocketServerPosix>(std::make_shared<NoopListener>());
+  StopServerOnExit stop_server(server);
+
+  int sockets[2] = {-1, -1};
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+  base::SocketGuard peer(sockets[1]);
+  auto client = std::make_shared<UsbClient>(sockets[0]);
+  std::weak_ptr<UsbClient> client_weak = client;
+  SocketServerPosixTestPeer::SetTemporaryClient(*server, client);
+
+  auto error_observed = std::make_shared<std::promise<void>>();
+  auto error_observed_future = error_observed->get_future();
+  auto client_listener =
+      std::make_shared<ErrorObservedClientListener>(server, error_observed);
+  client->Init();
+  client->StartUp(client_listener);
+  client.reset();
+
+  SendAll(peer.Get(), startup_bytes);
+  ASSERT_EQ(shutdown(peer.Get(), SHUT_WR), 0);
+  ASSERT_EQ(error_observed_future.wait_for(2s), std::future_status::ready);
+
+  auto status_drained = std::make_shared<std::promise<void>>();
+  auto status_drained_future = status_drained->get_future();
+  thread::DebugRouterExecutor::GetInstance().Post(
+      [status_drained]() { status_drained->set_value(); });
+  ASSERT_EQ(status_drained_future.wait_for(2s), std::future_status::ready);
+
+  auto cleanup_drained = std::make_shared<std::promise<void>>();
+  auto cleanup_drained_future = cleanup_drained->get_future();
+  SocketServerPosixTestPeer::SubmitCleanupWork(
+      *server, [cleanup_drained]() { cleanup_drained->set_value(); });
+  ASSERT_EQ(cleanup_drained_future.wait_for(2s), std::future_status::ready);
+
+  EXPECT_FALSE(SocketServerPosixTestPeer::HasTemporaryClient(*server));
+  EXPECT_TRUE(client_weak.expired());
+}
+
 TEST(SocketServerPosixTestSuite,
      AcceptsNewClientBeforeSupersededClientCleanupCompletes) {
   auto listener = std::make_shared<NoopListener>();
@@ -182,6 +257,12 @@ TEST(SocketServerPosixTestSuite,
 
   EXPECT_TRUE(accepted_before_cleanup);
   EXPECT_TRUE(old_client_weak.expired());
+}
+
+TEST(SocketServerPosixTestSuite, StartupFailuresReleaseTemporaryClient) {
+  ExpectStartupFailureReleasesTemporaryClient("");
+  ExpectStartupFailureReleasesTemporaryClient(
+      std::string(kFrameHeaderLen, '\0'));
 }
 
 }  // namespace

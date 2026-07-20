@@ -91,14 +91,6 @@ void UsbClient::StartInternal(
   StartWriter();
 }
 
-bool UsbClient::ReadAndCheckMessageHeader(char *header) {
-  if (!Read(header, kFrameHeaderLen)) {
-    LOGE("read header data error.");
-    return false;
-  }
-  return util::CheckHeaderThreeBytes(header);
-}
-
 /**
  *  The DebugRouter message structure is:
  *
@@ -127,51 +119,62 @@ bool UsbClient::ReadAndCheckMessageHeader(char *header) {
  *  checkMessageHeader will check header's value.
  */
 
-bool UsbClient::Read(char *buffer, uint32_t read_size) {
+UsbClient::ReadOutcome UsbClient::Read(char *buffer, uint32_t read_size) {
   int64_t start = 0;
   while (start < read_size) {
     int64_t read_data_len =
         recv(socket_guard_.Get(), buffer + start, read_size - start, 0);
-    if (read_data_len <= 0) {
+    if (read_data_len == 0) {
+      if (stopping_.load(std::memory_order_relaxed)) {
+        return {ReadResult::kStopped, 0};
+      }
+      return {start == 0 ? ReadResult::kEof : ReadResult::kTruncated, 0};
+    }
+    if (read_data_len < 0) {
+      if (stopping_.load(std::memory_order_relaxed)) {
+        return {ReadResult::kStopped, 0};
+      }
       // Check if it's a timeout error
 #ifdef _WIN32
       int error = WSAGetLastError();
       if (error == WSAEWOULDBLOCK || error == WSAETIMEDOUT) {
-        // Timeout, check if we're stopping
-        if (stopping_.load(std::memory_order_relaxed)) {
-          return false;
-        }
         // Continue to next iteration to check again
         continue;
       }
 #else
       int error = errno;
       if (error == EAGAIN || error == EWOULDBLOCK || error == ETIMEDOUT) {
-        // Timeout, check if we're stopping
-        if (stopping_.load(std::memory_order_relaxed)) {
-          return false;
-        }
         // Continue to next iteration to check again
         continue;
       }
 #endif
       LOGE("Read: read_data_len <= 0 :"
-           << "read target count:" << (read_size - start) << " read_data_len:"
-           << read_data_len << " error:" << GetErrorMessage());
-      return false;
+           << "read target count:" << (read_size - start)
+           << " read_data_len:" << read_data_len << " error:" << error);
+      return {ReadResult::kError, error};
     }
     start = start + read_data_len;
   }
-  if (start != read_size) {
-    LOGE("Read: read data count > read_size");
-    return false;
-  }
-  return true;
+  return {ReadResult::kSuccess, 0};
 }
 
 void UsbClient::ReadMessage() {
   LOGI("UsbClient: ReadMessage:" << socket_guard_.Get());
   bool isFirst = true;
+  bool has_completed_frame = false;
+  bool clean_eof = false;
+  int32_t terminal_error_code = 0;
+  auto report_read_failure = [&](const ReadOutcome &outcome,
+                                 const char *truncated_message,
+                                 const char *error_message) {
+    terminal_error_code = outcome.error_code;
+    if (outcome.result != ReadResult::kStopped && listener_) {
+      listener_->OnError(shared_from_this(), outcome.error_code,
+                         outcome.result == ReadResult::kError
+                             ? error_message
+                             : truncated_message);
+    }
+  };
   while (true) {
     // Check if we're stopping
     if (stopping_.load(std::memory_order_relaxed)) {
@@ -180,19 +183,70 @@ void UsbClient::ReadMessage() {
 
     char header[kFrameHeaderLen];
     memset(header, 0, kFrameHeaderLen);
-    if (!ReadAndCheckMessageHeader(header)) {
+    ReadOutcome header_outcome = Read(header, kFrameHeaderLen);
+    if (header_outcome.result != ReadResult::kSuccess) {
+      if (header_outcome.result == ReadResult::kEof) {
+        if (has_completed_frame) {
+          clean_eof = true;
+        } else {
+          report_read_failure(header_outcome,
+                              "peer closed before protocol frame", "");
+        }
+      } else {
+        report_read_failure(header_outcome, "truncated message header",
+                            "read message header data error");
+      }
+      break;
+    }
+    if (!util::CheckHeaderThreeBytes(header)) {
       LOGW("UsbClient: don't match DebugRouter protocol:");
       // need DebugRouterReport to report invailed client.
       for (int i = 0; i < kFrameHeaderLen; i++) {
         LOGE("header " << i << " : #" << util::CharToUInt32(header[i]) << "#");
       }
-      if (!isFirst && listener_) {
-        listener_->OnError(shared_from_this(), GetErrorMessage(),
+      if (listener_) {
+        listener_->OnError(shared_from_this(), 0,
                            "ReadAndCheckMessageHeader error: don't match "
                            "DebugRouter protocol");
       }
       break;
     }
+    char payload_size[kPayloadSizeLen];
+    ReadOutcome payload_size_outcome = Read(payload_size, kPayloadSizeLen);
+    if (payload_size_outcome.result != ReadResult::kSuccess) {
+      if (payload_size_outcome.result != ReadResult::kStopped) {
+        LOGE("read payload data error: " << payload_size_outcome.error_code);
+      }
+      report_read_failure(payload_size_outcome, "truncated payload size",
+                          "read payload size data error.");
+      break;
+    }
+
+    uint32_t payload_size_int =
+        util::DecodePayloadSize(payload_size, kPayloadSizeLen);
+
+    if (!util::CheckHeaderFourthByte(header, payload_size_int)) {
+      LOGE("CheckHeader failed: payload size mismatch.");
+      for (int i = 0; i < kFrameHeaderLen; i++) {
+        LOGE("header " << i << " : #" << util::CharToUInt32(header[i]) << "#");
+      }
+      if (listener_) {
+        listener_->OnError(shared_from_this(), 0,
+                           "message payload size mismatch");
+      }
+      break;
+    }
+    std::unique_ptr<char[]> payload(new char[payload_size_int]);
+    ReadOutcome payload_outcome = Read(payload.get(), payload_size_int);
+    if (payload_outcome.result != ReadResult::kSuccess) {
+      if (payload_outcome.result != ReadResult::kStopped) {
+        LOGE("read payload data error: " << payload_outcome.error_code);
+      }
+      report_read_failure(payload_outcome, "truncated payload",
+                          "read payload data error:");
+      break;
+    }
+    has_completed_frame = true;
     if (isFirst) {
       LOGI("UsbClient: handle first frame.");
       if (listener_) {
@@ -201,35 +255,6 @@ void UsbClient::ReadMessage() {
                           "Init Success!");
       }
       isFirst = false;
-    }
-    char payload_size[kPayloadSizeLen];
-    if (!Read(payload_size, kPayloadSizeLen)) {
-      LOGE("read payload data error: " << GetErrorMessage());
-      if (listener_) {
-        listener_->OnError(shared_from_this(), GetErrorMessage(),
-                           "read payload size data error.");
-      }
-      break;
-    }
-
-    uint32_t payload_size_int =
-        util::DecodePayloadSize(payload_size, kPayloadSizeLen);
-
-    if (!util::CheckHeaderFourthByte(header, payload_size_int)) {
-      LOGE("CheckHeader failed: Drop This Frame!");
-      for (int i = 0; i < kFrameHeaderLen; i++) {
-        LOGE("header " << i << " : #" << util::CharToUInt32(header[i]) << "#");
-      }
-      continue;
-    }
-    std::unique_ptr<char[]> payload(new char[payload_size_int]);
-    if (!Read(payload.get(), payload_size_int)) {
-      LOGE("read payload data error: " << GetErrorMessage());
-      if (listener_) {
-        listener_->OnError(shared_from_this(), GetErrorMessage(),
-                           "read payload data error:");
-      }
-      break;
     }
 
     std::string payload_str(payload.get(), payload_size_int);
@@ -266,8 +291,9 @@ void UsbClient::ReadMessage() {
     incoming_message_queue_.put(std::move(payload_str));
   }
   if (listener_ && is_connected_.exchange(false, std::memory_order_relaxed)) {
-    listener_->OnClose(shared_from_this(), GetErrorMessage(),
-                       "ReadMessage finished");
+    listener_->OnClose(
+        shared_from_this(), terminal_error_code,
+        clean_eof ? "peer closed connection" : "ReadMessage finished");
   }
   LOGI("UsbClient: ReadMessage thread exit.");
   incoming_message_queue_.put(std::move(kMessageQuit));

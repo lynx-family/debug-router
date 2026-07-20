@@ -40,6 +40,7 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
  private:
 #if defined(TESTING)
   friend class SocketServerPosixTestPeer;
+  friend class UsbClientTestPeer;
 #endif
 
   void StartInternal(const std::shared_ptr<UsbClientListener> &listener);
@@ -55,8 +56,14 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   void MessageDispatcher();
   void WriteMessage();
 
-  bool Read(char *buffer, uint32_t read_size);
-  bool ReadAndCheckMessageHeader(char *header);
+  enum class ReadResult { kSuccess, kEof, kTruncated, kStopped, kError };
+
+  struct ReadOutcome {
+    ReadResult result;
+    int32_t error_code;
+  };
+
+  ReadOutcome Read(char *buffer, uint32_t read_size);
 
   void CloseClientSocket(SocketType socket_fd_);
   /**
