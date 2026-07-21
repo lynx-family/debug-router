@@ -781,20 +781,103 @@ export class DebugRouterConnector {
     }
   }
 
-  handleWsMessage(id: number, message: string) {
-    const client = this.usbClients.get(id);
-    if (client) {
-      const data = JSON.parse(message);
-      if (
-        data?.data?.type === "UsbConnect" ||
-        data?.data?.type === "UsbConnectAck"
-      )
+  handleWsMessage(id: number, message: string, originId?: number) {
+    const data = JSON.parse(message);
+    const debugRouterId =
+      typeof data?.debugRouterId === "string" ? data.debugRouterId : undefined;
+    delete data.debugRouterId;
+
+    let client: Client | undefined;
+    if (debugRouterId === undefined) {
+      client = this.usbClients.get(id);
+    } else {
+      const matches = this.getAllAppClients().filter(
+        (candidate) => this.getDebugRouterId(candidate) === debugRouterId,
+      );
+      if (matches.length !== 1) {
+        this.rejectRoute(
+          originId,
+          debugRouterId,
+          id,
+          matches.length === 0 ? "not_found" : "ambiguous",
+        );
         return;
-      if (data?.data?.data?.client_id) {
-        data.data.data.client_id = -1;
       }
-      client.sendMessage(data);
+      client = matches[0];
     }
+
+    if (!client) {
+      return;
+    }
+    if (
+      data?.data?.type === "UsbConnect" ||
+      data?.data?.type === "UsbConnectAck"
+    )
+      return;
+    if (!this.canSendToClient(client)) {
+      if (debugRouterId !== undefined) {
+        this.rejectRoute(originId, debugRouterId, id, "write_failed");
+      }
+      return;
+    }
+    if (data?.data?.data?.client_id) {
+      data.data.data.client_id = this.isUsbClient(client)
+        ? -1
+        : client.clientId();
+    }
+    data.to = client.clientId();
+    try {
+      this.sendToClient(client, data);
+    } catch (error) {
+      if (debugRouterId !== undefined) {
+        this.rejectRoute(originId, debugRouterId, id, "write_failed");
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  private getDebugRouterId(client: Client): unknown {
+    if (this.isUsbClient(client)) {
+      return client.info.query.raw_info?.debugRouterId;
+    }
+    return (client as WebSocketClient).info.raw_info?.debugRouterId;
+  }
+
+  private canSendToClient(client: Client): boolean {
+    return this.isUsbClient(client)
+      ? client.canSendMessage()
+      : (client as WebSocketClient).canSendMessage();
+  }
+
+  private sendToClient(client: Client, data: unknown) {
+    if (this.isUsbClient(client)) {
+      client.sendMessage(data);
+    } else {
+      (client as WebSocketClient).sendMessage(JSON.stringify(data));
+    }
+  }
+
+  private isUsbClient(client: Client): client is UsbClient {
+    return "query" in (client as UsbClient).info;
+  }
+
+  private rejectRoute(
+    originId: number | undefined,
+    debugRouterId: string,
+    target: number,
+    reason: "not_found" | "ambiguous" | "write_failed",
+  ) {
+    if (originId === undefined) {
+      return;
+    }
+    this.wss?.sendMessageToDriver(
+      originId,
+      JSON.stringify({
+        event: "RouteRejected",
+        data: { debugRouterId, target, reason },
+      }),
+    );
   }
 
   handleUsbClienChange() {
