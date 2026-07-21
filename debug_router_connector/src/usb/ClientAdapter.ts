@@ -46,6 +46,7 @@ export default class ClientAdapter {
   protected from?: number;
   protected id: number = 0;
   private connectionAttemptId?: string;
+  private state: "idle" | "active" | "closed" = "idle";
   constructor(
     protected driver: DebugRouterConnector,
     protected listener: ClientEventsListener | null,
@@ -57,6 +58,9 @@ export default class ClientAdapter {
   ) {}
 
   protected handleData(client: net.Socket, data: Buffer) {
+    if (this.state === "closed") {
+      return;
+    }
     try {
       this.handleUnpackMessage(data);
     } catch (error: any) {
@@ -72,18 +76,32 @@ export default class ClientAdapter {
   }
 
   protected handleOff(client: net.Socket) {
+    this.closeAttempt(client, true);
+  }
+
+  private closeAttempt(client: net.Socket, notifyListener: boolean) {
+    if (this.state === "closed") {
+      return;
+    }
+    const wasActive = this.state === "active";
+    this.state = "closed";
     this.isConnected = false;
     client.destroy();
-    this.driver.traceRecorder?.recordSocketDisconnected(
-      this.device_id,
-      this.port,
-      {
-        device: this.device,
-        os: this.type,
-      },
-      this.connectionAttemptId,
-    );
+    if (wasActive) {
+      this.driver.traceRecorder?.recordSocketDisconnected(
+        this.device_id,
+        this.port,
+        {
+          device: this.device,
+          os: this.type,
+        },
+        this.connectionAttemptId,
+      );
+    }
     this.connectionAttemptId = undefined;
+    if (!notifyListener) {
+      return;
+    }
     if (this.listener === null) {
       defaultLogger.debug("handleOff: this.listener == null");
       return;
@@ -151,6 +169,9 @@ export default class ClientAdapter {
   }
 
   onConnect(): void {
+    if (this.state !== "active") {
+      return;
+    }
     const initialize: InitializeMessageType = {
       event: "Initialize",
       data: -1,
@@ -163,13 +184,16 @@ export default class ClientAdapter {
         os: this.type,
       },
     );
+    if (!this.tcpClient.writable || this.tcpClient.destroyed) {
+      this.handleOff(this.tcpClient);
+      return;
+    }
     try {
-      if (this.tcpClient.writable && !this.tcpClient.destroyed) {
-        defaultLogger.debug("send Initialize:" + this.port);
-        this.tcpClient.write(packMessage(initialize));
-      }
+      defaultLogger.debug("send Initialize:" + this.port);
+      this.tcpClient.write(packMessage(initialize));
     } catch (err) {
       defaultLogger.debug("send Initialize error:" + JSON.stringify(err));
+      this.handleOff(this.tcpClient);
     }
   }
 
@@ -294,11 +318,16 @@ export default class ClientAdapter {
   }
 
   connect(): void {
-    if (this.isConnected || this.tcpClient.connecting) return;
+    if (this.state !== "idle") return;
+    this.state = "active";
     const platform = this.type;
     if (platform === "iOS") {
       getTunnel(this.port, { udid: this.device_id })
         .then((tunnel: net.Socket) => {
+          if (this.state !== "active") {
+            tunnel.destroy();
+            return;
+          }
           this.tcpClient = tunnel;
           this.tcpClient.on("data", (data: Buffer) => {
             this.handleData(this.tcpClient, data);
@@ -327,6 +356,7 @@ export default class ClientAdapter {
             msg: msg,
             stage: "client",
           });
+          this.closeAttempt(this.tcpClient, true);
         });
     } else {
       try {
@@ -367,6 +397,7 @@ export default class ClientAdapter {
           msg: msg,
           stage: "client",
         });
+        this.closeAttempt(this.tcpClient, true);
       }
     }
   }
@@ -374,8 +405,16 @@ export default class ClientAdapter {
   public destroy() {
     defaultLogger.debug("ClientAdapter destroy");
     this.listener = null;
-    this.tcpClient.destroy();
+    this.closeAttempt(this.tcpClient, false);
     this.buffer = null;
     this.connection = null;
+  }
+
+  public isAttemptActive(): boolean {
+    return this.state === "active";
+  }
+
+  public isClosed(): boolean {
+    return this.state === "closed";
   }
 }

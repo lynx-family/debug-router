@@ -55,8 +55,17 @@ export abstract class BaseDevice {
       os: this.info.os,
       title: this.info.title,
     });
-    this.clientController?.stopWatchClient();
-    this.clientController = new ClientController(this.driver, this);
+    if (!this.connected) {
+      return;
+    }
+    if (
+      this.clientController &&
+      !this.clientController.matchesPorts(this.ports)
+    ) {
+      this.clientController.close();
+      this.clientController = undefined;
+    }
+    this.clientController ??= new ClientController(this.driver, this);
     this.clientController.startWatchClient();
   }
 
@@ -71,10 +80,13 @@ export abstract class BaseDevice {
     }
   }
 
+  closeClientController() {
+    this.clientController?.close();
+    this.clientController = undefined;
+  }
+
   disConnect() {
     this.connected = false;
-    if (this.clientController) {
-      this.clientController.close();
-    }
+    this.closeClientController();
   }
 }

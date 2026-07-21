@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node bin/driver.js start",
     "build": "rm -rf dist && bash ./scripts/build.sh",
+    "test": "npm run build && node --test test/*.test.js",
     "types": "rm -rf lib && rm -rf typings && tsc -p tsconfig.prod.json",
     "format": "prettier --write ."
   },
