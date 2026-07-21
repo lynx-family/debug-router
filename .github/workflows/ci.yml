@@ -307,7 +307,7 @@ jobs:
           set -e
           pushd debug_router_connector/
           npm install
-          npm run build
+          npm test
           ls -al
           popd
 
