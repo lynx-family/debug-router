@@ -13,6 +13,7 @@ export type PendingControlRoute = {
   originalId: number;
   clientId: number;
   createdAt: number;
+  responseMode?: "customized-message" | "raw-message";
   resolve?: (value: unknown) => void;
   reject?: (error: Error) => void;
 };

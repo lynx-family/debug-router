@@ -24,6 +24,9 @@ const {
 const {
   UsbClient,
 } = require("../../../../debug_router_connector/src/usb/Client");
+const {
+  isControlEvent,
+} = require("../../../../debug_router_connector/src/multiplexer/protocol/validation");
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -1077,6 +1080,33 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(snapshot.clients[2].query.raw_info, null);
   });
 
+  it("preserves missing WebSocket raw_info in wire snapshots", function () {
+    const { host } = createHost({
+      enableWebSocket: true,
+    });
+    const driver = createWebSocketClient(4, "Driver");
+    driver.info.raw_info = undefined;
+    const { controller } = createWebSocketControllerState([], [driver]);
+    host.webSocketController = controller;
+
+    const wireSnapshot = JSON.parse(JSON.stringify(host.createSnapshot()));
+    const wireDriver = wireSnapshot.websocketWebClients[0];
+
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(wireDriver, "raw_info"),
+      true
+    );
+    assert.strictEqual(wireDriver.raw_info, null);
+    assert.strictEqual(
+      isControlEvent({
+        kind: "event",
+        event: "snapshot",
+        data: wireSnapshot,
+      }),
+      true
+    );
+  });
+
   it("broadcasts physical device, client, and USB message events with snapshots", async function () {
     const { host, physical } = createHost({
       now: () => 2000,
@@ -2043,37 +2073,70 @@ describe("MultiplexerHost", function () {
     );
   });
 
-  it("delegates sendRawMessage, sendMessage, and closeClient RPCs", async function () {
+  it("routes sendRawMessage and sendMessage RPCs through Host", async function () {
     const { host, physical } = createHost();
-    const client = createClient(12, {
-      sendRawResult: {
-        event: "Customized",
-        data: {
-          ok: true,
-        },
-      },
+    const controlServer = attachControlServer(host);
+    const client = createClient(12);
+    const rawMessage = createCustomizedEnvelope({
+      id: 66,
+      clientId: 12,
+      method: "Runtime.getProperties",
+      sessionId: 7,
     });
-    const rawMessage = {
-      event: "Initialize",
-      data: 12,
-    };
     physical.usbClients.set(client.clientId(), client);
 
-    const rawResult = await host.handleControlRpc(
+    const rawResultPromise = host.handleControlRpc(
       1,
       createRpcRequest("sendRawMessage", {
         clientId: 12,
         message: rawMessage,
       })
     );
+    const rawGlobalMessageId = readCustomizedInner(
+      client.state.sendMessageCalls[0]
+    ).id;
+    assert.notStrictEqual(rawGlobalMessageId, 66);
+    host.handlePhysicalMessage(
+      12,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: rawGlobalMessageId,
+          result: { raw: true },
+          clientId: -1,
+          sessionId: 7,
+          messageAsString: true,
+        })
+      )
+    );
+    const rawResult = await rawResultPromise;
+
     await host.handleControlRpc(
       1,
       createRpcRequest("sendMessage", {
         clientId: 12,
-        message: {
-          event: "Ping",
-        },
+        message: createCustomizedEnvelope({
+          id: 77,
+          clientId: 12,
+          method: "Runtime.evaluate",
+        }),
       })
+    );
+
+    const globalMessageId = readCustomizedInner(
+      client.state.sendMessageCalls[1]
+    ).id;
+    assert.notStrictEqual(globalMessageId, 77);
+    assert.strictEqual(host.pendingRoutes.size, 1);
+
+    host.handlePhysicalMessage(
+      12,
+      JSON.stringify(
+        createCustomizedEnvelope({
+          id: globalMessageId,
+          result: { value: 42 },
+          messageAsString: true,
+        })
+      )
     );
     await host.handleControlRpc(
       1,
@@ -2085,33 +2148,36 @@ describe("MultiplexerHost", function () {
     assert.deepStrictEqual(rawResult, {
       event: "Customized",
       data: {
-        ok: true,
+        type: "CDP",
+        data: {
+          client_id: 12,
+          session_id: 7,
+          message: JSON.stringify({
+            id: 66,
+            result: { raw: true },
+          }),
+        },
+        sender: 0,
       },
     });
-    assert.deepStrictEqual(physical.sendRawMessageCalls, [
+    assert.deepStrictEqual(physical.sendRawMessageCalls, []);
+    assert.deepStrictEqual(physical.sendMessageCalls, []);
+    assert.strictEqual(client.state.sendMessageCalls.length, 2);
+    assert.strictEqual(host.pendingRoutes.size, 0);
+    assert.strictEqual(controlServer.targeted.length, 1);
+    assert.strictEqual(controlServer.targeted[0].controlId, 1);
+    assert.deepStrictEqual(
+      readCustomizedInner(controlServer.targeted[0].event.data.message),
       {
-        clientId: 12,
-        message: rawMessage,
-      },
-    ]);
-    assert.deepStrictEqual(physical.sendMessageCalls, [
-      {
-        clientId: 12,
-        message: {
-          event: "Ping",
-        },
-      },
-    ]);
-    assert.deepStrictEqual(client.state.sendMessageCalls, [
-      {
-        event: "Ping",
-      },
-    ]);
+        id: 77,
+        result: { value: 42 },
+      }
+    );
     assert.deepStrictEqual(physical.closeClientCalls, [12]);
     assert.strictEqual(client.state.closeCalls, 1);
   });
 
-  it("sendRawMessage rejects when the physical layer reports a missing client", async function () {
+  it("sendRawMessage rejects when Host cannot find the runtime client", async function () {
     const { host } = createHost();
 
     await assert.rejects(
@@ -2126,7 +2192,14 @@ describe("MultiplexerHost", function () {
             },
           })
         ),
-      /client not found:500/
+      (error) => {
+        assertControlError(
+          error,
+          "multiplexer-client-not-found",
+          /Multiplexer client was not found: 500/
+        );
+        return true;
+      }
     );
   });
 
@@ -2433,12 +2506,13 @@ describe("MultiplexerHost", function () {
     const driver = createWebSocketClient(93, "Driver");
     const { controller } = createWebSocketControllerState([runtime], [driver]);
     host.webSocketController = controller;
+    const rawWifiMessage = JSON.stringify({ event: "Ping" });
 
     await host.handleControlRpc(
       1,
       createRpcRequest("sendMessage", {
         clientId: 93,
-        message: "raw-wifi-message",
+        message: rawWifiMessage,
       })
     );
     const resultPromise = host.handleControlRpc(
@@ -2470,7 +2544,7 @@ describe("MultiplexerHost", function () {
       createRpcRequest("closeClient", { clientId: 93 })
     );
 
-    assert.strictEqual(runtime.state.sendMessageCalls[0], "raw-wifi-message");
+    assert.strictEqual(runtime.state.sendMessageCalls[0], rawWifiMessage);
     assert.strictEqual(runtime.state.sendMessageCalls.length, 2);
     assert.strictEqual(runtime.state.closeCalls, 1);
     assert.deepStrictEqual(JSON.parse(result).result, {

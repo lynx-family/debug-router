@@ -13,6 +13,7 @@
     "build": "rm -rf dist && bash ./scripts/build.sh",
     "types": "rm -rf lib && rm -rf typings && tsc -p tsconfig.prod.json",
     "test:multiplexer": "mocha \"../test/unit/multiplexer/**/*.test.js\" \"../test/unit/physical/**/*.test.js\"",
+    "test:message": "mocha \"../test/message/**/*.test.js\"",
     "test:integration:multiplexer": "mocha \"../test/integration/multiplexer/**/*.test.js\"",
     "test:physical": "mocha \"../test/unit/physical/**/*.test.js\"",
     "format": "prettier --write ."

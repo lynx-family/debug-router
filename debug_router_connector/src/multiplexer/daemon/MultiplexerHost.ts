@@ -20,6 +20,7 @@ import {
   DebugerRouterDriverEvents,
   DeviceDescription,
   PhysicalConnectorEvent,
+  ResponseMessageType,
 } from "../../utils/type";
 import {
   ClientSnapshot,
@@ -57,6 +58,7 @@ export type PendingTargetSeed =
       kind: "control";
       controlId: number;
       clientId: number;
+      responseMode?: "customized-message" | "raw-message";
       resolve?: (value: unknown) => void;
       reject?: (error: Error) => void;
     }
@@ -519,13 +521,14 @@ export class MultiplexerHost
           controlId,
         );
       case "sendRawMessage":
-        return this.physicalConnector.sendRawMessage(
-          (message.params as ControlRpcParams["sendRawMessage"]).clientId,
-          (message.params as ControlRpcParams["sendRawMessage"]).message,
+        return this.sendRawMessage(
+          message.params as ControlRpcParams["sendRawMessage"],
+          controlId,
         );
       case "sendMessage":
         this.sendClientMessage(
           message.params as ControlRpcParams["sendMessage"],
+          controlId,
         );
         return undefined;
       case "closeClient":
@@ -774,7 +777,11 @@ export class MultiplexerHost
     if (routed) {
       if (routed.target.kind === "control") {
         if (routed.target.resolve) {
-          routed.target.resolve(extractCustomizedMessage(routed.message));
+          routed.target.resolve(
+            routed.target.responseMode === "raw-message"
+              ? parseRawResponse(routed.externalMessage, routed.clientId)
+              : extractCustomizedMessage(routed.message),
+          );
         } else {
           // Connector facade events are a legacy compatibility surface.
           // externalMessage restores the caller's original request id without
@@ -1229,6 +1236,26 @@ export class MultiplexerHost
     });
   }
 
+  private async sendRawMessage(
+    params: ControlRpcParams["sendRawMessage"],
+    controlId: number,
+  ): Promise<ResponseMessageType> {
+    return new Promise<ResponseMessageType>((resolve, reject) => {
+      try {
+        this.sendMessageToRuntime(params.clientId, params.message, {
+          kind: "control",
+          controlId,
+          clientId: params.clientId,
+          responseMode: "raw-message",
+          resolve: (value) => resolve(value as ResponseMessageType),
+          reject,
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   private getUsbClient(clientId: number): UsbClient {
     const client = this.physicalConnector.usbClients.get(clientId);
     if (!client) {
@@ -1255,17 +1282,18 @@ export class MultiplexerHost
     return this.getWebSocketAppClients()?.get(clientId);
   }
 
-  private sendClientMessage(params: ControlRpcParams["sendMessage"]): void {
-    const websocketClient = this.getWebSocketRuntimeClient(params.clientId);
-    if (websocketClient) {
-      websocketClient.sendMessage(
-        typeof params.message === "string"
-          ? params.message
-          : JSON.stringify(params.message),
-      );
-      return;
-    }
-    this.physicalConnector.sendMessage(params.clientId, params.message);
+  private sendClientMessage(
+    params: ControlRpcParams["sendMessage"],
+    controlId: number,
+  ): void {
+    this.sendMessageToApp(
+      params.clientId,
+      typeof params.message === "string"
+        ? params.message
+        : JSON.stringify(params.message),
+      undefined,
+      controlId,
+    );
   }
 
   private closeClient(clientId: number): void {
@@ -1334,7 +1362,7 @@ export class MultiplexerHost
       osVersion: info.osVersion,
       sdkVersion: info.sdkVersion,
       type: info.type,
-      raw_info: cloneJsonValue(info.raw_info),
+      raw_info: cloneJsonValue(info.raw_info) ?? null,
     };
   }
 
@@ -1535,6 +1563,14 @@ export class MultiplexerHost
     message: string,
   ): void {
     if (target.kind === "control") {
+      if (target.resolve) {
+        target.resolve(
+          target.responseMode === "raw-message"
+            ? parseRawResponse(message, clientId)
+            : extractCustomizedMessage(message),
+        );
+        return;
+      }
       this.sendToControl(target.controlId, {
         kind: "event",
         event: this.getWebSocketAppClients()?.has(clientId)
@@ -1836,6 +1872,27 @@ function extractCustomizedMessage(message: string): string {
   return typeof customized.container.message === "string"
     ? customized.container.message
     : JSON.stringify(customized.container.message);
+}
+
+function parseRawResponse(
+  message: string,
+  clientId: number,
+): ResponseMessageType {
+  const data = parseJsonMessage(message);
+  if (
+    data?.data?.data &&
+    Object.prototype.hasOwnProperty.call(data.data.data, "client_id")
+  ) {
+    data.data.data.client_id = clientId;
+  }
+  if (
+    data?.data?.data &&
+    Object.prototype.hasOwnProperty.call(data.data.data, "message") &&
+    typeof data.data.data.message !== "string"
+  ) {
+    data.data.data.message = JSON.stringify(data.data.data.message);
+  }
+  return data as ResponseMessageType;
 }
 
 function rewriteRuntimeClientId(message: string, clientId: number): string {

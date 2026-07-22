@@ -205,28 +205,25 @@ describe("multiplexer integration multi connector", function () {
         sender: 0,
       },
     };
-    assert.deepStrictEqual(
-      await firstClient.sendRawMessage(rawMessage),
-      {
-        event: "Customized",
+    assert.deepStrictEqual(await firstClient.sendRawMessage(rawMessage), {
+      event: "Customized",
+      data: {
+        type: "CDP",
         data: {
-          type: "CDP",
-          data: {
-            client_id: 1,
-            session_id: 7,
-            message: JSON.stringify({
-              id: 77,
-              result: {
-                clientId: 1,
-                method: "Runtime.getProperties",
-                params: { objectId: "node-1" },
-              },
-            }),
-          },
-          sender: 0,
+          client_id: 1,
+          session_id: 7,
+          message: JSON.stringify({
+            id: 77,
+            result: {
+              clientId: 1,
+              method: "Runtime.getProperties",
+              params: { objectId: "node-1" },
+            },
+          }),
         },
+        sender: 0,
       },
-    );
+    });
     firstClient.close();
     second.startWatchAllClients(true);
 
@@ -235,7 +232,7 @@ describe("multiplexer integration multi connector", function () {
       return (
         log.some(
           (entry) =>
-            entry.event === "client-send-raw-message" &&
+            entry.event === "client-send-message" &&
             entry.id === 1 &&
             entry.message.data?.data?.message?.method ===
               "Runtime.getProperties",
