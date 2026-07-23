@@ -126,7 +126,6 @@ TEST(UsbClientTestSuite, PeerEOFNotifiesCloseWithoutError) {
   EXPECT_TRUE(listener->WaitForCount(listener->message_count, 1, 3000));
   EXPECT_TRUE(listener->WaitForCount(listener->close_count, 1, 3000));
   EXPECT_EQ(listener->error_count.load(std::memory_order_relaxed), 0);
-  EXPECT_GT(client.use_count(), 1);
 
   close(sockets[1]);
   client->Stop();

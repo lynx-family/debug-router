@@ -10,45 +10,52 @@ namespace debugrouter {
 namespace base {
 
 WorkThreadExecutor::WorkThreadExecutor()
-    : is_shut_down(false), alive_flag(std::make_shared<bool>(true)) {}
+    : state_(std::make_shared<SharedState>()) {}
 
 void WorkThreadExecutor::init() {
-  std::lock_guard<std::mutex> lock(task_mtx);
+  if (state_->is_shut_down.load(std::memory_order_acquire)) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(state_->task_mtx);
+  if (state_->is_shut_down.load(std::memory_order_acquire)) {
+    return;
+  }
   if (!worker) {
-    worker = std::make_unique<std::thread>([this]() { run(); });
+    worker = std::make_unique<std::thread>(
+        [state = state_]() { WorkThreadExecutor::run(state); });
   }
 }
 
 WorkThreadExecutor::~WorkThreadExecutor() { shutdown(); }
 
 void WorkThreadExecutor::submit(std::function<void()> task) {
-  if (is_shut_down) {
+  if (state_->is_shut_down.load(std::memory_order_acquire)) {
     return;
   }
-  std::lock_guard<std::mutex> lock(task_mtx);
-  if (is_shut_down) {
+  std::lock_guard<std::mutex> lock(state_->task_mtx);
+  if (state_->is_shut_down.load(std::memory_order_acquire)) {
     return;
   }
-  tasks.push(task);
-  cond.notify_one();
+  state_->tasks.push(std::move(task));
+  state_->cond.notify_one();
 }
 
 void WorkThreadExecutor::shutdown() {
   bool expected = false;
-  if (!is_shut_down.compare_exchange_strong(expected, true,
-                                            std::memory_order_acq_rel,
-                                            std::memory_order_acquire)) {
+  if (!state_->is_shut_down.compare_exchange_strong(
+          expected, true, std::memory_order_acq_rel,
+          std::memory_order_acquire)) {
     return;
   }
 
   std::unique_ptr<std::thread> worker_ptr;
   {
-    std::lock_guard<std::mutex> lock(task_mtx);
+    std::lock_guard<std::mutex> lock(state_->task_mtx);
     std::queue<std::function<void()>> empty;
-    tasks.swap(empty);
+    state_->tasks.swap(empty);
     worker_ptr = std::move(worker);
   }
-  cond.notify_all();
+  state_->cond.notify_all();
 
   if (worker_ptr && worker_ptr->joinable()) {
 #if __cpp_exceptions >= 199711L
@@ -71,31 +78,41 @@ void WorkThreadExecutor::shutdown() {
   LOGI("WorkThreadExecutor::shutdown success.");
 }
 
-void WorkThreadExecutor::run() {
-  std::weak_ptr<bool> weak_flag = alive_flag;
+void WorkThreadExecutor::run(const std::shared_ptr<SharedState>& state) {
   while (true) {
-    auto flag = weak_flag.lock();
-    if (!flag) {
+    if (state->is_shut_down.load(std::memory_order_acquire)) {
       break;
     }
-    if (is_shut_down) {
-      break;
-    }
-    std::unique_lock<std::mutex> lock(task_mtx);
-    cond.wait(lock, [this] { return !tasks.empty() || is_shut_down; });
-    if (is_shut_down) {
-      break;
-    }
-    if (!tasks.empty()) {
-      auto task = tasks.front();
-      tasks.pop();
-      lock.unlock();
-      if (is_shut_down) {
+
+    std::function<void()> task;
+    {
+      std::unique_lock<std::mutex> lock(state->task_mtx);
+      state->cond.wait(lock, [state] {
+        return !state->tasks.empty() ||
+               state->is_shut_down.load(std::memory_order_acquire);
+      });
+      if (state->is_shut_down.load(std::memory_order_acquire)) {
         break;
       }
+      if (state->tasks.empty()) {
+        continue;
+      }
+      task = std::move(state->tasks.front());
+      state->tasks.pop();
+    }
+
+#if __cpp_exceptions >= 199711L
+    try {
+#endif
       task();
       LOGI("WorkThreadExecutor::run task() success.");
+#if __cpp_exceptions >= 199711L
+    } catch (const std::exception& e) {
+      LOGE("WorkThreadExecutor::run task() failed, " << e.what());
+    } catch (...) {
+      LOGE("WorkThreadExecutor::run task() failed with unknown exception");
     }
+#endif
   }
 }
 

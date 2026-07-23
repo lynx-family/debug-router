@@ -81,6 +81,7 @@ unit_test("example_unittest") {
     "usb_client_unittest.cc",
     "usb_reconnect_race_unittest.cc",
     "websocket_task_unittest.cc",
+    "work_thread_executor_unittest.cc",
   ]
   deps = [ ":example_testset" ]
 }
