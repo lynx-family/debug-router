@@ -70,8 +70,10 @@ function createRpcRequest(overrides = {}) {
   return {
     kind: "rpc",
     id: 1,
-    method: "sendMessageToWeb",
+    method: "sendMessage",
     params: {
+      target: "web",
+      clientId: -1,
       message: "hello",
     },
     ...overrides,
@@ -169,8 +171,8 @@ describe("MultiplexerControlServer", function () {
     const second = server.registerConnection(secondSocket);
     const event = {
       kind: "event",
-      event: "client-disconnected",
-      data: { id: 1 },
+      event: "client-message",
+      data: { source: "usb-runtime", id: 1, message: "hello" },
     };
 
     assert.doesNotThrow(() => {
@@ -222,7 +224,10 @@ describe("MultiplexerControlServer", function () {
     const socket = new FakeSocket();
     const connection = server.registerConnection(socket);
 
-    await server.dispatchRpc(connection.controlId, createRpcRequest({ id: 11 }));
+    await server.dispatchRpc(
+      connection.controlId,
+      createRpcRequest({ id: 11 })
+    );
 
     assert.deepStrictEqual(parseSent(socket), {
       kind: "rpc-response",
@@ -250,7 +255,10 @@ describe("MultiplexerControlServer", function () {
     const socket = new FakeSocket();
     const connection = server.registerConnection(socket);
 
-    await server.dispatchRpc(connection.controlId, createRpcRequest({ id: 12 }));
+    await server.dispatchRpc(
+      connection.controlId,
+      createRpcRequest({ id: 12 })
+    );
 
     assert.deepStrictEqual(parseSent(socket), {
       kind: "rpc-response",
@@ -275,7 +283,10 @@ describe("MultiplexerControlServer", function () {
     const socket = new FakeSocket();
     const connection = server.registerConnection(socket);
 
-    await server.dispatchRpc(connection.controlId, createRpcRequest({ id: 13 }));
+    await server.dispatchRpc(
+      connection.controlId,
+      createRpcRequest({ id: 13 })
+    );
 
     assert.deepStrictEqual(parseSent(socket), {
       kind: "rpc-response",
@@ -300,7 +311,10 @@ describe("MultiplexerControlServer", function () {
     const connection = server.registerConnection(new FakeSocket());
     connection.close();
 
-    await server.dispatchRpc(connection.controlId, createRpcRequest({ id: 14 }));
+    await server.dispatchRpc(
+      connection.controlId,
+      createRpcRequest({ id: 14 })
+    );
     await server.dispatchRpc(999, createRpcRequest({ id: 15 }));
 
     assert.deepStrictEqual(calls, []);
@@ -318,13 +332,13 @@ describe("MultiplexerControlServer", function () {
     const second = server.registerConnection(secondSocket);
     const broadcast = {
       kind: "event",
-      event: "client-disconnected",
-      data: { id: 1 },
+      event: "client-message",
+      data: { source: "usb-runtime", id: 1, message: "broadcast" },
     };
     const targeted = {
       kind: "event",
-      event: "client-disconnected",
-      data: { id: 2 },
+      event: "client-message",
+      data: { source: "websocket-runtime", id: 2, message: "targeted" },
     };
 
     server.broadcast(broadcast);

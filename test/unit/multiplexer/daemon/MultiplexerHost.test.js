@@ -1023,8 +1023,9 @@ describe("MultiplexerHost", function () {
       controlId: 56,
       event: {
         kind: "event",
-        event: "ws-client-message",
+        event: "client-message",
         data: {
+          source: "websocket-runtime",
           id: 23,
           message: JSON.stringify(
             createCustomizedEnvelope({
@@ -1107,7 +1108,7 @@ describe("MultiplexerHost", function () {
     );
   });
 
-  it("broadcasts physical device, client, and USB message events with snapshots", async function () {
+  it("broadcasts physical lifecycle snapshots and unified USB message events", async function () {
     const { host, physical } = createHost({
       now: () => 2000,
     });
@@ -1137,34 +1138,21 @@ describe("MultiplexerHost", function () {
 
     assert.deepStrictEqual(
       controlServer.broadcasts.map((event) => event.event),
-      [
-        "device-connected",
-        "snapshot",
-        "client-connected",
-        "snapshot",
-        "usb-client-message",
-        "client-disconnected",
-        "snapshot",
-        "device-disconnected",
-        "snapshot",
-      ]
+      ["snapshot", "snapshot", "client-message", "snapshot", "snapshot"]
     );
-    assert.deepStrictEqual(controlServer.broadcasts[0].data, {
-      os: "Android",
-      title: "Device device-1",
-      serial: "device-1",
-      ports: [8901, 8902],
-      host: "localhost",
-    });
-    assert.deepStrictEqual(controlServer.broadcasts[4].data, {
+    assert.deepStrictEqual(controlServer.broadcasts[0].data.devices, [
+      {
+        os: "Android",
+        title: "Device device-1",
+        serial: "device-1",
+        ports: [8901, 8902],
+        host: "localhost",
+      },
+    ]);
+    assert.deepStrictEqual(controlServer.broadcasts[2].data, {
+      source: "usb-runtime",
       id: 7,
       message: '{"event":"Customized"}',
-    });
-    assert.deepStrictEqual(controlServer.broadcasts[5].data, {
-      id: 7,
-    });
-    assert.deepStrictEqual(controlServer.broadcasts[7].data, {
-      serial: "device-1",
     });
   });
 
@@ -1324,7 +1312,7 @@ describe("MultiplexerHost", function () {
     assert.deepStrictEqual(physical.getDeviceUsbClientsCalls, []);
   });
 
-  it("reacquireLegacyOwnership reattaches the host and allows watcher recovery", async function () {
+  it("startWatchAllClients reacquires legacy ownership and restores watchers", async function () {
     const { host, physical } = createHost({
       connectionTrace: {
         enabled: true,
@@ -1340,15 +1328,9 @@ describe("MultiplexerHost", function () {
     host.legacyOwnershipGuard.emitStatus("unattached", "legacy-preempted", 200);
     await host.handleControlRpc(
       1,
-      createRpcRequest("reacquireLegacyOwnership", {})
+      createRpcRequest("startWatchAllClients", { force: false })
     );
     assert.deepStrictEqual(await host.getDevices(), [device]);
-    await host.handleControlRpc(
-      1,
-      createRpcRequest("startWatchAllClients", {
-        force: true,
-      })
-    );
 
     assert.strictEqual(host.legacyOwnershipAttached, true);
     assert.strictEqual(host.legacyOwnershipGuard.reacquireCalls, 1);
@@ -1576,34 +1558,6 @@ describe("MultiplexerHost", function () {
     await Promise.all([first, second]);
 
     assert.strictEqual(physical.connectDevicesCalls.length, 1);
-  });
-
-  it("getDevices directly serializes the physical query result", async function () {
-    const { host, physical } = createHost();
-    const firstDevice = createDevice("device-1");
-    const secondDevice = createDevice("device-2");
-    physical.devices.set(firstDevice.serial, firstDevice);
-    physical.devices.set(secondDevice.serial, secondDevice);
-
-    const result = await host.handleControlRpc(
-      1,
-      createRpcRequest("getDevices", {
-        timeout: 30,
-        serial: "device-2",
-      })
-    );
-
-    assert.deepStrictEqual(physical.connectDevicesCalls, []);
-    assert.deepStrictEqual(physical.getDevicesCalls, [
-      {
-        timeout: 30,
-        serial: "device-2",
-      },
-    ]);
-    assert.deepStrictEqual(
-      result.map((item) => item.serial),
-      ["device-2"]
-    );
   });
 
   it("connectUsbClients starts discovery, watches target device once, and uses getDeviceUsbClients by default", async function () {
@@ -1928,9 +1882,7 @@ describe("MultiplexerHost", function () {
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchAllClients", {
-        force: false,
-      })
+      createRpcRequest("startWatchAllClients", { force: true })
     );
     physical.devices.set(secondDevice.serial, secondDevice);
     physical.emit("device-connected", secondDevice);
@@ -1942,135 +1894,62 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("routes sendCustomizedMessage through the runtime and resolves from physical responses", async function () {
+  it("stopWatchAllClients stops current watchers and ignores later devices", async function () {
     const { host, physical } = createHost();
-    const client = createClient(11);
-    physical.usbClients.set(client.clientId(), client);
+    const firstDevice = createDevice("device-1");
+    const secondDevice = createDevice("device-2");
+    const laterDevice = createDevice("device-3");
+    physical.devices.set(firstDevice.serial, firstDevice);
+    physical.devices.set(secondDevice.serial, secondDevice);
+    attachControlServer(host);
+    bindHostEvents(host);
 
-    const firstPromise = host.handleControlRpc(
+    await host.handleControlRpc(
       1,
-      createRpcRequest("sendCustomizedMessage", {
-        clientId: 11,
-        method: "Runtime.evaluate",
-      })
+      createRpcRequest("startWatchAllClients", { force: true })
     );
-    assert.deepStrictEqual(
-      readCustomizedInner(client.state.sendMessageCalls[0]),
-      {
-        id: 1,
-        method: "Runtime.evaluate",
-        params: "",
-      }
-    );
-    host.handlePhysicalMessage(
-      11,
-      JSON.stringify(
-        createCustomizedEnvelope({
-          id: 1,
-          result: {
-            ok: true,
-          },
-          messageAsString: true,
-        })
-      )
-    );
-    const first = await firstPromise;
+    await host.handleControlRpc(1, createRpcRequest("stopWatchAllClients", {}));
 
-    const secondPromise = host.handleControlRpc(
-      1,
-      createRpcRequest("sendCustomizedMessage", {
-        clientId: 11,
-        method: "App.call",
-        params: {
-          ok: true,
-        },
-        sessionId: 99,
-        type: "App",
-      })
-    );
-    assert.deepStrictEqual(
-      readCustomizedInner(client.state.sendMessageCalls[1]),
-      {
-        id: 2,
-        method: "App.call",
-        params: {
-          ok: true,
-        },
-      }
-    );
-    assert.strictEqual(client.state.sendMessageCalls[1].data.type, "App");
-    assert.strictEqual(
-      client.state.sendMessageCalls[1].data.data.session_id,
-      99
-    );
-    host.handlePhysicalMessage(
-      11,
-      JSON.stringify(
-        createCustomizedEnvelope({
-          id: 2,
-          result: "second",
-          messageAsString: false,
-          type: "App",
-        })
-      )
-    );
-    const second = await secondPromise;
+    physical.devices.set(laterDevice.serial, laterDevice);
+    physical.emit("device-connected", laterDevice);
+    await nextTick();
 
-    const thirdPromise = host.handleControlRpc(
-      1,
-      createRpcRequest("sendCustomizedMessage", {
-        clientId: 11,
-        method: "String.params",
-        params: "raw",
-      })
-    );
+    assert.deepStrictEqual(physical.startWatchClientCalls, [
+      "device-1",
+      "device-2",
+    ]);
+    assert.strictEqual(firstDevice.state.stopWatchCalls, 1);
+    assert.strictEqual(secondDevice.state.stopWatchCalls, 1);
+    assert.strictEqual(laterDevice.state.startWatchCalls, 0);
+    assert.strictEqual(host.allClientWatchersRequested, false);
+    assert.strictEqual(host.deviceDiscoveryAutoListensClients, false);
     assert.deepStrictEqual(
-      readCustomizedInner(client.state.sendMessageCalls[2]),
-      {
-        id: 3,
-        method: "String.params",
-        params: "raw",
-      }
+      Array.from(host.clientDiscoveryStartedDeviceIds),
+      []
     );
-    host.handlePhysicalMessage(
-      11,
-      JSON.stringify(
-        createCustomizedEnvelope({
-          id: 3,
-          result: null,
-          messageAsString: true,
-        })
-      )
-    );
-    const third = await thirdPromise;
-
-    assert.strictEqual(first, '{"id":1,"result":{"ok":true}}');
-    assert.strictEqual(second, '{"id":2,"result":"second"}');
-    assert.strictEqual(third, '{"id":3,"result":null}');
-    assert.deepStrictEqual(client.state.sendCustomizedCalls, []);
   });
 
-  it("throws a control error when sendCustomizedMessage targets a missing client", async function () {
-    const { host } = createHost();
+  it("stopWatchAllClients cancels an in-flight startWatchAllClients request", async function () {
+    const deferred = createDeferred();
+    const { host, physical } = createHost({
+      connectDevicesImpl: () => deferred.promise,
+    });
+    const device = createDevice("device-1");
+    physical.devices.set(device.serial, device);
 
-    await assert.rejects(
-      () =>
-        host.handleControlRpc(
-          1,
-          createRpcRequest("sendCustomizedMessage", {
-            clientId: 404,
-            method: "Runtime.evaluate",
-          })
-        ),
-      (error) => {
-        assertControlError(
-          error,
-          "multiplexer-client-not-found",
-          /Multiplexer client was not found: 404/
-        );
-        return true;
-      }
+    const starting = host.handleControlRpc(
+      1,
+      createRpcRequest("startWatchAllClients", { force: true })
     );
+    await nextTick();
+    await host.handleControlRpc(1, createRpcRequest("stopWatchAllClients", {}));
+
+    deferred.resolve([device]);
+    await starting;
+
+    assert.deepStrictEqual(physical.startWatchClientCalls, []);
+    assert.strictEqual(device.state.startWatchCalls, 0);
+    assert.strictEqual(host.allClientWatchersRequested, false);
   });
 
   it("routes sendRawMessage and sendMessage RPCs through Host", async function () {
@@ -2113,6 +1992,7 @@ describe("MultiplexerHost", function () {
     await host.handleControlRpc(
       1,
       createRpcRequest("sendMessage", {
+        target: "app",
         clientId: 12,
         message: createCustomizedEnvelope({
           id: 77,
@@ -2203,15 +2083,16 @@ describe("MultiplexerHost", function () {
     );
   });
 
-  it("sendMessageToApp rewrites USB messages, filters USB connect handshakes, and rejects invalid JSON", async function () {
+  it("sendMessage app target rewrites USB messages, filters USB connect handshakes, and rejects invalid JSON", async function () {
     const { host, physical } = createHost();
     const client = createClient(13);
     physical.usbClients.set(client.clientId(), client);
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessageToApp", {
-        id: 13,
+      createRpcRequest("sendMessage", {
+        target: "app",
+        clientId: 13,
         message: JSON.stringify({
           event: "Customized",
           data: {
@@ -2226,8 +2107,9 @@ describe("MultiplexerHost", function () {
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessageToApp", {
-        id: 13,
+      createRpcRequest("sendMessage", {
+        target: "app",
+        clientId: 13,
         message: JSON.stringify({
           event: "Customized",
           data: {
@@ -2238,8 +2120,9 @@ describe("MultiplexerHost", function () {
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessageToApp", {
-        id: 13,
+      createRpcRequest("sendMessage", {
+        target: "app",
+        clientId: 13,
         message: JSON.stringify({
           event: "Customized",
           data: {
@@ -2252,8 +2135,9 @@ describe("MultiplexerHost", function () {
       () =>
         host.handleControlRpc(
           1,
-          createRpcRequest("sendMessageToApp", {
-            id: 13,
+          createRpcRequest("sendMessage", {
+            target: "app",
+            clientId: 13,
             message: "{bad-json",
           })
         ),
@@ -2277,15 +2161,16 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("sendMessageToApp preserves missing and zero client_id values", async function () {
+  it("sendMessage app target preserves missing and zero client_id values", async function () {
     const { host, physical } = createHost();
     const client = createClient(14);
     physical.usbClients.set(client.clientId(), client);
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessageToApp", {
-        id: 14,
+      createRpcRequest("sendMessage", {
+        target: "app",
+        clientId: 14,
         message: JSON.stringify({
           event: "Customized",
           data: {
@@ -2299,8 +2184,9 @@ describe("MultiplexerHost", function () {
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessageToApp", {
-        id: 14,
+      createRpcRequest("sendMessage", {
+        target: "app",
+        clientId: 14,
         message: JSON.stringify({
           event: "Customized",
           data: {
@@ -2337,7 +2223,7 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("sendMessageToApp rejects missing clients before attempting control or websocket routing", async function () {
+  it("sendMessage app target rejects missing clients before attempting control or websocket routing", async function () {
     const disabled = createHost({
       enableWebSocket: false,
     });
@@ -2349,8 +2235,9 @@ describe("MultiplexerHost", function () {
       () =>
         disabled.host.handleControlRpc(
           1,
-          createRpcRequest("sendMessageToApp", {
-            id: 404,
+          createRpcRequest("sendMessage", {
+            target: "app",
+            clientId: 404,
             message: "{}",
           })
         ),
@@ -2367,8 +2254,9 @@ describe("MultiplexerHost", function () {
       () =>
         enabled.host.handleControlRpc(
           1,
-          createRpcRequest("sendMessageToApp", {
-            id: 404,
+          createRpcRequest("sendMessage", {
+            target: "app",
+            clientId: 404,
             message: "{}",
           })
         ),
@@ -2473,20 +2361,25 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(host.isIdle(), false);
     assert.deepStrictEqual(controlServer.broadcasts, []);
     assert.deepStrictEqual(
-      controlServer.targeted
-        .filter(({ event }) => event.event.includes("-connected"))
-        .map(({ controlId, event }) => [controlId, event.event]),
+      controlServer.targeted.map(({ controlId, event }) => [
+        controlId,
+        event.event,
+      ]),
       [
-        [1, "websocket-app-client-connected"],
-        [1, "websocket-web-client-connected"],
+        [1, "snapshot"],
+        [1, "snapshot"],
       ]
     );
 
     const pending = host.handleControlRpc(
       77,
-      createRpcRequest("sendCustomizedMessage", {
+      createRpcRequest("sendRawMessage", {
         clientId: 91,
-        method: "Runtime.evaluate",
+        message: createCustomizedEnvelope({
+          id: 81,
+          clientId: 91,
+          method: "Runtime.evaluate",
+        }),
       })
     );
     state.appMap.delete(91);
@@ -2511,18 +2404,23 @@ describe("MultiplexerHost", function () {
     await host.handleControlRpc(
       1,
       createRpcRequest("sendMessage", {
+        target: "app",
         clientId: 93,
         message: rawWifiMessage,
       })
     );
     const resultPromise = host.handleControlRpc(
       1,
-      createRpcRequest("sendCustomizedMessage", {
+      createRpcRequest("sendRawMessage", {
         clientId: 93,
-        method: "Runtime.call",
-        params: { value: true },
-        sessionId: 3,
-        type: "App",
+        message: createCustomizedEnvelope({
+          id: 82,
+          clientId: 93,
+          method: "Runtime.call",
+          params: { value: true },
+          sessionId: 3,
+          type: "App",
+        }),
       })
     );
     const routedEnvelope = JSON.parse(runtime.state.sendMessageCalls[1]);
@@ -2547,7 +2445,7 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(runtime.state.sendMessageCalls[0], rawWifiMessage);
     assert.strictEqual(runtime.state.sendMessageCalls.length, 2);
     assert.strictEqual(runtime.state.closeCalls, 1);
-    assert.deepStrictEqual(JSON.parse(result).result, {
+    assert.deepStrictEqual(JSON.parse(result.data.data.message).result, {
       value: "runtime-result",
     });
     assert.deepStrictEqual(driver.state.sendMessageCalls, []);
@@ -2793,7 +2691,7 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(calls, 2);
   });
 
-  it("sendMessageToWeb returns when websocket is disabled or the server has not started", async function () {
+  it("sendMessage web broadcast returns when websocket is disabled or the server has not started", async function () {
     const disabled = createHost({
       enableWebSocket: false,
     });
@@ -2803,16 +2701,54 @@ describe("MultiplexerHost", function () {
 
     await disabled.host.handleControlRpc(
       1,
-      createRpcRequest("sendMessageToWeb", {
+      createRpcRequest("sendMessage", {
+        target: "web",
+        clientId: -1,
         message: "hello",
       })
     );
     await enabled.host.handleControlRpc(
       1,
-      createRpcRequest("sendMessageToWeb", {
+      createRpcRequest("sendMessage", {
+        target: "web",
+        clientId: -1,
         message: "hello",
       })
     );
+  });
+
+  it("sendMessage web target sends to the specified Driver instead of an App runtime", async function () {
+    const { host } = createHost({
+      enableWebSocket: true,
+    });
+    const { controller, state } = createWebSocketControllerState();
+    host.webSocketController = controller;
+
+    await host.handleControlRpc(
+      1,
+      createRpcRequest("sendMessage", {
+        target: "web",
+        clientId: -1,
+        message: { event: "broadcast" },
+      })
+    );
+    await host.handleControlRpc(
+      1,
+      createRpcRequest("sendMessage", {
+        target: "web",
+        clientId: 42,
+        message: "targeted",
+      })
+    );
+
+    assert.deepStrictEqual(state.webMessages, [
+      { kind: "broadcast", message: '{"event":"broadcast"}' },
+      {
+        kind: "targeted",
+        webClientId: 42,
+        message: "targeted",
+      },
+    ]);
   });
 
   it("coalesces concurrent ListSession queries and targets a fresh SessionList cache hit to one websocket frontend", function () {
@@ -2966,12 +2902,7 @@ describe("MultiplexerHost", function () {
     });
 
     for (let controlId = 1; controlId <= frontendCount; controlId++) {
-      host.sendMessageToApp(
-        client.clientId(),
-        request,
-        undefined,
-        controlId
-      );
+      host.sendMessageToApp(client.clientId(), request, undefined, controlId);
     }
 
     assert.strictEqual(client.state.sendMessageCalls.length, frontendCount);
@@ -3024,18 +2955,10 @@ describe("MultiplexerHost", function () {
     });
 
     for (let controlId = 1; controlId <= frontendCount; controlId++) {
-      host.sendMessageToApp(
-        client.clientId(),
-        request,
-        undefined,
-        controlId
-      );
+      host.sendMessageToApp(client.clientId(), request, undefined, controlId);
     }
     for (const outbound of client.state.sendMessageCalls) {
-      host.handlePhysicalMessage(
-        client.clientId(),
-        JSON.stringify(outbound)
-      );
+      host.handlePhysicalMessage(client.clientId(), JSON.stringify(outbound));
     }
 
     assert.strictEqual(controlServer.broadcasts.length, 0);
@@ -3080,12 +3003,7 @@ describe("MultiplexerHost", function () {
     });
 
     for (let controlId = 1; controlId <= frontendCount; controlId++) {
-      host.sendMessageToApp(
-        client.clientId(),
-        request,
-        undefined,
-        controlId
-      );
+      host.sendMessageToApp(client.clientId(), request, undefined, controlId);
     }
 
     const response = JSON.stringify({
@@ -3364,8 +3282,9 @@ describe("MultiplexerHost", function () {
         controlId: 55,
         event: {
           kind: "event",
-          event: "usb-client-message",
+          event: "client-message",
           data: {
+            source: "usb-runtime",
             id: 22,
             message: JSON.stringify(
               createCustomizedEnvelope({
@@ -3476,7 +3395,11 @@ describe("MultiplexerHost", function () {
     ]);
     assert.deepStrictEqual(
       controlServer.broadcasts.map((event) => event.event),
-      ["usb-client-message", "ws-client-message"]
+      ["client-message", "client-message"]
+    );
+    assert.deepStrictEqual(
+      controlServer.broadcasts.map((event) => event.data.source),
+      ["usb-runtime", "websocket-runtime"]
     );
     assert.strictEqual(controlServer.broadcasts[0].data.id, 31);
     assert.strictEqual(controlServer.broadcasts[1].data.id, 32);
@@ -3600,9 +3523,13 @@ describe("MultiplexerHost", function () {
 
     const pendingControl = host.handleControlRpc(
       77,
-      createRpcRequest("sendCustomizedMessage", {
+      createRpcRequest("sendRawMessage", {
         clientId: 41,
-        method: "Runtime.evaluate",
+        message: createCustomizedEnvelope({
+          id: 83,
+          clientId: 41,
+          method: "Runtime.evaluate",
+        }),
       })
     );
     host.handleControlDisconnected(77);

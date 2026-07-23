@@ -188,7 +188,7 @@ type MultiplexerDiscoveryInfo = {
 3. `MultiplexerDaemonClient`，负责连接 daemon control WebSocket、发送 RPC、接收事件。
 4. 本地 `DriverClient`，以及 device、USB runtime、WiFi runtime 和 WebSocket frontend 镜像 Map。facade 不再创建或持有 connection trace recorder。
 
-如果 `manualConnect` 为 false，构造函数会自动调用 `connectDevices()`。`connectDevices()`、`startWatchAllClients()` 和 daemon 断线后的 desired-state 恢复都会先调用 `reacquireLegacyOwnership`，确保 daemon 重新成为旧 `LatestDriverProcess` owner 后再恢复物理 watcher。
+如果 `manualConnect` 为 false，构造函数会自动调用 `connectDevices()`。Host 会在 `connectDevices()` 和 `startWatchAllClients()` 内部重新获取旧 `LatestDriverProcess` ownership，因此 desired-state 恢复可通过现有 RPC 一并恢复 ownership 和物理 watcher，不再需要单独的 `reacquireLegacyOwnership` RPC。
 
 公开 facade 的当前行为：
 
@@ -196,7 +196,7 @@ type MultiplexerDiscoveryInfo = {
 - `connectUsbClients()` 通过 daemon 启动指定 device 的 runtime client watcher，并把返回 snapshot upsert 成本地 `MultiplexerUsbClient`。
 - `getDevices()`、`getDeviceUsbClients()`、`getAllUsbClients()` 从本地镜像读取，必要时等待本地事件。
 - `startWSServer()` 通过 daemon 启动 WebSocket server，并把返回的 `WebSocketServerInfo` 同步成本地兼容字段 `wssPort`、`wssHost`、`roomId`、`wss.wssPath`。
-- facade 调用 `startWSServer()` 后成为 WebSocket 状态 requester：Host 会向它定向同步当前 WebSocket snapshot、后续 app/frontend 生命周期事件以及 `ws-client-message` / `ws-web-message`；未请求 WebSocket 服务的 facade 不消费这些状态。
+- facade 调用 `startWSServer()` 后成为 WebSocket 状态 requester：Host 会向它定向同步当前及后续 WebSocket snapshot，并发送 source 为 `websocket-runtime` 或 `websocket-driver` 的 `client-message`；未请求 WebSocket 服务的 facade 不消费这些状态。
 - `getAllWebsocketAppClients()` 和 `getAllAppClients()` 通过 `MultiplexerWebSocketClient` 代理继续暴露 WiFi runtime；代理的发送和关闭操作会转成 daemon RPC。
 - `sendMessageToWeb()`、`sendMessageToApp()` 仍保留原调用方式，但实际转发给 daemon。
 - `disableAllClients()` 和 `addDeviceManager()` 在 Multiplexer-only facade 中不再操作物理对象，只记录 warning。
@@ -284,21 +284,19 @@ control RPC 当前由 `ControlRpcMethod` 定义：
 | RPC                        | 作用                                                                      |
 | -------------------------- | ------------------------------------------------------------------------- |
 | `connectDevices`           | 启动物理设备发现，返回设备 snapshot                                       |
-| `getDevices`               | 从 daemon 当前物理连接读取设备 snapshot                                   |
 | `connectUsbClients`        | 启动指定设备的 runtime client watcher，返回 client snapshot               |
-| `startWatchClient`         | 对单个 device 启动 runtime client watcher                                 |
-| `stopWatchClient`          | 停止单个 device 的 runtime client watcher 并清理该 device 的 watcher 状态 |
+| `startWatchClient`         | 启动指定设备的 runtime client watcher                                     |
+| `stopWatchClient`          | 停止指定设备的 runtime client watcher，但不主动断开设备                   |
 | `disconnectDevice`         | 断开指定 device                                                           |
-| `reacquireLegacyOwnership` | 让 daemon 重新声明旧 `LatestDriverProcess` owner                          |
 | `shutdownDaemon`           | 请求 daemon 主动停止，用于 replacement/yield                              |
 | `startWSServer`            | 在 daemon 内启动 WebSocket server                                         |
-| `startWatchAllClients`     | 对当前所有设备启动 runtime client watcher                                 |
-| `sendMessageToWeb`         | 广播消息到 WebSocket Driver frontend                                      |
-| `sendMessageToApp`         | 从 control 或 WebSocket frontend 发送消息到 runtime                       |
-| `sendCustomizedMessage`    | 构造 Customized CDP/App 请求并等待回包                                    |
+| `startWatchAllClients`     | 启动当前及后续设备的 runtime client watcher                               |
+| `stopWatchAllClients`      | 停止全部 watcher，并关闭后续设备的自动 watcher                            |
 | `sendRawMessage`           | 透传原始 request-response 消息到 `PhysicalConnector.sendRawMessage`       |
-| `sendMessage`              | 透传 fire-and-forget 消息到 runtime                                       |
+| `sendMessage`              | 统一发送到 App runtime、指定 Web Driver 或全部 Web Driver                 |
 | `closeClient`              | 关闭指定 runtime client                                                   |
+
+单设备 watcher 使用独立的 `startWatchClient({ deviceId })` 与 `stopWatchClient({ deviceId })`，`deviceId` 必须非空。全部设备 watcher 使用 `startWatchAllClients({ force? })` 与 `stopWatchAllClients({})`；停止全部 watcher 后，显式调用任一 start RPC 可以再次开启。`sendMessage` 固定使用 `{ target: "app" | "web", clientId, message }`；`target: "web"` 时 `clientId: -1` 表示广播，App 不支持 `-1`。
 
 RPC 请求和响应都带 `kind`、`id`，请求可带 `meta.protocolVersion`、`clientVersion`、`capabilities`。`MultiplexerDaemonClient` 默认 RPC 超时是 5000ms。RPC 的 operation `timeout` 为正数时，实际超时取 `max(rpcTimeout, timeout + 1000ms)`；没有 operation timeout 时继续使用默认 RPC 超时，不按 method 做特殊判断。
 
@@ -309,33 +307,25 @@ RPC 请求和响应都带 `kind`、`id`，请求可带 `meta.protocolVersion`、
 ```text
 snapshot
 legacy-ownership-changed
-device-connected
-device-disconnected
-client-connected
-client-disconnected
-usb-client-message
-ws-client-message
-ws-web-message
-websocket-app-client-connected
-websocket-app-client-disconnected
-websocket-web-client-connected
-websocket-web-client-disconnected
+client-message
 ```
 
-每个 control 连接建立后，Host 会先向该 control id 发送一次 `snapshot`。物理 device、USB runtime 生命周期和 legacy ownership 更新会广播给已连接的 controls。runtime 路由策略不区分 transport：USB/WiFi 共用 id 恢复、route lookup、定向回包、未知 response 丢弃和 notification 广播逻辑，只有 control event 名不同，USB 使用 `usb-client-message`，WiFi 使用 `ws-client-message`。原始 WebSocket `ws-web-message` 以及 WebSocket app/frontend 生命周期事件只对请求过 `startWSServer` 的 facade 可见，未请求 server 的 facade 会过滤共享 WebSocket 状态/event。如果一个已经连接的 control 请求复用共享 WebSocket server，Host 会立刻向它补发最新定向 snapshot，使已存在的 WiFi runtimes 立即进入本地镜像。
+每个 control 连接建立后，Host 会先向该 control id 发送一次 `snapshot`。物理 device、USB runtime、WebSocket runtime 和 WebSocket Driver 的生命周期变化全部通过新 snapshot 表示，不再发送独立生命周期 ControlEvent；Connector 对连续快照做差分并在本地发出兼容公开事件。连接按 device 先于 runtime 的依赖顺序上报，同一快照批量移除时 runtime/WebSocket Client 先于 device。
+
+runtime 路由策略不区分 transport：USB/WiFi 共用 id 恢复、route lookup、定向回包、未知 response 丢弃和 notification 广播逻辑。所有消息统一使用 `client-message`，通过 `source: "usb-runtime" | "websocket-runtime" | "websocket-driver"` 区分来源。WebSocket snapshot 和消息只对请求过 `startWSServer` 的 facade 可见；复用共享 WebSocket server 时，Host 会立即向 requester 补发最新定向 snapshot。
 
 Connection trace 完全由 daemon 持有，不属于 `snapshot` 或 control 协议。`MultiplexerHost` 是唯一 owner：它只根据 `connectionTrace` 创建 `ConnectionTraceRecorder`，把同一实例传给自己创建的 `PhysicalConnector`，记录整条链路的连接事实，并负责关闭 recorder；不会复用注入 `PhysicalConnector` 上或外部 `traceRecorder` option 中的 recorder。除旧版已有的 device、runtime 和 WebSocket client 连接事实外，Host 还会记录 daemon 启停与关闭触发原因、control socket 建连/断连、共享 WebSocket server 启停，以及 legacy ownership 获取/丢失；control socket 事件携带 `controlId` 和变化后的活动连接数，server 与 ownership 事件携带对应端点或 owner 元数据。Connector facade 不再提供 `getConnectionTrace()` 或 `onConnectionTrace()`，daemon 也不提供 trace 查询、订阅 RPC 或 trace control event。Recorder 自身已有的 buffer、listener 和查询能力暂时保留为 daemon 内部能力，但不跨进程暴露。
 
 Trace 配置是 daemon 启动级全局配置。真正首次启动 daemon 的 Connector 决定 `connectionTrace`；后续 Connector 只会复用已有 daemon，在 daemon 重启前不能替换 recorder 配置。daemon 仍按照原 `ConnectionTraceOptions` 规则结合 `process.env.DriverConnectionTracePath` 构造 recorder，因此 option 和环境变量均未提供 output 时默认不启用。字符串形式的 `connectionTrace.output` 会先转成绝对路径，再序列化给 daemon；`WritableStream` 对进程内 `PhysicalConnector` 仍然有效，但无法跨 Multiplexer 进程边界，因此 facade 会忽略该 output、输出 warning，并继续传递其他 trace options。`MultiplexerDaemonManager` 会在 daemon 启动参数序列化前明确移除 `traceRecorder`，daemon entry 也会拒绝人为传入的 recorder 实例。
 
-`DebugRouterConnector.applyHostEvent()` 会把实际收到的 event 同步到本地镜像，并继续按旧事件名对外 `emit`，例如 `device-connected`、`client-connected`、`app-client-connected`、`usb-client-message`。
+`DebugRouterConnector.applyHostEvent()` 会把 snapshot 同步到本地镜像，并将统一 `client-message` 的 source 映射回 `usb-client-message`、`ws-client-message`、`ws-web-message` 等兼容公开事件；Connector 对外事件面保持不变。
 
 ## 9. connector 侧镜像对象
 
 `MultiplexerDevice` 是 connector 进程内的设备代理对象。它保存 daemon snapshot，并通过 RPC 操作 daemon 内真实 device：
 
-- `startWatchClient()` -> `startWatchClient`
-- `stopWatchClient()` -> `stopWatchClient`
+- `startWatchClient()` -> `startWatchClient({ deviceId })`
+- `stopWatchClient()` -> `stopWatchClient({ deviceId })`
 - `disConnect()` -> `disconnectDevice`
 - `getHost()` 默认返回 snapshot host，缺省时返回 `127.0.0.1`
 
@@ -350,16 +340,17 @@ Trace 配置是 daemon 启动级全局配置。真正首次启动 daemon 的 Con
 - `sendClientMessage()`
 - `on()` / `once()` / `off()` / `onAllEvents()`
 
-其中发送类方法都会转成 daemon RPC。`handleMessage()` 只处理来自 daemon 的 `usb-client-message` event：CDP/App notification 会按 method 触发本地事件，request-response 回包由 daemon 侧 route 表处理。
+其中发送类方法都会转成 daemon RPC。`handleMessage()` 只处理 source 为 `usb-runtime` 的 `client-message`：CDP/App notification 会按 method 触发本地事件，request-response 回包由 daemon 侧 route 表处理。
 
 `MultiplexerWebSocketClient` 是 connector 进程内对 daemon 真实 WebSocket client 的兼容代理。它从 `WebSocketClientSnapshot` 更新 `id`、`type` 和 `raw_info`，但不持有真实 socket；`sendMessage()`、`sendCustomizedMessage()` 和 `close()` 都通过 daemon RPC 操作真实 WiFi runtime。Driver 类型的代理还保留 `handleListClients()` 行为，用 facade 当前的 WiFi/USB 镜像生成兼容 `ClientList`。
 
 本地镜像同步规则：
 
-1. 收到 `snapshot` 时，以 snapshot 为准同步 device、USB client Map；对于请求过 WebSocket 服务的 facade，同时同步 WebSocket app/frontend Map，并移除 snapshot 中不存在的本地对象。
-2. 收到 device、USB client 或 requester-scoped WebSocket connected event 时 upsert 对应本地对象。
-3. 收到对应断开 event 时删除本地对象并发出兼容事件。
-4. daemon control socket 断开时清空 device、USB client 和已缓存的 WebSocket client 镜像，并调度 desired-state 恢复。
+1. 收到 `snapshot` 时，先 upsert device、USB client Map；对于请求过 WebSocket 服务的 facade，同时 upsert WebSocket app/frontend Map。
+2. 对比前后快照，对新增对象发出兼容连接事件。
+3. 对缺失对象按 runtime/WebSocket Client 先于 device 的依赖顺序删除并发出兼容断开事件。
+4. 收到 `client-message` 时，根据 source 映射到对应兼容消息事件面。
+5. daemon control socket 断开时清空 device、USB client 和已缓存的 WebSocket client 镜像，并调度 desired-state 恢复。
 
 ## 10. WebSocket frontend 路径
 
@@ -384,7 +375,7 @@ WebSocket client 握手流程：
 消息路径：
 
 - Driver frontend 发 `Customized` 到目标 runtime：`WebSocketClient` 取出目标 `client_id`，调用 `WebSocketController.sendMessageToApp(id, message, fromWebClientId)`，再进入 `MultiplexerHost.handleWebSocketMessage()`；Host 按 client id 选择 WebSocket app client（WiFi）或 `PhysicalConnector.usbClients`（USB）。
-- WebSocket app client 发消息到 frontend：`WebSocketClient` 调用 `handleWebSocketAppMessage()`，Host 再交给 transport-independent 的 `handleRuntimeMessage(appClientId, message, "ws-client-message")`；WiFi/USB 共用路由逻辑，但保留不同的 control event 名称。
+- WebSocket app client 发消息到 frontend：`WebSocketClient` 调用 `handleWebSocketAppMessage()`，Host 再交给 transport-independent 的 `handleRuntimeMessage(appClientId, message, "websocket-runtime")`；WiFi/USB 共用路由逻辑，并保留明确的消息 source。
 - `ClientList` 由 Driver frontend 触发，返回当前 WebSocket app clients 和 USB runtime clients；USB runtime client 会带 `network: "USB"`，WebSocket app client 会带 `network: "WiFi"`。
 
 `sendMessageToWebClient(webClientId, message)` 用于把命中的 request-response 回包只发回原始 Driver frontend；`sendMessageToWeb(message)` 用于 SDK 主动事件广播。
@@ -395,7 +386,7 @@ WebSocket client 握手流程：
 - 在 daemon 当前路径中，Driver frontend 发起的 `Customized` 会带 `fromWebClientId`，因此进入 Host 统一路由。
 - Host 统一出站路由同时支持 `PhysicalConnector.usbClients` 和 `WebSocketController.websocketAppClients`，两类 runtime 共用 message id 重写、pending route 和定向回包逻辑。
 - Driver frontend client 永远不是 control `sendMessage`、`sendCustomizedMessage` 或 `closeClient` RPC 的合法 runtime 目标。runtime lookup 只检查 WebSocket app clients 和 USB clients，因此即使 Driver/app client id 重复，也不会把 runtime 操作误发给 Driver。
-- runtime `Customized` 消息以已注册的 WebSocket app client id 为准，因此 payload 缺少 `sender` 时仍会进入统一路由；该分支不会在 `WebSocketClient` 中提前重复发出 `ws-client-message`，而是由 Host 对路由结果或广播结果只发出一次。非 `Customized` runtime 消息和 Driver 消息仍走 requester-scoped raw event 路径。
+- runtime `Customized` 消息以已注册的 WebSocket app client id 为准，因此 payload 缺少 `sender` 时仍会进入统一路由；该分支不会在 `WebSocketClient` 中提前重复发出消息，而是由 Host 对路由结果或广播结果只发出一次。非 `Customized` runtime 消息和 Driver 消息使用 requester-scoped `client-message`，由 source 区分。
 - WebSocket 解析或路由异常由 client handler 捕获并记录，不会向外抛出或主动关闭 socket。连接关闭时 controller 还会核对来源 client 实例后再删除 Map 项，避免数字 id 相同的 WiFi runtime 与 Driver frontend 互相误删。
 - WebSocket app client 会出现在 `ClientList` 中，并通过 snapshot 和生命周期事件同步给请求 WebSocket 服务的 Connector facade。Driver 到 WiFi、Connector 到 WiFi、定向回包、原始事件、断开清理和 late-requester snapshot 恢复均已有 integration/E2E 测试覆盖。
 
@@ -452,10 +443,10 @@ route 默认超时 10000ms。control route 超时时会 reject 对应 Promise；
 1. Host 收到 runtime 消息后解析 Customized payload。
 2. 如果 payload 中有安全整数 id，先按全局 id 从 `PendingRouteTable` 中 `take()` route。
 3. 命中 route 时，把 id 改回 frontend 原始 id，并把 sender/client_id 改回真实 runtime client id。
-4. control route 如果带 `resolve`，说明来自 `sendCustomizedMessage()`，直接 resolve 被提取出的 Customized 内层 message；否则向指定 control 定向发送对应 event：USB 使用 `usb-client-message`，WiFi 使用 `ws-client-message`。
+4. control route 如果带 `resolve`，说明来自 `sendCustomizedMessage()`，直接 resolve 被提取出的 Customized 内层 message；否则向指定 control 定向发送 `client-message`，source 为 `usb-runtime` 或 `websocket-runtime`。
 5. WebSocket route 通过 `sendMessageToWebClient(webClientId, message)` 只发回原始 Driver frontend。
 6. 如果消息带 response id 但没有命中 route，直接丢弃，避免回包泄漏给其他 frontend。
-7. 如果消息没有 response id，视为 SDK 主动事件：改写 runtime client id 后广播给 WebSocket Driver frontend，并向 controls 广播 transport 对应的 event；USB 使用 `usb-client-message`，WiFi 使用 `ws-client-message`。
+7. 如果消息没有 response id，视为 SDK 主动事件：改写 runtime client id 后广播给 WebSocket Driver frontend，并向 controls 广播带对应 runtime source 的 `client-message`。
 
 route 清理：
 
@@ -548,7 +539,7 @@ SDK runtime 消息进入 Host 后：
 1. 有有效 response id 的消息仍优先走 `PendingRouteTable`，本模块不参与。
 2. 无 response id 的消息完成 runtime client id 改写。
 3. Host 调用 `recordNotification(clientId, message)` 判断本次消息是否需要记忆化；命中当前已声明的 `SessionList` 时刷新缓存并解除 `ListSession` pending。
-4. 当前这条 SDK 通知仍按统一逻辑广播：所有 Driver frontend 都会收到，controls 则收到对应的 `usb-client-message` 或 `ws-client-message`，确保首次查询和查询合并期间的相关请求方都能收到结果。
+4. 当前这条 SDK 通知仍按统一逻辑广播：所有 Driver frontend 都会收到，controls 则收到带对应 runtime source 的 `client-message`，确保首次查询和查询合并期间的相关请求方都能收到结果。
 5. 后续 TTL 内的新查询命中缓存时，只定向返回当前请求方，不再次广播。
 
 对应时序为：
@@ -624,7 +615,7 @@ Host 丢失 legacy owner 后会：
 
 这里不再构造人为的空 snapshot，也不额外执行一套 ownership-loss 专用的镜像清理。Host 会先从 daemon 侧权威 Map 中清除 device 和 runtime，再把这些 Map 与保留的 Driver Map 一起序列化为 snapshot；WebSocket `ClientList` 读取的也是同一份 USB/WiFi runtime Map，facade 再以该 snapshot 对齐全部镜像。因此即使 WiFi runtime 与 Driver frontend 使用相同的数字 client id，`ClientList`、Host snapshot 和 facade 镜像也会收敛到同一份真实状态。
 
-connector 后续在 `connectDevices()`、`startWatchAllClients()` 或 desired-state 恢复前会调用 `reacquireLegacyOwnership`，让 daemon 重新声明 owner。这里不是回到旧 connector 实现，而是让 daemon 重新获得旧物理层需要的 owner 文件。
+connector 后续调用 `connectDevices()`、`startWatchAllClients()` 或执行 desired-state 恢复时，Host 会在对应 `connectDevices` / `startWatchAllClients` RPC 内部重新声明 owner。这里不是回到旧 connector 实现，而是让 daemon 重新获得旧物理层需要的 owner 文件，也不再暴露单独的 ownership RPC。
 
 ## 13. 容灾、恢复和退出
 
@@ -724,7 +715,7 @@ Host 收到带有效 response id、但 route 表中没有匹配项的 runtime �
 1. facade 读取已有 `daemon.json`。
 2. discovery fresh 且 health ok，直接连接已有 control server。
 3. 新 control 连接收到当前 snapshot。
-4. 后续物理 device 和 USB runtime 生命周期事件由 daemon 广播给所有 control clients。USB/WiFi runtime 共用处理策略，但分别发出 `usb-client-message` 和 `ws-client-message`；WebSocket 生命周期状态只对请求过 `startWSServer()` 的 facade 可见。
+4. 后续物理 device 和 USB runtime 生命周期变化由 daemon 以 snapshot 广播给所有 control clients。USB/WiFi runtime 共用处理策略，并发出带对应 source 的 `client-message`；WebSocket 生命周期状态只对请求过 `startWSServer()` 的 facade 可见。
 
 ### 15.3 Driver frontend 请求 runtime
 
@@ -740,7 +731,7 @@ Host 收到带有效 response id、但 route 表中没有匹配项的 runtime �
 1. USB 或 WiFi runtime 发出无 request id 的 CDP/App notification。
 2. Host 识别为主动事件，改写 runtime client id。
 3. 如果 WebSocket 已启用，Host 广播给所有 Driver frontend。
-4. Host 对两种 transport 使用相同广播逻辑，但 USB 发出 `usb-client-message`，WiFi 发出 `ws-client-message`。
+4. Host 对两种 transport 使用相同广播逻辑，并发出 source 为 `usb-runtime` 或 `websocket-runtime` 的 `client-message`。
 5. connector facade 将 USB event 分发到对应 `MultiplexerUsbClient` 的本地事件系统；WiFi event 经 requester-state 过滤后通过 WebSocket event surface 暴露。
 
 ### 15.5 并发 `ListSession` 查询

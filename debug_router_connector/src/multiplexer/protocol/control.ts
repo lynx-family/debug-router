@@ -1,4 +1,4 @@
-// Copyright 2024 The Lynx Authors. All rights reserved.
+// Copyright 2026 The Lynx Authors. All rights reserved.
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -54,18 +54,14 @@ export type WebSocketServerInfo = {
 
 export type ControlRpcMethod =
   | "connectDevices"
-  | "getDevices"
   | "connectUsbClients"
   | "startWatchClient"
   | "stopWatchClient"
   | "disconnectDevice"
-  | "reacquireLegacyOwnership"
   | "shutdownDaemon"
   | "startWSServer"
   | "startWatchAllClients"
-  | "sendMessageToWeb"
-  | "sendMessageToApp"
-  | "sendCustomizedMessage"
+  | "stopWatchAllClients"
   | "sendRawMessage"
   | "sendMessage"
   | "closeClient";
@@ -75,10 +71,6 @@ export type ControlRpcParams = {
     timeout?: number;
     serial?: string | null;
     isAutoListenClients?: boolean;
-  };
-  getDevices: {
-    timeout?: number;
-    serial?: string | null;
   };
   connectUsbClients: {
     deviceId: string;
@@ -95,34 +87,35 @@ export type ControlRpcParams = {
   disconnectDevice: {
     deviceId: string;
   };
-  reacquireLegacyOwnership: Record<string, never>;
+  /**
+   * Requests a graceful daemon shutdown, normally for replacement or explicit
+   * Connector shutdown.
+   */
   shutdownDaemon: {
     reason?: string;
   };
-  startWSServer: Record<string, never>;
+  startWSServer: {
+    // This RPC has no parameters.
+  };
   startWatchAllClients: {
     force?: boolean;
   };
-  sendMessageToWeb: {
-    message: string;
+  stopWatchAllClients: {
+    // This RPC has no parameters.
   };
-  sendMessageToApp: {
-    id: number;
-    message: string;
-    fromWebClientId?: number;
-  };
-  sendCustomizedMessage: {
-    clientId: number;
-    method: string;
-    params?: object | string;
-    sessionId?: number;
-    type?: string;
-  };
+  /**
+   * Sends a request-response message to one USB or WiFi Runtime and returns
+   * the complete raw response envelope.
+   */
   sendRawMessage: {
     clientId: number;
     message: RequireMessageType;
   };
+  /**
+   * Sends a fire-and-forget message to an App Runtime or WebSocket Driver.
+   */
   sendMessage: {
+    target: "app" | "web";
     clientId: number;
     message: unknown;
   };
@@ -133,18 +126,14 @@ export type ControlRpcParams = {
 
 export type ControlRpcResult = {
   connectDevices: DeviceSnapshot[];
-  getDevices: DeviceSnapshot[];
   connectUsbClients: ClientSnapshot[];
   startWatchClient: void;
   stopWatchClient: void;
   disconnectDevice: void;
-  reacquireLegacyOwnership: void;
   shutdownDaemon: void;
   startWSServer: WebSocketServerInfo | undefined;
   startWatchAllClients: void;
-  sendMessageToWeb: void;
-  sendMessageToApp: void;
-  sendCustomizedMessage: string;
+  stopWatchAllClients: void;
   sendRawMessage: ResponseMessageType;
   sendMessage: void;
   closeClient: void;

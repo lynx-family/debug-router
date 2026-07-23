@@ -1,4 +1,4 @@
-// Copyright 2024 The Lynx Authors. All rights reserved.
+// Copyright 2026 The Lynx Authors. All rights reserved.
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -19,6 +19,7 @@ import {
   MultiplexerDiscoveryInfo,
   Snapshot,
   isControlEvent,
+  isControlRpcRequest,
   isControlRpcResponse,
   isRecord,
   parseJsonValue,
@@ -107,6 +108,7 @@ export class MultiplexerDaemonClient {
     method: M,
     params: ControlRpcParams[M],
   ): Promise<ControlRpcResult[M]> {
+    this.assertValidRpcParams(method, params);
     await this.connect();
     return this.callConnected(method, params);
   }
@@ -116,13 +118,12 @@ export class MultiplexerDaemonClient {
     method: M,
     params: ControlRpcParams[M],
   ): Promise<ControlRpcResult[M]> {
+    this.assertValidRpcParams(method, params);
     await this.connectToDiscovery(discovery);
     return this.callConnected(method, params);
   }
 
-  async connectToDiscovery(
-    discovery: MultiplexerDiscoveryInfo,
-  ): Promise<void> {
+  async connectToDiscovery(discovery: MultiplexerDiscoveryInfo): Promise<void> {
     this.closed = false;
     this.connecting = this.connectInternal(discovery).finally(() => {
       this.connecting = null;
@@ -153,9 +154,7 @@ export class MultiplexerDaemonClient {
       const timer = setTimeout(() => {
         this.pendingRpc.delete(id);
         reject(
-          new Error(
-            `Timed out waiting for multiplexer RPC ${method} response`,
-          ),
+          new Error(`Timed out waiting for multiplexer RPC ${method} response`),
         );
       }, this.getRpcTimeout(method, params));
 
@@ -181,6 +180,22 @@ export class MultiplexerDaemonClient {
         pending.reject(error);
       });
     });
+  }
+
+  private assertValidRpcParams<M extends ControlRpcMethod>(
+    method: M,
+    params: ControlRpcParams[M],
+  ): void {
+    const request: ControlRpcRequest<M> = {
+      kind: "rpc",
+      id: 0,
+      method,
+      params,
+      meta: this.createMeta(),
+    };
+    if (!isControlRpcRequest(request)) {
+      throw new Error(`Invalid multiplexer RPC ${method} params`);
+    }
   }
 
   subscribe(listener: (event: ControlEvent) => void): () => void {
@@ -342,9 +357,7 @@ export class MultiplexerDaemonClient {
       this.pendingRpc.delete(responseId);
       clearTimeout(pending.timer);
       pending.reject(
-        new Error(
-          `Invalid multiplexer RPC ${pending.method} response payload`,
-        ),
+        new Error(`Invalid multiplexer RPC ${pending.method} response payload`),
       );
       return;
     }
@@ -431,7 +444,10 @@ export class MultiplexerDaemonClient {
     return `ws://127.0.0.1:${discovery.controlPort}${this.controlPath}`;
   }
 
-  private reportUnknownControlMessage(value: unknown, messageText: string): void {
+  private reportUnknownControlMessage(
+    value: unknown,
+    messageText: string,
+  ): void {
     const messageKind = isRecord(value) ? value.kind : undefined;
     const messageEvent = isRecord(value) ? value.event : undefined;
     const messageId = isRecord(value) ? value.id : undefined;

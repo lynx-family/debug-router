@@ -398,8 +398,6 @@ describe("multiplexer protocol validation", function () {
         { timeout: 1000, serial: null, isAutoListenClients: true },
       ],
       ["connectDevices", { serial: "device-1" }],
-      ["getDevices", { timeout: 1000, serial: "device-1" }],
-      ["getDevices", { serial: null }],
       [
         "connectUsbClients",
         {
@@ -413,31 +411,12 @@ describe("multiplexer protocol validation", function () {
       ["startWatchClient", { deviceId: "device-1" }],
       ["stopWatchClient", { deviceId: "device-1" }],
       ["disconnectDevice", { deviceId: "device-1" }],
-      ["reacquireLegacyOwnership", {}],
       ["shutdownDaemon", {}],
       ["shutdownDaemon", { reason: "daemon-protocol-older-than-connector" }],
       ["startWSServer", {}],
+      ["startWatchAllClients", {}],
       ["startWatchAllClients", { force: true }],
-      ["sendMessageToWeb", { message: "hello" }],
-      ["sendMessageToApp", { id: 1, message: "hello", fromWebClientId: 2 }],
-      [
-        "sendCustomizedMessage",
-        {
-          clientId: 1,
-          method: "Runtime.evaluate",
-          params: { expression: "1+1" },
-          sessionId: 2,
-          type: "CDP",
-        },
-      ],
-      [
-        "sendCustomizedMessage",
-        {
-          clientId: 1,
-          method: "Runtime.evaluate",
-          params: "payload",
-        },
-      ],
+      ["stopWatchAllClients", {}],
       [
         "sendRawMessage",
         {
@@ -455,8 +434,14 @@ describe("multiplexer protocol validation", function () {
           message: createCustomizedRequestMessage(),
         },
       ],
-      ["sendMessage", { clientId: 1, message: null }],
-      ["sendMessage", { clientId: 1, message: undefined }],
+      ["sendMessage", { target: "app", clientId: 1, message: null }],
+      ["sendMessage", { target: "app", clientId: 1, message: undefined }],
+      ["sendMessage", { target: "web", clientId: -1, message: "broadcast" }],
+      ["sendMessage", { target: "web", clientId: 2, message: "targeted" }],
+      [
+        "sendMessage",
+        { target: "web", clientId: -1, message: { event: "broadcast" } },
+      ],
       ["closeClient", { clientId: 1 }],
     ];
 
@@ -492,8 +477,6 @@ describe("multiplexer protocol validation", function () {
       createRpcRequest("connectDevices", { timeout: "1000" }),
       createRpcRequest("connectDevices", { serial: 1 }),
       createRpcRequest("connectDevices", { isAutoListenClients: "true" }),
-      createRpcRequest("getDevices", { timeout: "1000" }),
-      createRpcRequest("getDevices", { serial: 1 }),
       createRpcRequest("connectUsbClients", {}),
       createRpcRequest("connectUsbClients", { deviceId: 1 }),
       createRpcRequest("connectUsbClients", {
@@ -504,36 +487,38 @@ describe("multiplexer protocol validation", function () {
         deviceId: "device-1",
         clientName: 1,
       }),
+      createRpcRequest("setClientWatch", {
+        action: "start",
+        deviceId: "device-1",
+      }),
       createRpcRequest("startWatchClient", {}),
       createRpcRequest("startWatchClient", { deviceId: 1 }),
+      createRpcRequest("startWatchClient", { deviceId: "" }),
+      createRpcRequest("startWatchClient", {
+        deviceId: "device-1",
+        action: "start",
+      }),
       createRpcRequest("stopWatchClient", {}),
       createRpcRequest("stopWatchClient", { deviceId: 1 }),
+      createRpcRequest("stopWatchClient", { deviceId: "" }),
+      createRpcRequest("stopWatchClient", {
+        deviceId: "device-1",
+        action: "stop",
+      }),
+      createRpcRequest("startWatchAllClients", { force: "true" }),
+      createRpcRequest("stopWatchAllClients", { force: false }),
       createRpcRequest("disconnectDevice", {}),
       createRpcRequest("disconnectDevice", { deviceId: 1 }),
       createRpcRequest("shutdownDaemon", { reason: 1 }),
-      createRpcRequest("startWatchAllClients", { force: "true" }),
-      createRpcRequest("sendMessageToWeb", { message: 1 }),
-      createRpcRequest("sendMessageToApp", { id: "1", message: "hello" }),
-      createRpcRequest("sendMessageToApp", { id: 1, message: 1 }),
+      createRpcRequest("startWSServer", { unexpected: true }),
+      createRpcRequest("sendMessageToWeb", { message: "hello" }),
       createRpcRequest("sendMessageToApp", {
         id: 1,
         message: "hello",
-        fromWebClientId: "2",
-      }),
-      createRpcRequest("sendCustomizedMessage", {
-        clientId: "1",
-        method: "Runtime.evaluate",
-      }),
-      createRpcRequest("sendCustomizedMessage", { clientId: 1, method: 1 }),
-      createRpcRequest("sendCustomizedMessage", {
-        clientId: 1,
-        method: "Runtime.evaluate",
-        params: 1,
       }),
       createRpcRequest("sendCustomizedMessage", {
         clientId: 1,
         method: "Runtime.evaluate",
-        sessionId: "2",
       }),
       createRpcRequest("sendRawMessage", { clientId: "1", message: {} }),
       createRpcRequest("sendRawMessage", {
@@ -555,6 +540,29 @@ describe("multiplexer protocol validation", function () {
         },
       }),
       createRpcRequest("sendMessage", { message: "hello" }),
+      createRpcRequest("sendMessage", {
+        target: "app",
+        message: "hello",
+      }),
+      createRpcRequest("sendMessage", {
+        target: "app",
+        clientId: -1,
+        message: "hello",
+      }),
+      createRpcRequest("sendMessage", {
+        target: "web",
+        message: "hello",
+      }),
+      createRpcRequest("sendMessage", {
+        target: "web",
+        clientId: "2",
+        message: "hello",
+      }),
+      createRpcRequest("sendMessage", {
+        target: "unknown",
+        clientId: 1,
+        message: "hello",
+      }),
       createRpcRequest("closeClient", { clientId: "1" }),
       createRpcRequest("getConnectionTrace", {}),
       createRpcRequest("subscribeConnectionTrace", {}),
@@ -569,18 +577,14 @@ describe("multiplexer protocol validation", function () {
   it("validates all method-aware control RPC response result branches", function () {
     const validCases = [
       createRpcResponse([createDeviceSnapshot()], "connectDevices"),
-      createRpcResponse([createDeviceSnapshot()], "getDevices"),
       createRpcResponse([createClientSnapshot()], "connectUsbClients"),
       createRpcResponse(undefined, "startWatchClient"),
       createRpcResponse(undefined, "stopWatchClient"),
+      createRpcResponse(undefined, "startWatchAllClients"),
+      createRpcResponse(undefined, "stopWatchAllClients"),
       createRpcResponse(undefined, "disconnectDevice"),
-      createRpcResponse(undefined, "reacquireLegacyOwnership"),
       createRpcResponse(undefined, "shutdownDaemon"),
       createRpcResponse(undefined, "startWSServer"),
-      createRpcResponse(undefined, "startWatchAllClients"),
-      createRpcResponse(undefined, "sendMessageToWeb"),
-      createRpcResponse(undefined, "sendMessageToApp"),
-      createRpcResponse("ok", "sendCustomizedMessage"),
       createRpcResponse(createRegisterResponse(), "sendRawMessage"),
       createRpcResponse(
         { event: "Customized", data: { ok: true } },
@@ -618,7 +622,6 @@ describe("multiplexer protocol validation", function () {
       ],
       createRpcResponse([createDeviceSnapshot()], "connectUsbClients"),
       createRpcResponse([createClientSnapshot()], "connectDevices"),
-      createRpcResponse(1, "sendCustomizedMessage"),
       createRpcResponse(
         { event: "Register", data: { id: 1, info: { app: 1 } } },
         "sendRawMessage"
@@ -716,23 +719,21 @@ describe("multiplexer protocol validation", function () {
         previousOwnerPid: 200,
         reason: "legacy-preempted",
       }),
-      createEvent("device-connected", createDeviceSnapshot()),
-      createEvent("device-disconnected", { serial: "device-1" }),
-      createEvent("client-connected", createClientSnapshot()),
-      createEvent("client-disconnected", { id: 1 }),
-      createEvent("usb-client-message", { id: 1, message: "hello" }),
-      createEvent("ws-client-message", { id: 1, message: "hello" }),
-      createEvent("ws-web-message", { id: 1, message: "hello" }),
-      createEvent(
-        "websocket-app-client-connected",
-        createWebSocketClientSnapshot()
-      ),
-      createEvent("websocket-app-client-disconnected", { id: 1 }),
-      createEvent(
-        "websocket-web-client-connected",
-        createWebSocketClientSnapshot()
-      ),
-      createEvent("websocket-web-client-disconnected", { id: 1 }),
+      createEvent("client-message", {
+        source: "usb-runtime",
+        id: 1,
+        message: "hello",
+      }),
+      createEvent("client-message", {
+        source: "websocket-runtime",
+        id: 1,
+        message: "hello",
+      }),
+      createEvent("client-message", {
+        source: "websocket-driver",
+        id: 1,
+        message: "hello",
+      }),
     ];
 
     for (const event of validEvents) {
@@ -771,27 +772,39 @@ describe("multiplexer protocol validation", function () {
         ownerPid: 100,
         reason: "unknown",
       }),
-      createEvent("device-connected", { ...createDeviceSnapshot(), serial: 1 }),
-      createEvent("device-disconnected", { serial: 1 }),
-      createEvent("client-connected", { ...createClientSnapshot(), id: "1" }),
-      createEvent("client-disconnected", { id: "1" }),
-      createEvent("usb-client-message", { id: "1", message: "hello" }),
-      createEvent("ws-client-message", { id: 1, message: 1 }),
-      createEvent("ws-web-message", null),
-      createEvent("websocket-app-client-connected", {
-        ...createWebSocketClientSnapshot(),
-        network: "USB",
+      createEvent("client-message", {
+        source: "unknown",
+        id: 1,
+        message: "hello",
       }),
-      createEvent("websocket-app-client-disconnected", { id: "1" }),
+      createEvent("client-message", {
+        source: "usb-runtime",
+        id: "1",
+        message: "hello",
+      }),
+      createEvent("client-message", {
+        source: "websocket-runtime",
+        id: 1,
+        message: 1,
+      }),
+      createEvent("client-message", null),
+      createEvent("device-connected", createDeviceSnapshot()),
+      createEvent("device-disconnected", { serial: "device-1" }),
+      createEvent("client-connected", createClientSnapshot()),
+      createEvent("client-disconnected", { id: 1 }),
+      createEvent("usb-client-message", { id: 1, message: "hello" }),
+      createEvent("ws-client-message", { id: 1, message: "hello" }),
+      createEvent("ws-web-message", { id: 1, message: "hello" }),
+      createEvent(
+        "websocket-app-client-connected",
+        createWebSocketClientSnapshot()
+      ),
+      createEvent("websocket-app-client-disconnected", { id: 1 }),
       createEvent(
         "websocket-web-client-connected",
-        (() => {
-          const snapshot = createWebSocketClientSnapshot();
-          delete snapshot.raw_info;
-          return snapshot;
-        })()
+        createWebSocketClientSnapshot()
       ),
-      createEvent("websocket-web-client-disconnected", { id: "1" }),
+      createEvent("websocket-web-client-disconnected", { id: 1 }),
       createEvent("connection-trace-node", {
         sequence: 1,
         event: "client_watch_started",

@@ -39,6 +39,9 @@ function createDaemonClient(overrides = {}) {
       if (overrides.rejectMethods?.has(method)) {
         throw new Error(`${method} rejected`);
       }
+      if (overrides.call) {
+        return overrides.call(method, params);
+      }
       if (overrides.results?.has(method)) {
         return overrides.results.get(method);
       }
@@ -96,6 +99,21 @@ function createCustomizedMessage(type, data) {
       sender: 0,
     },
   });
+}
+
+function createCustomizedResponse(type, message, clientId) {
+  return {
+    event: "Customized",
+    data: {
+      type,
+      data: {
+        client_id: clientId,
+        session_id: -1,
+        message,
+      },
+      sender: 0,
+    },
+  };
 }
 
 describe("multiplexer client mirror sync", function () {
@@ -271,10 +289,19 @@ describe("multiplexer client mirror sync", function () {
       },
     };
     const daemonClient = createDaemonClient({
-      results: new Map([
-        ["sendCustomizedMessage", "customized-result"],
-        ["sendRawMessage", rawResult],
-      ]),
+      call(method, params) {
+        if (method !== "sendRawMessage") {
+          return `${method}-result`;
+        }
+        if (params.message.event === "Initialize") {
+          return rawResult;
+        }
+        return createCustomizedResponse(
+          params.message.data.type,
+          "customized-result",
+          params.clientId
+        );
+      },
     });
     const client = MultiplexerUsbClient.fromSnapshot(
       createClientSnapshot(),
@@ -306,25 +333,50 @@ describe("multiplexer client mirror sync", function () {
     assert.strictEqual(customized, "customized-result");
     assert.deepStrictEqual(raw, rawResult);
     assert.strictEqual(app, "customized-result");
-    assert.deepStrictEqual(daemonClient.state.calls, [
-      {
-        method: "closeClient",
-        params: {
-          clientId: 1,
-        },
+    const calls = daemonClient.state.calls;
+    assert.deepStrictEqual(calls[0], {
+      method: "closeClient",
+      params: {
+        clientId: 1,
       },
+    });
+    assert.strictEqual(calls[1].method, "sendRawMessage");
+    assert.strictEqual(calls[1].params.clientId, 1);
+    assert.deepStrictEqual(
       {
-        method: "sendCustomizedMessage",
-        params: {
-          clientId: 1,
-          method: "Runtime.evaluate",
-          params: {
-            expression: "1 + 1",
+        ...calls[1].params.message,
+        data: {
+          ...calls[1].params.message.data,
+          data: {
+            ...calls[1].params.message.data.data,
+            message: {
+              ...calls[1].params.message.data.data.message,
+              id: "<generated>",
+            },
           },
-          sessionId: 7,
-          type: "CDP",
         },
       },
+      {
+        event: "Customized",
+        data: {
+          type: "CDP",
+          data: {
+            client_id: -1,
+            session_id: 7,
+            message: {
+              id: "<generated>",
+              method: "Runtime.evaluate",
+              params: {
+                expression: "1 + 1",
+              },
+            },
+          },
+          sender: 0,
+        },
+      }
+    );
+    assert(Number.isSafeInteger(calls[1].params.message.data.data.message.id));
+    assert.deepStrictEqual(calls.slice(2, 4), [
       {
         method: "sendRawMessage",
         params: {
@@ -335,25 +387,50 @@ describe("multiplexer client mirror sync", function () {
       {
         method: "sendMessage",
         params: {
+          target: "app",
           clientId: 1,
           message: {
             event: "Ping",
           },
         },
       },
+    ]);
+    assert.strictEqual(calls[4].method, "sendRawMessage");
+    assert.strictEqual(calls[4].params.clientId, 1);
+    assert.deepStrictEqual(
       {
-        method: "sendCustomizedMessage",
-        params: {
-          clientId: 1,
-          method: "App.call",
-          params: {
-            value: true,
+        ...calls[4].params.message,
+        data: {
+          ...calls[4].params.message.data,
+          data: {
+            ...calls[4].params.message.data.data,
+            message: {
+              ...calls[4].params.message.data.data.message,
+              id: "<generated>",
+            },
           },
-          sessionId: -1,
-          type: "App",
         },
       },
-    ]);
+      {
+        event: "Customized",
+        data: {
+          type: "App",
+          data: {
+            client_id: -1,
+            session_id: -1,
+            message: {
+              id: "<generated>",
+              method: "App.call",
+              params: {
+                value: true,
+              },
+            },
+          },
+          sender: 0,
+        },
+      }
+    );
+    assert(Number.isSafeInteger(calls[4].params.message.data.data.message.id));
   });
 
   it("does not throw when fire-and-forget MultiplexerUsbClient RPCs reject", async function () {
@@ -440,7 +517,16 @@ describe("multiplexer client mirror sync", function () {
 
   it("forwards MultiplexerWebSocketClient compatibility APIs to daemon RPC", async function () {
     const daemonClient = createDaemonClient({
-      results: new Map([["sendCustomizedMessage", "wifi-result"]]),
+      call(method, params) {
+        if (method === "sendRawMessage") {
+          return createCustomizedResponse(
+            params.message.data.type,
+            "wifi-result",
+            params.clientId
+          );
+        }
+        return `${method}-result`;
+      },
     });
     const client = MultiplexerWebSocketClient.fromSnapshot(
       createWebSocketClientSnapshot(),
@@ -458,36 +544,87 @@ describe("multiplexer client mirror sync", function () {
     await nextTick();
 
     assert.strictEqual(customized, "wifi-result");
-    assert.deepStrictEqual(daemonClient.state.calls, [
+    assert.deepStrictEqual(daemonClient.state.calls.slice(0, 2), [
       {
         method: "closeClient",
         params: { clientId: 100 },
       },
       {
         method: "sendMessage",
-        params: { clientId: 100, message: "raw-message" },
+        params: {
+          target: "app",
+          clientId: 100,
+          message: "raw-message",
+        },
+      },
+    ]);
+    const rawCall = daemonClient.state.calls[2];
+    assert.strictEqual(rawCall.method, "sendRawMessage");
+    assert.strictEqual(rawCall.params.clientId, 100);
+    assert.deepStrictEqual(
+      {
+        ...rawCall.params.message,
+        data: {
+          ...rawCall.params.message.data,
+          data: {
+            ...rawCall.params.message.data.data,
+            message: {
+              ...rawCall.params.message.data.data.message,
+              id: "<generated>",
+            },
+          },
+        },
       },
       {
-        method: "sendCustomizedMessage",
-        params: {
-          clientId: 100,
-          method: "Runtime.evaluate",
-          params: { expression: "1 + 1" },
-          sessionId: 7,
+        event: "Customized",
+        data: {
           type: "CDP",
+          data: {
+            client_id: -1,
+            session_id: 7,
+            message: {
+              id: "<generated>",
+              method: "Runtime.evaluate",
+              params: { expression: "1 + 1" },
+            },
+          },
+          sender: 0,
+        },
+      }
+    );
+    assert(Number.isSafeInteger(rawCall.params.message.data.data.message.id));
+  });
+
+  it("routes MultiplexerWebSocketClient Driver messages to the target Web client", async function () {
+    const daemonClient = createDaemonClient();
+    const client = MultiplexerWebSocketClient.fromSnapshot(
+      createWebSocketClientSnapshot({ id: 101, type: "Driver" }),
+      daemonClient
+    );
+
+    client.sendMessage("driver-message");
+    await nextTick();
+
+    assert.deepStrictEqual(daemonClient.state.calls, [
+      {
+        method: "sendMessage",
+        params: {
+          target: "web",
+          clientId: 101,
+          message: "driver-message",
         },
       },
     ]);
   });
 
-  it("forwards sendCustomizedMessage RPC errors without legacy rewrapping", async function () {
+  it("forwards sendRawMessage RPC errors without legacy rewrapping", async function () {
     const daemonClient = createDaemonClient({
-      rejectMethods: new Set(["sendCustomizedMessage"]),
+      rejectMethods: new Set(["sendRawMessage"]),
     });
     daemonClient.call = async (method, params) => {
       daemonClient.state.calls.push({ method, params });
       throw new Error(
-        "Timed out waiting for multiplexer RPC sendCustomizedMessage response"
+        "Timed out waiting for multiplexer RPC sendRawMessage response"
       );
     };
     const client = MultiplexerWebSocketClient.fromSnapshot(
@@ -505,7 +642,7 @@ describe("multiplexer client mirror sync", function () {
       (error) => {
         assert.strictEqual(
           error.message,
-          "Timed out waiting for multiplexer RPC sendCustomizedMessage response"
+          "Timed out waiting for multiplexer RPC sendRawMessage response"
         );
         return true;
       }

@@ -1,4 +1,4 @@
-// Copyright 2024 The Lynx Authors. All rights reserved.
+// Copyright 2026 The Lynx Authors. All rights reserved.
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -15,7 +15,6 @@ import { defaultLogger } from "../../utils/logger";
 import { WebSocketController } from "../../websocket/WebSocketServer";
 import { WebSocketClient } from "../../websocket/WebSocketConnection";
 import {
-  SocketEvent,
   ClientDescription,
   DebugerRouterDriverEvents,
   DeviceDescription,
@@ -58,7 +57,6 @@ export type PendingTargetSeed =
       kind: "control";
       controlId: number;
       clientId: number;
-      responseMode?: "customized-message" | "raw-message";
       resolve?: (value: unknown) => void;
       reject?: (error: Error) => void;
     }
@@ -151,13 +149,13 @@ export class MultiplexerHost
   private readonly activeWebSocketDriverIds = new Set<number>();
   private readonly legacyOwnershipGuard: LegacyOwnershipGuard;
   private physicalDiscoveryGeneration = 0;
+  private clientWatchGeneration = 0;
   private legacyOwnershipAttached = false;
   private idleTimer: NodeJS.Timeout | null = null;
   private idleTimeoutHandler: (() => void | Promise<void>) | undefined;
   private shutdownHandler: (() => void | Promise<void>) | undefined;
   private runtimeIdleTimeout: number | undefined;
   private nextGlobalMessageId = 1;
-  private nextControlMessageId = 1;
   private started = false;
   private shutdownRequested = false;
   private daemonStopReason: string | undefined;
@@ -174,11 +172,6 @@ export class MultiplexerHost
       void this.ensureClientDiscovery(device.serial);
     }
 
-    this.broadcast({
-      kind: "event",
-      event: "device-connected",
-      data: this.serializeDevice(device),
-    });
     this.webSocketController?.sendDeviceList();
     this.publishSnapshot();
   };
@@ -190,13 +183,6 @@ export class MultiplexerHost
 
     this.clearClientDiscoveryForDevice(device.serial);
 
-    this.broadcast({
-      kind: "event",
-      event: "device-disconnected",
-      data: {
-        serial: device.serial,
-      },
-    });
     this.webSocketController?.sendDeviceList();
     this.publishSnapshot();
   };
@@ -207,11 +193,6 @@ export class MultiplexerHost
     }
 
     this.connectionTraceRecorder?.recordAppClientConnected(client);
-    this.broadcast({
-      kind: "event",
-      event: "client-connected",
-      data: this.serializeClient(client),
-    });
     this.webSocketController?.sendClientList();
     this.publishSnapshot();
   };
@@ -228,13 +209,6 @@ export class MultiplexerHost
       new Error(`Multiplexer runtime client ${id} disconnected`),
     );
 
-    this.broadcast({
-      kind: "event",
-      event: "client-disconnected",
-      data: {
-        id,
-      },
-    });
     this.webSocketController?.sendClientList();
     this.publishSnapshot();
   };
@@ -470,28 +444,30 @@ export class MultiplexerHost
         return this.connectDevices(
           message.params as ControlRpcParams["connectDevices"],
         );
-      case "getDevices":
-        return this.getDeviceSnapshots(
-          message.params as ControlRpcParams["getDevices"],
-        );
       case "connectUsbClients":
         return this.connectUsbClients(
           message.params as ControlRpcParams["connectUsbClients"],
         );
       case "startWatchClient":
         return this.startWatchClient(
-          message.params as ControlRpcParams["startWatchClient"],
+          (message.params as ControlRpcParams["startWatchClient"]).deviceId,
         );
       case "stopWatchClient":
         return this.stopWatchClient(
-          message.params as ControlRpcParams["stopWatchClient"],
+          (message.params as ControlRpcParams["stopWatchClient"]).deviceId,
+        );
+      case "startWatchAllClients":
+        return this.startWatchAllClients(
+          message.params as ControlRpcParams["startWatchAllClients"],
+        );
+      case "stopWatchAllClients":
+        return this.stopWatchAllClients(
+          message.params as ControlRpcParams["stopWatchAllClients"],
         );
       case "disconnectDevice":
         return this.disconnectDevice(
           message.params as ControlRpcParams["disconnectDevice"],
         );
-      case "reacquireLegacyOwnership":
-        return this.reacquireLegacyOwnership();
       case "shutdownDaemon":
         this.requestDaemonShutdown(
           (message.params as ControlRpcParams["shutdownDaemon"]).reason,
@@ -499,34 +475,13 @@ export class MultiplexerHost
         return undefined;
       case "startWSServer":
         return this.startWSServer(controlId);
-      case "startWatchAllClients":
-        return this.startWatchAllClients(
-          message.params as ControlRpcParams["startWatchAllClients"],
-        );
-      case "sendMessageToWeb":
-        return this.sendMessageToWeb(
-          (message.params as ControlRpcParams["sendMessageToWeb"]).message,
-        );
-      case "sendMessageToApp":
-        return this.sendMessageToApp(
-          (message.params as ControlRpcParams["sendMessageToApp"]).id,
-          (message.params as ControlRpcParams["sendMessageToApp"]).message,
-          (message.params as ControlRpcParams["sendMessageToApp"])
-            .fromWebClientId,
-          controlId,
-        );
-      case "sendCustomizedMessage":
-        return this.sendCustomizedMessage(
-          message.params as ControlRpcParams["sendCustomizedMessage"],
-          controlId,
-        );
       case "sendRawMessage":
         return this.sendRawMessage(
           message.params as ControlRpcParams["sendRawMessage"],
           controlId,
         );
       case "sendMessage":
-        this.sendClientMessage(
+        this.sendMessageFromConnector(
           message.params as ControlRpcParams["sendMessage"],
           controlId,
         );
@@ -559,54 +514,39 @@ export class MultiplexerHost
       case "ws-web-message":
         this.sendToWebSocketRequesters({
           kind: "event",
-          event,
-          data: payload as { id: number; message: string },
-        } as ControlEvent);
+          event: "client-message",
+          data: {
+            source:
+              event === "ws-client-message"
+                ? "websocket-runtime"
+                : "websocket-driver",
+            ...(payload as { id: number; message: string }),
+          },
+        });
         break;
       case "websocket-app-client-connected":
         this.connectionTraceRecorder?.recordWebsocketAppClientConnected(
           payload as WebSocketClient,
         );
-        this.sendToWebSocketRequesters({
-          kind: "event",
-          event,
-          data: this.serializeWebSocketClient(payload as WebSocketClient),
-        } as ControlEvent);
         break;
       case "websocket-web-client-connected":
         this.connectionTraceRecorder?.recordWebsocketWebClientConnected(
           payload as WebSocketClient,
         );
-        this.sendToWebSocketRequesters({
-          kind: "event",
-          event,
-          data: this.serializeWebSocketClient(payload as WebSocketClient),
-        } as ControlEvent);
         break;
       case "websocket-app-client-disconnected":
         this.connectionTraceRecorder?.recordWebsocketAppClientDisconnected(
           payload as number,
         );
-        this.sendToWebSocketRequesters({
-          kind: "event",
-          event,
-          data: { id: payload as number },
-        } as ControlEvent);
         break;
       case "websocket-web-client-disconnected":
         this.connectionTraceRecorder?.recordWebsocketWebClientDisconnected(
           payload as number,
         );
-        this.sendToWebSocketRequesters({
-          kind: "event",
-          event,
-          data: { id: payload as number },
-        } as ControlEvent);
         break;
       default:
-        // Generic app lifecycle events are derived by each Connector from the
-        // websocket-specific events to preserve the legacy event order without
-        // duplicating notifications across the control channel.
+        // Generic app lifecycle events and their websocket-specific variants
+        // are derived by each Connector from snapshots.
         break;
     }
   }
@@ -724,7 +664,7 @@ export class MultiplexerHost
   }
 
   handleWebSocketAppMessage(appClientId: number, message: string): void {
-    this.handleRuntimeMessage(appClientId, message, "ws-client-message");
+    this.handleRuntimeMessage(appClientId, message, "websocket-runtime");
   }
 
   handleWebSocketClientConnected(clientId: number, type?: string): void {
@@ -765,22 +705,20 @@ export class MultiplexerHost
   }
 
   handlePhysicalMessage(clientId: number, message: string): void {
-    this.handleRuntimeMessage(clientId, message, "usb-client-message");
+    this.handleRuntimeMessage(clientId, message, "usb-runtime");
   }
 
   private handleRuntimeMessage(
     clientId: number,
     message: string,
-    event: "usb-client-message" | "ws-client-message",
+    source: "usb-runtime" | "websocket-runtime",
   ): void {
     const routed = this.restoreInboundMessage(message, clientId);
     if (routed) {
       if (routed.target.kind === "control") {
         if (routed.target.resolve) {
           routed.target.resolve(
-            routed.target.responseMode === "raw-message"
-              ? parseRawResponse(routed.externalMessage, routed.clientId)
-              : extractCustomizedMessage(routed.message),
+            parseRawResponse(routed.externalMessage, routed.clientId),
           );
         } else {
           // Connector facade events are a legacy compatibility surface.
@@ -788,8 +726,9 @@ export class MultiplexerHost
           // exposing the sender/client_id rewrite used for Web routing.
           this.sendToControl(routed.target.controlId, {
             kind: "event",
-            event,
+            event: "client-message",
             data: {
+              source,
               id: routed.clientId,
               message: routed.externalMessage,
             },
@@ -822,8 +761,9 @@ export class MultiplexerHost
     }
     this.broadcast({
       kind: "event",
-      event,
+      event: "client-message",
       data: {
+        source,
         id: clientId,
         message,
       },
@@ -933,6 +873,7 @@ export class MultiplexerHost
   private async connectDevices(
     params: ControlRpcParams["connectDevices"],
   ): Promise<DeviceSnapshot[]> {
+    this.legacyOwnershipGuard.reacquire();
     const generation = this.physicalDiscoveryGeneration;
     await this.ensureDeviceDiscovery(
       params.isAutoListenClients ?? true,
@@ -946,7 +887,7 @@ export class MultiplexerHost
   }
 
   private async getDeviceSnapshots(
-    params: ControlRpcParams["getDevices"],
+    params: Pick<ControlRpcParams["connectDevices"], "timeout" | "serial">,
   ): Promise<DeviceSnapshot[]> {
     this.assertPhysicalDiscoveryCurrent(this.physicalDiscoveryGeneration);
     const devices = await this.physicalConnector.getDevices(
@@ -975,20 +916,29 @@ export class MultiplexerHost
     return snapshots;
   }
 
-  private async startWatchClient(
-    params: ControlRpcParams["startWatchClient"],
-  ): Promise<void> {
+  /**
+   * Starts client discovery for one device without changing whether newly
+   * discovered devices should be watched automatically.
+   */
+  private async startWatchClient(deviceId: string): Promise<void> {
     const generation = this.physicalDiscoveryGeneration;
+    const clientWatchGeneration = this.clientWatchGeneration;
     await this.ensureDeviceDiscovery(false, generation);
-    await this.ensureClientDiscovery(params.deviceId, generation);
+    await this.ensureClientDiscovery(
+      deviceId,
+      generation,
+      clientWatchGeneration,
+    );
   }
 
-  private async stopWatchClient(
-    params: ControlRpcParams["stopWatchClient"],
-  ): Promise<void> {
-    this.clearClientDiscoveryForDevice(params.deviceId);
+  /**
+   * Stops client discovery for one device. The device remains connected and
+   * can be watched again through startWatchClient.
+   */
+  private async stopWatchClient(deviceId: string): Promise<void> {
+    this.clearClientDiscoveryForDevice(deviceId);
 
-    const device = this.physicalConnector.devices.get(params.deviceId);
+    const device = this.physicalConnector.devices.get(deviceId);
     if (!device) {
       return;
     }
@@ -1005,10 +955,6 @@ export class MultiplexerHost
     }
 
     device.disConnect();
-  }
-
-  private reacquireLegacyOwnership(): void {
-    this.legacyOwnershipGuard.reacquire();
   }
 
   private async ensureDeviceDiscovery(
@@ -1055,8 +1001,12 @@ export class MultiplexerHost
   private async ensureClientDiscovery(
     deviceId: string,
     generation: number = this.physicalDiscoveryGeneration,
+    clientWatchGeneration: number = this.clientWatchGeneration,
   ): Promise<void> {
     this.assertPhysicalDiscoveryCurrent(generation);
+    if (clientWatchGeneration !== this.clientWatchGeneration) {
+      return;
+    }
     if (this.clientDiscoveryStartedDeviceIds.has(deviceId)) {
       return;
     }
@@ -1070,15 +1020,24 @@ export class MultiplexerHost
     const starting = Promise.resolve()
       .then(async () => {
         this.assertPhysicalDiscoveryCurrent(generation);
+        if (clientWatchGeneration !== this.clientWatchGeneration) {
+          return;
+        }
         const device = this.physicalConnector.devices.get(deviceId);
         if (!device) {
           return;
         }
 
-        await this.physicalConnector.startWatchClient(device, () =>
-          this.isPhysicalDiscoveryCurrent(generation),
+        await this.physicalConnector.startWatchClient(
+          device,
+          () =>
+            this.isPhysicalDiscoveryCurrent(generation) &&
+            clientWatchGeneration === this.clientWatchGeneration,
         );
-        if (this.isPhysicalDiscoveryCurrent(generation)) {
+        if (
+          this.isPhysicalDiscoveryCurrent(generation) &&
+          clientWatchGeneration === this.clientWatchGeneration
+        ) {
           this.clientDiscoveryStartedDeviceIds.add(deviceId);
         }
       })
@@ -1113,13 +1072,47 @@ export class MultiplexerHost
   }
 
   private async startWatchAllClients(
-    params: ControlRpcParams["startWatchAllClients"],
+    _params: ControlRpcParams["startWatchAllClients"],
   ): Promise<void> {
+    this.legacyOwnershipGuard.reacquire();
     const generation = this.physicalDiscoveryGeneration;
+    const clientWatchGeneration = this.clientWatchGeneration;
     this.assertPhysicalDiscoveryCurrent(generation);
     this.allClientWatchersRequested = true;
     await this.ensureDeviceDiscovery(false, generation);
-    await this.ensureClientDiscoveryForCurrentDevices(generation);
+    if (clientWatchGeneration !== this.clientWatchGeneration) {
+      return;
+    }
+    await this.ensureClientDiscoveryForCurrentDevices(
+      generation,
+      clientWatchGeneration,
+    );
+    this.publishClientSnapshot();
+  }
+
+  /**
+   * Stops every current client watcher and prevents both all-client and
+   * connectDevices auto-watch modes from starting watchers for later devices.
+   * Explicit watcher RPCs can enable discovery again.
+   */
+  private async stopWatchAllClients(
+    _params: ControlRpcParams["stopWatchAllClients"],
+  ): Promise<void> {
+    this.clientWatchGeneration++;
+    this.allClientWatchersRequested = false;
+    this.deviceDiscoveryAutoListensClients = false;
+
+    await Promise.allSettled(
+      Array.from(this.clientDiscoveryStartingByDeviceId.values()),
+    );
+    this.clientDiscoveryStartingByDeviceId.clear();
+    this.clientDiscoveryStartedDeviceIds.clear();
+
+    await Promise.all(
+      Array.from(this.physicalConnector.devices.values(), (device) =>
+        device.stopWatchClient(),
+      ),
+    );
     this.publishClientSnapshot();
   }
 
@@ -1198,44 +1191,6 @@ export class MultiplexerHost
     return info;
   }
 
-  private createControlMessageId(): number {
-    while (this.pendingRoutes.has(this.nextControlMessageId)) {
-      this.nextControlMessageId++;
-    }
-    if (this.nextControlMessageId >= Number.MAX_SAFE_INTEGER) {
-      this.nextControlMessageId = 1;
-    }
-    return this.nextControlMessageId++;
-  }
-
-  private async sendCustomizedMessage(
-    params: ControlRpcParams["sendCustomizedMessage"],
-    controlId: number,
-  ): Promise<string> {
-    const originalId = this.createControlMessageId();
-    const message = createCustomizedMessage({
-      id: originalId,
-      method: params.method,
-      params: normalizeCustomizedParams(params.params),
-      sessionId: params.sessionId ?? -1,
-      type: params.type ?? "CDP",
-    });
-
-    return new Promise<string>((resolve, reject) => {
-      try {
-        this.sendMessageToRuntime(params.clientId, message, {
-          kind: "control",
-          controlId,
-          clientId: params.clientId,
-          resolve: (value) => resolve(String(value)),
-          reject,
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
   private async sendRawMessage(
     params: ControlRpcParams["sendRawMessage"],
     controlId: number,
@@ -1246,7 +1201,6 @@ export class MultiplexerHost
           kind: "control",
           controlId,
           clientId: params.clientId,
-          responseMode: "raw-message",
           resolve: (value) => resolve(value as ResponseMessageType),
           reject,
         });
@@ -1282,18 +1236,28 @@ export class MultiplexerHost
     return this.getWebSocketAppClients()?.get(clientId);
   }
 
-  private sendClientMessage(
+  private sendMessageFromConnector(
     params: ControlRpcParams["sendMessage"],
     controlId: number,
   ): void {
-    this.sendMessageToApp(
-      params.clientId,
+    const message =
       typeof params.message === "string"
         ? params.message
-        : JSON.stringify(params.message),
-      undefined,
+        : JSON.stringify(params.message);
+    if (params.target === "web") {
+      if (params.clientId === -1) {
+        this.sendMessageToWeb(message);
+      } else {
+        this.sendMessageToWebClient(params.clientId, message);
+      }
+      return;
+    }
+
+    this.sendMessageToRuntime(params.clientId, message, {
+      kind: "control",
       controlId,
-    );
+      clientId: params.clientId,
+    });
   }
 
   private closeClient(clientId: number): void {
@@ -1415,12 +1379,13 @@ export class MultiplexerHost
 
   private async ensureClientDiscoveryForCurrentDevices(
     generation: number = this.physicalDiscoveryGeneration,
+    clientWatchGeneration: number = this.clientWatchGeneration,
   ): Promise<void> {
     this.assertPhysicalDiscoveryCurrent(generation);
     const deviceIds = Array.from(this.physicalConnector.devices.keys());
     await Promise.all(
       deviceIds.map((deviceId) =>
-        this.ensureClientDiscovery(deviceId, generation),
+        this.ensureClientDiscovery(deviceId, generation, clientWatchGeneration),
       ),
     );
   }
@@ -1564,19 +1529,16 @@ export class MultiplexerHost
   ): void {
     if (target.kind === "control") {
       if (target.resolve) {
-        target.resolve(
-          target.responseMode === "raw-message"
-            ? parseRawResponse(message, clientId)
-            : extractCustomizedMessage(message),
-        );
+        target.resolve(parseRawResponse(message, clientId));
         return;
       }
       this.sendToControl(target.controlId, {
         kind: "event",
-        event: this.getWebSocketAppClients()?.has(clientId)
-          ? "ws-client-message"
-          : "usb-client-message",
+        event: "client-message",
         data: {
+          source: this.getWebSocketAppClients()?.has(clientId)
+            ? "websocket-runtime"
+            : "usb-runtime",
           id: clientId,
           message,
         },
@@ -1749,16 +1711,6 @@ function cloneJsonValue(value: unknown): unknown {
   }
 }
 
-function normalizeCustomizedParams(
-  params: ControlRpcParams["sendCustomizedMessage"]["params"],
-): Object {
-  if (params === undefined) {
-    return "";
-  }
-
-  return params as Object;
-}
-
 function parseJsonMessage(message: string): any {
   try {
     return JSON.parse(message);
@@ -1776,31 +1728,6 @@ function parseJsonMessageOrNull(message: string): any | null {
   } catch (_error) {
     return null;
   }
-}
-
-function createCustomizedMessage(option: {
-  id: number;
-  method: string;
-  params: Object;
-  sessionId: number;
-  type: string;
-}): object {
-  return {
-    event: SocketEvent.Customized,
-    data: {
-      type: option.type,
-      data: {
-        client_id: -1,
-        session_id: option.sessionId,
-        message: {
-          id: option.id,
-          method: option.method,
-          params: option.params,
-        },
-      },
-      sender: 0,
-    },
-  };
 }
 
 function getCustomizedPayload(data: any): CustomizedPayload | null {
@@ -1860,18 +1787,6 @@ function hasResponseId(message: string): boolean {
 
   const customized = getCustomizedPayload(data);
   return getValidMessageId(customized?.message) !== null;
-}
-
-function extractCustomizedMessage(message: string): string {
-  const data = parseJsonMessageOrNull(message);
-  const customized = data ? getCustomizedPayload(data) : null;
-  if (!customized) {
-    return message;
-  }
-
-  return typeof customized.container.message === "string"
-    ? customized.container.message
-    : JSON.stringify(customized.container.message);
 }
 
 function parseRawResponse(

@@ -248,23 +248,31 @@ export class DebugRouterConnector {
 
   startWatchAllClients(force: boolean = true): void {
     this.desiredWatchAllClientsForce = force;
-    void this.reacquireLegacyOwnership()
-      .then(() => this.ensureWatchAllClientsStarted(force))
+    void this.ensureWatchAllClientsStarted(force).catch((error: Error) => {
+      defaultLogger.warn(
+        `Failed to start multiplexer client watchers: ${error.message}`,
+      );
+      this.scheduleDesiredRecovery();
+    });
+  }
+
+  stopWatchAllClients(): void {
+    this.desiredWatchAllClientsForce = undefined;
+    void this.daemonClient
+      .call("stopWatchAllClients", {})
+      .then(() => {
+        this.watchAllClientsStarted = false;
+      })
       .catch((error: Error) => {
         defaultLogger.warn(
-          `Failed to start multiplexer client watchers: ${error.message}`,
+          `Failed to stop multiplexer client watchers: ${error.message}`,
         );
-        this.scheduleDesiredRecovery();
       });
   }
 
   private async ensureWatchAllClientsStarted(force: boolean): Promise<void> {
     await this.daemonClient.call("startWatchAllClients", { force });
     this.watchAllClientsStarted = true;
-  }
-
-  private async reacquireLegacyOwnership(): Promise<void> {
-    await this.daemonClient.call("reacquireLegacyOwnership", {});
   }
 
   private restoreDesiredWatchAllClients(): Promise<void> | undefined {
@@ -294,7 +302,6 @@ export class DebugRouterConnector {
     if (isAutoListenClients) {
       this.desiredDeviceDiscoveryAutoListenClients = true;
     }
-    await this.reacquireLegacyOwnership();
     const snapshots = await this.daemonClient.call("connectDevices", {
       timeout,
       serial,
@@ -523,7 +530,11 @@ export class DebugRouterConnector {
       data.data.data.client_id = -1;
     }
     void this.daemonClient
-      .call("sendMessageToApp", { id, message: JSON.stringify(data) })
+      .call("sendMessage", {
+        target: "app",
+        clientId: id,
+        message: JSON.stringify(data),
+      })
       .catch((error: Error) => {
         defaultLogger.warn(
           `Failed to route websocket message to app through multiplexer host: ${error.message}`,
@@ -555,7 +566,7 @@ export class DebugRouterConnector {
       return;
     }
     void this.daemonClient
-      .call("sendMessageToWeb", { message })
+      .call("sendMessage", { target: "web", clientId: -1, message })
       .catch((error: Error) => {
         defaultLogger.warn(
           `Failed to send multiplexer message to web: ${error.message}`,
@@ -573,7 +584,7 @@ export class DebugRouterConnector {
       return;
     }
     void this.daemonClient
-      .call("sendMessageToApp", { id, message })
+      .call("sendMessage", { target: "app", clientId: id, message })
       .catch((error: Error) => {
         defaultLogger.warn(
           `Failed to send multiplexer message to app: ${error.message}`,
@@ -684,7 +695,6 @@ export class DebugRouterConnector {
       return;
     }
 
-    await this.reacquireLegacyOwnership();
     const snapshots = await this.daemonClient.call("connectDevices", {
       timeout: -1,
       serial: null,
@@ -719,7 +729,9 @@ export class DebugRouterConnector {
   }
 
   applySnapshot(snapshot: Snapshot): void {
-    this.syncDeviceSnapshots(snapshot.devices);
+    const activeDeviceSerials = this.upsertDeviceSnapshotState(
+      snapshot.devices,
+    );
     this.syncClientSnapshots(snapshot.clients);
     if (this.shouldExposeWebSocketState() && snapshot.websocketAppClients) {
       this.syncWebSocketAppSnapshots(snapshot.websocketAppClients);
@@ -727,6 +739,7 @@ export class DebugRouterConnector {
     if (this.shouldExposeWebSocketState() && snapshot.websocketWebClients) {
       this.syncWebSocketWebSnapshots(snapshot.websocketWebClients);
     }
+    this.removeStaleDevices(activeDeviceSerials);
   }
 
   applyHostEvent(event: ControlEvent): void {
@@ -737,83 +750,28 @@ export class DebugRouterConnector {
       case "legacy-ownership-changed":
         this.applyLegacyOwnershipChange(event.data.status);
         break;
-      case "device-connected": {
-        if (!this.isDeviceSnapshotEnabled(event.data)) {
+      case "client-message":
+        if (event.data.source === "usb-runtime") {
+          this.handleUsbMessage(event.data.id, event.data.message);
           break;
         }
-        const device = MultiplexerDevice.fromSnapshot(
-          event.data,
-          this.daemonClient,
+        if (!this.shouldExposeWebSocketState()) {
+          break;
+        }
+        this.emit(
+          event.data.source === "websocket-runtime"
+            ? "ws-client-message"
+            : "ws-web-message",
+          {
+            id: event.data.id,
+            message: event.data.message,
+          } as any,
         );
-        this.registerDevice(device);
-        break;
-      }
-      case "device-disconnected":
-        this.unregisterDeviceInternal(event.data.serial, false);
-        break;
-      case "client-connected": {
-        if (!this.isClientSnapshotEnabled(event.data)) {
-          this.hiddenUsbClientIds.add(event.data.id);
-          break;
-        }
-        this.hiddenUsbClientIds.delete(event.data.id);
-        const client = MultiplexerUsbClient.fromSnapshot(
-          event.data,
-          this.daemonClient,
-        );
-        this.regiserUsbClient(client);
-        break;
-      }
-      case "client-disconnected":
-        this.hiddenUsbClientIds.delete(event.data.id);
-        this.unregisterUsbClientInternal(event.data.id, true);
-        break;
-      case "usb-client-message":
-        this.handleUsbMessage(event.data.id, event.data.message);
-        break;
-      case "ws-client-message":
-        if (!this.shouldExposeWebSocketState()) {
-          break;
-        }
-        this.emit("ws-client-message", event.data as any);
-        break;
-      case "ws-web-message":
-        if (!this.shouldExposeWebSocketState()) {
-          break;
-        }
-        this.emit("ws-web-message", event.data as any);
-        break;
-      case "websocket-app-client-connected":
-        if (!this.shouldExposeWebSocketState()) {
-          break;
-        }
-        this.upsertWebSocketAppSnapshot(event.data, true);
-        break;
-      case "websocket-app-client-disconnected":
-        if (!this.shouldExposeWebSocketState()) {
-          break;
-        }
-        this.websocketAppClients.delete(event.data.id);
-        this.emit("websocket-app-client-disconnected", event.data.id as any);
-        this.emit("app-client-disconnected", event.data.id as any);
-        break;
-      case "websocket-web-client-connected":
-        if (!this.shouldExposeWebSocketState()) {
-          break;
-        }
-        this.upsertWebSocketWebSnapshot(event.data, true);
-        break;
-      case "websocket-web-client-disconnected":
-        if (!this.shouldExposeWebSocketState()) {
-          break;
-        }
-        this.websocketWebClients.delete(event.data.id);
-        this.emit("websocket-web-client-disconnected", event.data.id as any);
         break;
     }
   }
 
-  private syncDeviceSnapshots(snapshots: DeviceSnapshot[]): void {
+  private upsertDeviceSnapshotState(snapshots: DeviceSnapshot[]): Set<string> {
     const enabledSnapshots = snapshots.filter((snapshot) =>
       this.isDeviceSnapshotEnabled(snapshot),
     );
@@ -821,7 +779,10 @@ export class DebugRouterConnector {
       enabledSnapshots.map((snapshot) => snapshot.serial),
     );
     this.upsertDeviceSnapshots(enabledSnapshots);
+    return activeSerials;
+  }
 
+  private removeStaleDevices(activeSerials: Set<string>): void {
     for (const serial of Array.from(this.devices.keys())) {
       if (!activeSerials.has(serial)) {
         this.unregisterDeviceInternal(serial, false);
@@ -987,10 +948,7 @@ export class DebugRouterConnector {
       });
     }
 
-    // The control protocol does not carry a target client kind, and Driver ids
-    // can collide with runtime ids. Reuse the existing Driver broadcast RPC so
-    // handleListClients() cannot accidentally route ClientList to a runtime.
-    this.sendMessageToWeb(
+    webClient.sendMessage(
       JSON.stringify({
         event: "ClientList",
         data,

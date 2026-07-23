@@ -42,8 +42,10 @@ function createRpcRequest(overrides = {}) {
   return {
     kind: "rpc",
     id: 1,
-    method: "sendMessageToWeb",
+    method: "sendMessage",
     params: {
+      target: "web",
+      clientId: -1,
       message: "hello",
     },
     ...overrides,
@@ -178,8 +180,8 @@ describe("MultiplexerControlConnection", function () {
     const { socket, connection } = createConnection();
     const event = {
       kind: "event",
-      event: "client-disconnected",
-      data: { id: 1 },
+      event: "client-message",
+      data: { source: "usb-runtime", id: 1, message: "hello" },
     };
 
     connection.unsubscribe();
@@ -188,14 +190,17 @@ describe("MultiplexerControlConnection", function () {
     connection.subscribe();
     connection.send(event);
 
-    assert.deepStrictEqual(socket.sent.map((item) => JSON.parse(item)), [
-      {
-        kind: "rpc-response",
-        id: 23,
-        ok: true,
-      },
-      event,
-    ]);
+    assert.deepStrictEqual(
+      socket.sent.map((item) => JSON.parse(item)),
+      [
+        {
+          kind: "rpc-response",
+          id: 23,
+          ok: true,
+        },
+        event,
+      ]
+    );
   });
 
   it("does not send when the socket is closed or closing", function () {

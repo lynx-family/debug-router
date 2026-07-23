@@ -138,7 +138,7 @@ describe("multiplexer integration routing isolation", function () {
     const serverInfo = await client.call("startWSServer", {});
     const web = await connectDriverWebSocket(
       `ws://127.0.0.1:${serverInfo.port}/mdevices/page/android`,
-      { app: "driver-control-mix" },
+      { app: "driver-control-mix" }
     );
     context.trackSocket(web.socket);
 
@@ -154,7 +154,10 @@ describe("multiplexer integration routing isolation", function () {
 
     const controlResponse = waitFor(() => {
       return controlEvents.find((event) => {
-        if (event.event !== "usb-client-message") {
+        if (
+          event.event !== "client-message" ||
+          event.data.source !== "usb-runtime"
+        ) {
           return false;
         }
         return (
@@ -165,8 +168,9 @@ describe("multiplexer integration routing isolation", function () {
     }, 2000);
 
     web.socket.send(createCustomizedEnvelope(1, 1, "web-route"));
-    await client.call("sendMessageToApp", {
-      id: 1,
+    await client.call("sendMessage", {
+      target: "app",
+      clientId: 1,
       message: createCustomizedEnvelope(1, 1, "control-route"),
     });
 
@@ -191,7 +195,7 @@ describe("multiplexer integration routing isolation", function () {
         .filter((entry) => entry.event === "client-send-message");
       return (
         sentMessages.filter(
-          (entry) => entry.id === 1 && entry.message?.event === "Customized",
+          (entry) => entry.id === 1 && entry.message?.event === "Customized"
         ).length >= 2
       );
     }, 2000);
@@ -226,27 +230,31 @@ describe("multiplexer integration routing isolation", function () {
     const responseA = waitFor(() =>
       eventsA.find(
         (event) =>
-          event.event === "usb-client-message" &&
+          event.event === "client-message" &&
+          event.data.source === "usb-runtime" &&
           parseCustomizedEnvelope(event.data.message).cdp.result?.params
-            ?.marker === "control-a",
-      ),
+            ?.marker === "control-a"
+      )
     );
     const responseB = waitFor(() =>
       eventsB.find(
         (event) =>
-          event.event === "usb-client-message" &&
+          event.event === "client-message" &&
+          event.data.source === "usb-runtime" &&
           parseCustomizedEnvelope(event.data.message).cdp.result?.params
-            ?.marker === "control-b",
-      ),
+            ?.marker === "control-b"
+      )
     );
 
     await Promise.all([
-      controlA.call("sendMessageToApp", {
-        id: 1,
+      controlA.call("sendMessage", {
+        target: "app",
+        clientId: 1,
         message: createCustomizedEnvelope(1, 1, "control-a"),
       }),
-      controlB.call("sendMessageToApp", {
-        id: 1,
+      controlB.call("sendMessage", {
+        target: "app",
+        clientId: 1,
         message: createCustomizedEnvelope(1, 1, "control-b"),
       }),
     ]);
@@ -261,18 +269,20 @@ describe("multiplexer integration routing isolation", function () {
     assert.strictEqual(
       eventsA.some(
         (event) =>
-          event.event === "usb-client-message" &&
-          event.data.message.includes("control-b"),
+          event.event === "client-message" &&
+          event.data.source === "usb-runtime" &&
+          event.data.message.includes("control-b")
       ),
-      false,
+      false
     );
     assert.strictEqual(
       eventsB.some(
         (event) =>
-          event.event === "usb-client-message" &&
-          event.data.message.includes("control-a"),
+          event.event === "client-message" &&
+          event.data.source === "usb-runtime" &&
+          event.data.message.includes("control-a")
       ),
-      false,
+      false
     );
   });
 
@@ -291,11 +301,11 @@ describe("multiplexer integration routing isolation", function () {
     const connectorB = context.createConnector({ enableWebSocket: true });
     const connectorEventsA = collectConnectorEvents(
       connectorA,
-      "usb-client-message",
+      "usb-client-message"
     );
     const connectorEventsB = collectConnectorEvents(
       connectorB,
-      "usb-client-message",
+      "usb-client-message"
     );
     await Promise.all([
       connectorA.connectDevices(-1, null, true),
@@ -317,15 +327,15 @@ describe("multiplexer integration routing isolation", function () {
       connectorEventsA.find(
         (event) =>
           parseCustomizedEnvelope(event.message).cdp.result?.params?.marker ===
-          "connector-a",
-      ),
+          "connector-a"
+      )
     );
     const connectorResponseB = waitFor(() =>
       connectorEventsB.find(
         (event) =>
           parseCustomizedEnvelope(event.message).cdp.result?.params?.marker ===
-          "connector-b",
-      ),
+          "connector-b"
+      )
     );
     const webResponseA = waitForSocketMessage(webA.socket, (value) => {
       if (value?.event !== "Customized") {
@@ -346,8 +356,14 @@ describe("multiplexer integration routing isolation", function () {
       );
     });
 
-    connectorA.sendMessageToApp(1, createCustomizedEnvelope(1, 1, "connector-a"));
-    connectorB.sendMessageToApp(1, createCustomizedEnvelope(1, 1, "connector-b"));
+    connectorA.sendMessageToApp(
+      1,
+      createCustomizedEnvelope(1, 1, "connector-a")
+    );
+    connectorB.sendMessageToApp(
+      1,
+      createCustomizedEnvelope(1, 1, "connector-b")
+    );
     webA.socket.send(createCustomizedEnvelope(1, 1, "web-a"));
     webB.socket.send(createCustomizedEnvelope(1, 1, "web-b"));
 
@@ -359,28 +375,28 @@ describe("multiplexer integration routing isolation", function () {
     ]);
     assert.deepStrictEqual(
       parseCustomizedEnvelope(eventA.message).cdp.result.params,
-      { marker: "connector-a" },
+      { marker: "connector-a" }
     );
     assert.deepStrictEqual(
       parseCustomizedEnvelope(eventB.message).cdp.result.params,
-      { marker: "connector-b" },
+      { marker: "connector-b" }
     );
     assert.deepStrictEqual(
       parseCustomizedEnvelope(socketA.text).cdp.result.params,
-      { marker: "web-a" },
+      { marker: "web-a" }
     );
     assert.deepStrictEqual(
       parseCustomizedEnvelope(socketB.text).cdp.result.params,
-      { marker: "web-b" },
+      { marker: "web-b" }
     );
 
     assert.strictEqual(
       connectorEventsA.some((event) => event.message.includes("connector-b")),
-      false,
+      false
     );
     assert.strictEqual(
       connectorEventsB.some((event) => event.message.includes("connector-a")),
-      false,
+      false
     );
   });
 
@@ -439,7 +455,7 @@ describe("multiplexer integration routing isolation", function () {
     await waitForClientIds([frontendA, frontendB, frontendC], [1]);
     await waitFor(
       () => connectorA.usbClients.has(1) && connectorB.usbClients.has(1),
-      2000,
+      2000
     );
 
     const frontendD = await connectDriverWebSocket(url, { app: "agent-d" });
@@ -450,7 +466,7 @@ describe("multiplexer integration routing isolation", function () {
     await waitForClientIds([frontendA, frontendB, frontendC, frontendD], []);
     await waitFor(
       () => !connectorA.usbClients.has(1) && !connectorB.usbClients.has(1),
-      2000,
+      2000
     );
 
     frontendB.socket.close();
@@ -469,7 +485,7 @@ describe("multiplexer integration routing isolation", function () {
     await waitForClientIds([frontendA, frontendC, frontendD], [2]);
     await waitFor(
       () => connectorA.usbClients.has(2) && connectorB.usbClients.has(2),
-      2000,
+      2000
     );
 
     context.appendCommand({ type: "remove-client", id: 2 });
@@ -477,7 +493,7 @@ describe("multiplexer integration routing isolation", function () {
     await waitForClientIds([frontendA, frontendC, frontendD], []);
     await waitFor(
       () => connectorA.devices.size === 0 && connectorB.devices.size === 0,
-      2000,
+      2000
     );
 
     context.appendCommand({
@@ -507,7 +523,7 @@ describe("multiplexer integration routing isolation", function () {
         connectorB.devices.has("device-1") &&
         connectorA.usbClients.has(3) &&
         connectorB.usbClients.has(3),
-      2000,
+      2000
     );
 
     const frontendBReconnect = await connectDriverWebSocket(url, {
@@ -535,7 +551,7 @@ describe("multiplexer integration routing isolation", function () {
           parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
             ?.marker === marker
         );
-      }),
+      })
     );
 
     for (const [marker, frontend] of frontends) {
@@ -544,10 +560,11 @@ describe("multiplexer integration routing isolation", function () {
 
     const received = await Promise.all(responses);
     assert.deepStrictEqual(
-      received.map((message) =>
-        parseCustomizedEnvelope(message.text).cdp.result.params.marker,
+      received.map(
+        (message) =>
+          parseCustomizedEnvelope(message.text).cdp.result.params.marker
       ),
-      frontends.map(([marker]) => marker),
+      frontends.map(([marker]) => marker)
     );
     for (const [marker, frontend] of frontends) {
       const unexpectedMarkers = frontends
@@ -556,11 +573,11 @@ describe("multiplexer integration routing isolation", function () {
       assert.strictEqual(
         frontend.messages.some((message) =>
           unexpectedMarkers.some((other) =>
-            JSON.stringify(message).includes(other),
-          ),
+            JSON.stringify(message).includes(other)
+          )
         ),
         false,
-        `${marker} should not receive another frontend response`,
+        `${marker} should not receive another frontend response`
       );
     }
   });
@@ -591,7 +608,7 @@ describe("multiplexer integration routing isolation", function () {
       const connector = context.createConnector({ enableWebSocket: true });
       connectorEvents.set(
         connector,
-        collectConnectorEvents(connector, "usb-client-message"),
+        collectConnectorEvents(connector, "usb-client-message")
       );
       await connector.connectDevices(-1, null, true);
       for (const deviceId of activeDevices) {
@@ -662,7 +679,7 @@ describe("multiplexer integration routing isolation", function () {
     assert.strictEqual(openFrontends(frontends).length, 12);
     await waitForClientIds(
       openFrontends(frontends).map((entry) => entry.frontend),
-      [],
+      []
     );
 
     for (const deviceIndex of shuffleWithRandom([1, 2, 3], random)) {
@@ -677,7 +694,7 @@ describe("multiplexer integration routing isolation", function () {
         [301, "device-3"],
         [302, "device-3"],
       ],
-      random,
+      random
     )) {
       addClient(clientId, deviceId);
     }
@@ -685,14 +702,18 @@ describe("multiplexer integration routing isolation", function () {
       frontends,
       connectors,
       activeDevices,
-      activeClients,
+      activeClients
     );
 
     for (const entry of takeRandom(openFrontends(frontends), 5, random)) {
       entry.closed = true;
       entry.frontend.socket.close();
     }
-    for (const entry of takeRandom(openConnectors(connectors).slice(1), 4, random)) {
+    for (const entry of takeRandom(
+      openConnectors(connectors).slice(1),
+      4,
+      random
+    )) {
       entry.closed = true;
       await entry.connector.close();
     }
@@ -705,7 +726,7 @@ describe("multiplexer integration routing isolation", function () {
       frontends,
       connectors,
       activeDevices,
-      activeClients,
+      activeClients
     );
 
     const repluggedDeviceId = addDevice(4);
@@ -720,7 +741,7 @@ describe("multiplexer integration routing isolation", function () {
     while (openFrontends(frontends).length < 12) {
       await openFrontend(
         `frontend-reconnect-${reconnectFrontendIndex}`,
-        reconnectUrl,
+        reconnectUrl
       );
       reconnectFrontendIndex++;
     }
@@ -730,43 +751,51 @@ describe("multiplexer integration routing isolation", function () {
       frontends,
       connectors,
       activeDevices,
-      activeClients,
+      activeClients
     );
 
     const targetClientId = pickRandom([...activeClients.keys()], random);
-    const selectedConnectors = takeRandom(openConnectors(connectors), 10, random);
+    const selectedConnectors = takeRandom(
+      openConnectors(connectors),
+      10,
+      random
+    );
     const selectedFrontends = takeRandom(openFrontends(frontends), 10, random);
     const connectorResponses = selectedConnectors.map((entry) => {
       const events = connectorEvents.get(entry.connector);
       return waitFor(() =>
         events.find(
           (event) =>
-            parseCustomizedEnvelope(event.message).cdp.result?.params?.marker ===
-            entry.label,
-        ),
+            parseCustomizedEnvelope(event.message).cdp.result?.params
+              ?.marker === entry.label
+        )
       );
     });
     const frontendResponses = selectedFrontends.map((entry) =>
-      waitForSocketMessage(entry.frontend.socket, (value) => {
-        if (value?.event !== "Customized") {
-          return false;
-        }
-        return (
-          parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
-            ?.marker === entry.label
-        );
-      }, 2500),
+      waitForSocketMessage(
+        entry.frontend.socket,
+        (value) => {
+          if (value?.event !== "Customized") {
+            return false;
+          }
+          return (
+            parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
+              ?.marker === entry.label
+          );
+        },
+        2500
+      )
     );
 
     for (const entry of selectedConnectors) {
       entry.connector.sendMessageToApp(
         targetClientId,
-        createCustomizedEnvelope(targetClientId, 17, entry.label),
+        createCustomizedEnvelope(targetClientId, 17, entry.label)
       );
     }
     for (const entry of selectedFrontends) {
       entry.frontend.socket.send(
-        createCustomizedEnvelope(targetClientId, 17, entry.label),
+        createCustomizedEnvelope(targetClientId, 17, entry.label)
       );
     }
 
@@ -777,16 +806,16 @@ describe("multiplexer integration routing isolation", function () {
     assert.deepStrictEqual(
       controlReceived.map(
         (event) =>
-          parseCustomizedEnvelope(event.message).cdp.result.params.marker,
+          parseCustomizedEnvelope(event.message).cdp.result.params.marker
       ),
-      selectedConnectors.map((entry) => entry.label),
+      selectedConnectors.map((entry) => entry.label)
     );
     assert.deepStrictEqual(
       webReceived.map(
         (message) =>
-          parseCustomizedEnvelope(message.text).cdp.result.params.marker,
+          parseCustomizedEnvelope(message.text).cdp.result.params.marker
       ),
-      selectedFrontends.map((entry) => entry.label),
+      selectedFrontends.map((entry) => entry.label)
     );
     for (const entry of selectedFrontends) {
       const unexpectedMarkers = selectedFrontends
@@ -795,11 +824,11 @@ describe("multiplexer integration routing isolation", function () {
       assert.strictEqual(
         entry.frontend.messages.some((message) =>
           unexpectedMarkers.some((marker) =>
-            JSON.stringify(message).includes(marker),
-          ),
+            JSON.stringify(message).includes(marker)
+          )
         ),
         false,
-        `${entry.label} should not receive another WebSocket response`,
+        `${entry.label} should not receive another WebSocket response`
       );
     }
   });
@@ -822,16 +851,17 @@ describe("multiplexer integration routing isolation", function () {
       message: createCustomizedResponseEnvelope(1, 999, "unknown-response"),
     });
     await waitFor(() =>
-      context.readLog().some((entry) => entry.event === "emit-usb-message"),
+      context.readLog().some((entry) => entry.event === "emit-usb-message")
     );
     await delay(100);
     assert.strictEqual(
       controlEvents.some(
         (event) =>
-          event.event === "usb-client-message" &&
-          event.data.message.includes("unknown-response"),
+          event.event === "client-message" &&
+          event.data.source === "usb-runtime" &&
+          event.data.message.includes("unknown-response")
       ),
-      false,
+      false
     );
 
     const notification = JSON.stringify({
@@ -856,9 +886,10 @@ describe("multiplexer integration routing isolation", function () {
     await waitFor(() =>
       controlEvents.some(
         (event) =>
-          event.event === "usb-client-message" &&
-          event.data.message.includes("notification"),
-      ),
+          event.event === "client-message" &&
+          event.data.source === "usb-runtime" &&
+          event.data.message.includes("notification")
+      )
     );
   });
 });
@@ -876,7 +907,9 @@ function parseMaybeCustomized(text) {
 }
 
 function latestClientIds(messages) {
-  const clientLists = messages.filter((message) => message?.event === "ClientList");
+  const clientLists = messages.filter(
+    (message) => message?.event === "ClientList"
+  );
   if (clientLists.length === 0) {
     return [];
   }
@@ -894,9 +927,9 @@ async function waitForClientIds(frontends, expectedIds) {
   await waitFor(
     () =>
       frontends.every((frontend) =>
-        arraysEqual(latestClientIds(frontend.messages), expected),
+        arraysEqual(latestClientIds(frontend.messages), expected)
       ),
-    2500,
+    2500
   );
 }
 
@@ -904,30 +937,30 @@ async function waitForFrontendAndConnectorState(
   frontendEntries,
   connectorEntries,
   activeDevices,
-  activeClients,
+  activeClients
 ) {
   const expectedClientIds = [...activeClients.keys()].sort(
-    (first, second) => first - second,
+    (first, second) => first - second
   );
   const expectedDeviceIds = [...activeDevices].sort();
   await Promise.all([
     waitForClientIds(
       openFrontends(frontendEntries).map((entry) => entry.frontend),
-      expectedClientIds,
+      expectedClientIds
     ),
     waitFor(
       () =>
         openConnectors(connectorEntries).every((entry) => {
           const deviceIds = [...entry.connector.devices.keys()].sort();
           const clientIds = [...entry.connector.usbClients.keys()].sort(
-            (first, second) => first - second,
+            (first, second) => first - second
           );
           return (
             arraysEqual(deviceIds, expectedDeviceIds) &&
             arraysEqual(clientIds, expectedClientIds)
           );
         }),
-      3000,
+      3000
     ),
   ]);
 }
@@ -938,8 +971,7 @@ function openConnectors(entries) {
 
 function openFrontends(entries) {
   return entries.filter(
-    (entry) =>
-      !entry.closed && entry.frontend.socket.readyState === 1,
+    (entry) => !entry.closed && entry.frontend.socket.readyState === 1
   );
 }
 

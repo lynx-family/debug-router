@@ -69,12 +69,24 @@ describe("multiplexer integration reconnect and snapshot", function () {
       () => context.discovery.getReusableDiscovery(),
       3000,
     );
-    const pending = client.call("sendCustomizedMessage", {
+    const pending = client.call("sendRawMessage", {
       clientId: 1,
-      method: "Runtime.evaluate",
-      params: { marker: "pending-before-crash" },
-      sessionId: 1,
-      type: "CDP",
+      message: {
+        event: "Customized",
+        data: {
+          type: "CDP",
+          data: {
+            client_id: -1,
+            session_id: 1,
+            message: {
+              id: 1,
+              method: "Runtime.evaluate",
+              params: { marker: "pending-before-crash" },
+            },
+          },
+          sender: 0,
+        },
+      },
     });
     process.kill(initialInfo.pid, "SIGKILL");
 

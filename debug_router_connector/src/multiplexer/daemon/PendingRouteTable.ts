@@ -1,4 +1,4 @@
-// Copyright 2024 The Lynx Authors. All rights reserved.
+// Copyright 2026 The Lynx Authors. All rights reserved.
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -13,7 +13,6 @@ export type PendingControlRoute = {
   originalId: number;
   clientId: number;
   createdAt: number;
-  responseMode?: "customized-message" | "raw-message";
   resolve?: (value: unknown) => void;
   reject?: (error: Error) => void;
 };

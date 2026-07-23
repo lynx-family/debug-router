@@ -1,4 +1,4 @@
-// Copyright 2024 The Lynx Authors. All rights reserved.
+// Copyright 2026 The Lynx Authors. All rights reserved.
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -25,18 +25,14 @@ type JsonRecord = Record<string, unknown>;
 
 const CONTROL_RPC_METHODS: ControlRpcMethod[] = [
   "connectDevices",
-  "getDevices",
   "connectUsbClients",
   "startWatchClient",
   "stopWatchClient",
   "disconnectDevice",
-  "reacquireLegacyOwnership",
   "shutdownDaemon",
   "startWSServer",
   "startWatchAllClients",
-  "sendMessageToWeb",
-  "sendMessageToApp",
-  "sendCustomizedMessage",
+  "stopWatchAllClients",
   "sendRawMessage",
   "sendMessage",
   "closeClient",
@@ -253,28 +249,15 @@ export function isControlEvent(value: unknown): value is ControlEvent {
       return isSnapshot(value.data);
     case "legacy-ownership-changed":
       return isLegacyOwnershipChangedEventData(value.data);
-    case "device-connected":
-      return isDeviceSnapshot(value.data);
-    case "device-disconnected":
-      return isRecord(value.data) && isString(value.data.serial);
-    case "client-connected":
-      return isClientSnapshot(value.data);
-    case "client-disconnected":
-      return isRecord(value.data) && isNumber(value.data.id);
-    case "usb-client-message":
-    case "ws-client-message":
-    case "ws-web-message":
+    case "client-message":
       return (
         isRecord(value.data) &&
+        (value.data.source === "usb-runtime" ||
+          value.data.source === "websocket-runtime" ||
+          value.data.source === "websocket-driver") &&
         isNumber(value.data.id) &&
         isString(value.data.message)
       );
-    case "websocket-app-client-connected":
-    case "websocket-web-client-connected":
-      return isWebSocketClientSnapshot(value.data);
-    case "websocket-app-client-disconnected":
-    case "websocket-web-client-disconnected":
-      return isRecord(value.data) && isNumber(value.data.id);
     default:
       return false;
   }
@@ -295,11 +278,6 @@ function isControlRpcParams(
         isOptionalStringOrNull(params.serial) &&
         isOptional(params.isAutoListenClients, isBoolean)
       );
-    case "getDevices":
-      return (
-        isOptional(params.timeout, isNumber) &&
-        isOptionalStringOrNull(params.serial)
-      );
     case "connectUsbClients":
       return (
         isString(params.deviceId) &&
@@ -309,36 +287,30 @@ function isControlRpcParams(
       );
     case "startWatchClient":
     case "stopWatchClient":
+      return (
+        isString(params.deviceId) &&
+        params.deviceId.length > 0 &&
+        Object.keys(params).length === 1
+      );
     case "disconnectDevice":
       return isString(params.deviceId);
-    case "reacquireLegacyOwnership":
-      return true;
     case "shutdownDaemon":
       return isOptional(params.reason, isString);
     case "startWSServer":
-      return true;
+      return Object.keys(params).length === 0;
     case "startWatchAllClients":
       return isOptional(params.force, isBoolean);
-    case "sendMessageToWeb":
-      return isString(params.message);
-    case "sendMessageToApp":
-      return (
-        isNumber(params.id) &&
-        isString(params.message) &&
-        isOptional(params.fromWebClientId, isNumber)
-      );
-    case "sendCustomizedMessage":
-      return (
-        isNumber(params.clientId) &&
-        isString(params.method) &&
-        isOptional(params.params, isStringOrObject) &&
-        isOptional(params.sessionId, isNumber) &&
-        isOptional(params.type, isString)
-      );
+    case "stopWatchAllClients":
+      return Object.keys(params).length === 0;
     case "sendRawMessage":
       return isNumber(params.clientId) && isRequireMessage(params.message);
     case "sendMessage":
-      return isNumber(params.clientId) && hasOwn(params, "message");
+      return (
+        (params.target === "app" || params.target === "web") &&
+        isNumber(params.clientId) &&
+        !(params.target === "app" && params.clientId === -1) &&
+        hasOwn(params, "message")
+      );
     case "closeClient":
       return isNumber(params.clientId);
     default:
@@ -356,24 +328,19 @@ function isControlRpcResult(
 
   switch (method) {
     case "connectDevices":
-    case "getDevices":
       return Array.isArray(result) && result.every(isDeviceSnapshot);
     case "connectUsbClients":
       return Array.isArray(result) && result.every(isClientSnapshot);
-    case "sendCustomizedMessage":
-      return isString(result);
     case "sendRawMessage":
       return isResponseMessage(result);
     case "startWSServer":
       return result === undefined || isWebSocketServerInfo(result);
-    case "startWatchAllClients":
     case "startWatchClient":
     case "stopWatchClient":
+    case "startWatchAllClients":
+    case "stopWatchAllClients":
     case "disconnectDevice":
-    case "reacquireLegacyOwnership":
     case "shutdownDaemon":
-    case "sendMessageToWeb":
-    case "sendMessageToApp":
     case "sendMessage":
     case "closeClient":
       return result === undefined;
@@ -469,10 +436,6 @@ function isOptional<T>(
 
 function isOptionalStringOrNull(value: unknown): boolean {
   return value === undefined || value === null || isString(value);
-}
-
-function isStringOrObject(value: unknown): value is string | object {
-  return isString(value) || (typeof value === "object" && value !== null);
 }
 
 function hasOwn(value: JsonRecord, key: string): boolean {

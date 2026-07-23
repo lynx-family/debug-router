@@ -42,10 +42,7 @@ describe("multiplexer integration daemon lifecycle", function () {
     assert.strictEqual(info.minSupportedProtocolVersion > 0, true);
     assert.strictEqual(info.controlPort > 0, true);
     assert.strictEqual(info.daemonVersion, "integration-test-daemon");
-    assert.deepStrictEqual(info.capabilities, [
-      "fake-physical",
-      "integration",
-    ]);
+    assert.deepStrictEqual(info.capabilities, ["fake-physical", "integration"]);
 
     const health = await getHealth(info.controlPort);
     assert.strictEqual(health.statusCode, 200);
@@ -53,7 +50,7 @@ describe("multiplexer integration daemon lifecycle", function () {
     assert.strictEqual(health.body.protocolVersion, info.protocolVersion);
     assert.strictEqual(
       health.body.minSupportedProtocolVersion,
-      info.minSupportedProtocolVersion,
+      info.minSupportedProtocolVersion
     );
     assert.strictEqual(health.body.daemonVersion, "integration-test-daemon");
     assert.deepStrictEqual(health.body.capabilities, [
@@ -68,9 +65,9 @@ describe("multiplexer integration daemon lifecycle", function () {
           (entry) =>
             entry.event === "fake-physical-created" &&
             entry.devices === 1 &&
-            entry.clients === 1,
+            entry.clients === 1
         ),
-      "fake physical should be created in the daemon process",
+      "fake physical should be created in the daemon process"
     );
 
     const firstHeartbeat = readJsonFile(context.paths.discoveryPath, null)
@@ -91,11 +88,11 @@ describe("multiplexer integration daemon lifecycle", function () {
     await waitFor(() => snapshots.length > 0);
     assert.deepStrictEqual(
       snapshots[0].devices.map((device) => device.serial),
-      ["device-1"],
+      ["device-1"]
     );
     assert.deepStrictEqual(
       snapshots[0].clients.map((runtime) => runtime.id),
-      [1],
+      [1]
     );
 
     await stopDaemonForPlatform(context, info);
@@ -119,7 +116,7 @@ describe("multiplexer integration daemon lifecycle", function () {
     const log = context.readLog();
     assert(
       log.some((entry) => entry.event === "fake-physical-closed"),
-      "fake physical connector should be closed during idle cleanup",
+      "fake physical connector should be closed during idle cleanup"
     );
   });
 
@@ -173,21 +170,23 @@ describe("multiplexer integration daemon lifecycle", function () {
     assert.strictEqual(fs.existsSync(context.paths.daemonLockPath), true);
     assert.strictEqual((await getHealth(info.controlPort)).body.pid, info.pid);
     assert.deepStrictEqual(
-      (await healthyClient.call("getDevices", {})).map(
-        (device) => device.serial,
-      ),
-      ["device-1"],
+      (
+        await healthyClient.call("connectDevices", {
+          isAutoListenClients: false,
+        })
+      ).map((device) => device.serial),
+      ["device-1"]
     );
     assert.deepStrictEqual(failedClientStates, ["connected", "disconnected"]);
 
     const log = context.readLog();
     assert(
       !log.some((entry) => entry.event === "daemon-uncaught-exception"),
-      "socket errors should not reach the daemon uncaught exception handler",
+      "socket errors should not reach the daemon uncaught exception handler"
     );
     assert(
       !log.some((entry) => entry.event === "fake-physical-closed"),
-      "isolating one control socket should not close physical resources",
+      "isolating one control socket should not close physical resources"
     );
   });
 });
