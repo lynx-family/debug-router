@@ -20,6 +20,14 @@ export abstract class Connection {
   protected pendingRequests: Map<string, PendingRequestResolvers> = new Map();
   abstract close(): void;
   abstract send(data: any): void;
+  trySend(data: any): boolean {
+    try {
+      this.send(data);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   abstract sendExpectResponse(
     data: RequireMessageType,
   ): Promise<ResponseMessageType>;

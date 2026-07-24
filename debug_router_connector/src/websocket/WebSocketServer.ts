@@ -155,15 +155,19 @@ export class WebSocketController {
     });
   }
 
-  sendMessageToApp(id: number, message: string) {
+  sendMessageToApp(id: number, message: string): void {
+    this.trySendMessageToApp(id, message);
+  }
+
+  trySendMessageToApp(id: number, message: string): boolean {
     const client = this.websocketAppClients.get(id);
     if (client) {
       // send to ws client app
       client.sendMessage(message);
-    } else {
-      // send to usb client app
-      this.driver.handleWsMessage(id, message);
+      return true;
     }
+    // send to usb client app
+    return this.driver.tryHandleWsMessage(id, message);
   }
 
   sendClientList() {
