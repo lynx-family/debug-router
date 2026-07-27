@@ -9,6 +9,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <memory>
+
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
 #include "debug_router/native/socket/usb_client.h"
@@ -20,13 +22,12 @@ SocketServerPosix::SocketServerPosix(
     const std::shared_ptr<SocketServerConnectionListener> &listener)
     : SocketServer(listener) {}
 
-SocketServerPosix::~SocketServerPosix() { Close(); }
+SocketServerPosix::~SocketServerPosix() { StopServer(); }
 
 int32_t SocketServerPosix::InitSocket() {
   LOGI("SocketServerPosix::InitSocket");
 
   const SocketType socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-  socket_fd_.store(socket_fd, std::memory_order_release);
   if (socket_fd == kInvalidSocket) {
     LOGE("create socket error:" << GetErrorMessage());
     NotifyInit(GetErrorMessage(), "create socket error");
@@ -35,7 +36,7 @@ int32_t SocketServerPosix::InitSocket() {
 
   int on = 1;
   if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) == -1) {
-    Close();
+    CloseSocket(socket_fd);
     LOGE("setsockopt error:" << GetErrorMessage());
     NotifyInit(GetErrorMessage(), "setsockopt error");
     return kInvalidPort;
@@ -60,7 +61,7 @@ int32_t SocketServerPosix::InitSocket() {
            (GetErrorMessage() == EADDRINUSE));
 
   if (!flag) {
-    Close();
+    CloseSocket(socket_fd);
     LOGE("bind address error:" << GetErrorMessage());
     NotifyInit(GetErrorMessage(), "bind address error");
     return kInvalidPort;
@@ -69,9 +70,13 @@ int32_t SocketServerPosix::InitSocket() {
   LOGI("bind port:" << port);
 
   if (listen(socket_fd, kConnectionQueueMaxLength) != 0) {
-    Close();
+    CloseSocket(socket_fd);
     LOGE("listen error:" << GetErrorMessage());
     NotifyInit(GetErrorMessage(), "listen error");
+    return kInvalidPort;
+  }
+  if (!TryPublishSocket(socket_fd)) {
+    CloseSocket(socket_fd);
     return kInvalidPort;
   }
   return port;
@@ -94,28 +99,30 @@ void SocketServerPosix::Start() {
   SocketType accept_socket_fd =
       accept(socket_fd, (struct sockaddr *)(&addr), &addrLen);
   if (accept_socket_fd == kInvalidSocket) {
+    const int error = GetErrorMessage();
     Close();
-    LOGE("accept socket error:" << GetErrorMessage());
-    NotifyInit(GetErrorMessage(), "accept socket error");
+    LOGE("accept socket error:" << error);
+    NotifyInit(error, "accept socket error");
     return;
   }
   LOGI("accept usbclient socket:" << accept_socket_fd);
   std::shared_ptr<UsbClient> old_temp_client;
   LOGI("create a new usb client.");
   auto new_temp_client = std::make_shared<UsbClient>(accept_socket_fd);
-  {
-    std::lock_guard<std::mutex> lock(client_lock_);
-    old_temp_client = temp_usb_client_;
-    temp_usb_client_ = new_temp_client;
+  if (!TryInstallPendingClient(new_temp_client, &old_temp_client)) {
+    return;
   }
   if (old_temp_client) {
     LOGI("close last connector, destroy temp_usb_client_.");
     ScheduleClientStop(old_temp_client);
   }
   std::shared_ptr<ClientListener> listener =
-      std::make_shared<ClientListener>(shared_from_this());
+      std::make_shared<ClientListener>(weak_from_this());
   new_temp_client->Init();
   new_temp_client->StartUp(listener);
+#if defined(TESTING)
+  WaitForClientListenerReleaseForTest();
+#endif
 }
 
 void SocketServerPosix::CloseSocket(int socket_fd) {

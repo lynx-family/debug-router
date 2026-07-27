@@ -2,12 +2,19 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/native/socket/socket_server_type.h"
+#include "debug_router/native/socket/socket_server_api.h"
+
 #ifdef _WIN32
+#include <winsock2.h>
+
 #include "debug_router/native/socket/win/socket_server_win.h"
 #else
+#include <sys/socket.h>
+
 #include "debug_router/native/socket/posix/socket_server_posix.h"
 #endif
+#include <utility>
+
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/thread/debug_router_executor.h"
 
@@ -17,10 +24,16 @@ namespace socket_server {
 std::shared_ptr<SocketServer> SocketServer::CreateSocketServer(
     const std::shared_ptr<SocketServerConnectionListener> &listener) {
 #ifdef _WIN32
-  return std::make_shared<SocketServerWin>(listener);
+  SocketServer *socket_server = new SocketServerWin(listener);
 #else
-  return std::make_shared<SocketServerPosix>(listener);
+  SocketServer *socket_server = new SocketServerPosix(listener);
 #endif
+  return std::shared_ptr<SocketServer>(socket_server, [](SocketServer *server) {
+    // Stop while the dynamic platform object is still fully alive. Its
+    // destructor repeats this idempotently for direct internal construction.
+    server->StopServer();
+    delete server;
+  });
 }
 
 SocketServer::SocketServer(
@@ -52,7 +65,13 @@ bool SocketServer::Send(const std::string &message) {
 
 void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
                                       int32_t code, const std::string &reason) {
-  thread::DebugRouterExecutor::GetInstance().Post([=]() {
+  std::weak_ptr<SocketServer> weak_server = weak_from_this();
+  auto callback = [weak_server, this, client = std::move(client), code,
+                   reason]() {
+    auto keep_alive = weak_server.lock();
+    if (!keep_alive) {
+      return;
+    }
     std::shared_ptr<UsbClient> old_client_;
     bool should_notify = false;
     {
@@ -75,12 +94,18 @@ void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
         listener->OnStatusChanged(kConnected, code, reason);
       }
     }
-  });
+  };
+  thread::DebugRouterExecutor::GetInstance().Post(std::move(callback));
 }
 
 void SocketServer::HandleOnMessageStatus(std::shared_ptr<UsbClient> client,
                                          const std::string &message) {
-  thread::DebugRouterExecutor::GetInstance().Post([=]() {
+  std::weak_ptr<SocketServer> weak_server = weak_from_this();
+  auto callback = [weak_server, this, client = std::move(client), message]() {
+    auto keep_alive = weak_server.lock();
+    if (!keep_alive) {
+      return;
+    }
     bool is_current_client = false;
     {
       std::lock_guard<std::mutex> lock(client_lock_);
@@ -93,13 +118,20 @@ void SocketServer::HandleOnMessageStatus(std::shared_ptr<UsbClient> client,
     if (auto listener = listener_.lock()) {
       listener->OnMessage(message);
     }
-  });
+  };
+  thread::DebugRouterExecutor::GetInstance().Post(std::move(callback));
 }
 
 void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
                                        ConnectionStatus status, int32_t code,
                                        const std::string &reason) {
-  thread::DebugRouterExecutor::GetInstance().Post([=]() {
+  std::weak_ptr<SocketServer> weak_server = weak_from_this();
+  thread::DebugRouterExecutor::GetInstance().Post([weak_server, this, client,
+                                                   status, code, reason]() {
+    auto keep_alive = weak_server.lock();
+    if (!keep_alive) {
+      return;
+    }
     std::shared_ptr<UsbClient> client_to_stop;
     bool should_notify = false;
     // True if this callback tore down a client that had already been
@@ -152,7 +184,13 @@ void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
 void SocketServer::HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
                                        ConnectionStatus status, int32_t code,
                                        const std::string &reason) {
-  thread::DebugRouterExecutor::GetInstance().Post([=]() {
+  std::weak_ptr<SocketServer> weak_server = weak_from_this();
+  thread::DebugRouterExecutor::GetInstance().Post([weak_server, this, client,
+                                                   status, code, reason]() {
+    auto keep_alive = weak_server.lock();
+    if (!keep_alive) {
+      return;
+    }
     std::shared_ptr<UsbClient> client_to_stop;
     bool should_notify = false;
     // True if this callback tore down a client that had already been
@@ -203,29 +241,76 @@ void SocketServer::HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
 }
 
 void SocketServer::NotifyInit(int32_t code, const std::string &info) {
-  thread::DebugRouterExecutor::GetInstance().Post([=]() {
-    if (auto listener = listener_.lock()) {
-      listener->OnInit(code, info);
+  uint64_t generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(running_mutex_);
+    generation = listener_generation_;
+    if (listener_should_exit_ || !is_running_.load(std::memory_order_relaxed) ||
+        generation != server_generation_) {
+      return;
     }
-  });
+  }
+  std::weak_ptr<SocketServer> weak_server = weak_from_this();
+  thread::DebugRouterExecutor::GetInstance().Post(
+      [weak_server, generation, code, info]() {
+        auto socket_server = weak_server.lock();
+        if (!socket_server ||
+            !socket_server->IsListenerGenerationActive(generation)) {
+          return;
+        }
+        if (auto listener = socket_server->listener_.lock()) {
+          listener->OnInit(code, info);
+        }
+      });
 }
 
 void SocketServer::setEnableServer(bool enable) {
   LOGI("SocketServer::setEnableServer:" << enable);
-  // notify only when transition from false to true
-  if (!is_running_.exchange(enable, std::memory_order_relaxed) && enable) {
+  if (enable) {
+    StartServer();
+  } else {
+    StopServer();
+  }
+}
+
+void SocketServer::StartServer() {
+  std::lock_guard<std::mutex> operation_lock(server_operation_mutex_);
+  bool should_notify = false;
+  {
+    std::lock_guard<std::mutex> lock(running_mutex_);
+    if (initialized_ && !listen_thread_.joinable()) {
+      listener_should_exit_ = false;
+      listen_thread_ = std::thread(ListenerThreadFunc, this);
+    }
+    if (!is_running_.exchange(true, std::memory_order_relaxed)) {
+      ++server_generation_;
+      should_notify = true;
+    }
+  }
+  if (should_notify) {
     running_condition_.notify_one();
   }
 }
 
-void SocketServer::StartServer() { setEnableServer(true); }
-
 void SocketServer::StopServer() {
+  std::lock_guard<std::mutex> operation_lock(server_operation_mutex_);
   std::shared_ptr<UsbClient> current_client;
   std::shared_ptr<UsbClient> pending_client;
-  setEnableServer(false);
-  // Close socket if it's valid
-  SocketType socket_fd = socket_fd_.load(std::memory_order_acquire);
+  SocketType socket_fd = kInvalidSocket;
+  {
+    std::lock_guard<std::mutex> lock(running_mutex_);
+    is_running_.store(false, std::memory_order_relaxed);
+    listener_should_exit_ = true;
+    ++server_generation_;
+    socket_fd = socket_fd_.load(std::memory_order_acquire);
+  }
+#if defined(TESTING)
+  if (stop_requested_latch_for_test_) {
+    stop_requested_latch_for_test_->CountDown();
+  }
+#endif
+  running_condition_.notify_all();
+
   if (socket_fd != kInvalidSocket) {
 #ifdef _WIN32
     shutdown(socket_fd, SD_BOTH);
@@ -248,17 +333,31 @@ void SocketServer::StopServer() {
   if (pending_client && pending_client != current_client) {
     pending_client->Stop();
   }
+
+  if (listen_thread_.joinable()) {
+    listen_thread_.join();
+  }
 }
 
 void SocketServer::ThreadFunc(std::shared_ptr<SocketServer> socket_server) {
+  // Keep the protected entry point source-compatible. Internal listener
+  // generations use ListenerThreadFunc so the thread does not own the server.
+  ListenerThreadFunc(socket_server.get());
+}
+
+void SocketServer::ListenerThreadFunc(SocketServer *socket_server) {
   int count = 0;
   while (true) {
     {
       std::unique_lock lock(socket_server->running_mutex_);
-      socket_server->running_condition_.wait(lock, [=]() {
-        return socket_server->is_running_.load(std::memory_order_relaxed) ==
-               true;
+      socket_server->running_condition_.wait(lock, [socket_server]() {
+        return socket_server->listener_should_exit_ ||
+               socket_server->is_running_.load(std::memory_order_relaxed);
       });
+      if (socket_server->listener_should_exit_) {
+        return;
+      }
+      socket_server->listener_generation_ = socket_server->server_generation_;
     }
     LOGI("Init start:" << count);
     socket_server->Start();
@@ -267,8 +366,57 @@ void SocketServer::ThreadFunc(std::shared_ptr<SocketServer> socket_server) {
 }
 
 void SocketServer::Init() {
-  std::thread listen_thread(ThreadFunc, shared_from_this());
-  listen_thread.detach();
+  std::lock_guard<std::mutex> operation_lock(server_operation_mutex_);
+  std::lock_guard<std::mutex> lock(running_mutex_);
+  initialized_ = true;
+  if (!listen_thread_.joinable()) {
+    listener_should_exit_ = false;
+    listen_thread_ = std::thread(ListenerThreadFunc, this);
+  }
+}
+
+bool SocketServer::TryPublishSocket(SocketType socket_fd) {
+  std::lock_guard<std::mutex> lock(running_mutex_);
+  if (listener_should_exit_ || !is_running_.load(std::memory_order_relaxed) ||
+      listener_generation_ != server_generation_) {
+    return false;
+  }
+  socket_fd_.store(socket_fd, std::memory_order_release);
+  return true;
+}
+
+bool SocketServer::TryInstallPendingClient(
+    const std::shared_ptr<UsbClient> &client,
+    std::shared_ptr<UsbClient> *old_client) {
+  std::lock_guard<std::mutex> running_lock(running_mutex_);
+  if (listener_should_exit_ || !is_running_.load(std::memory_order_relaxed) ||
+      listener_generation_ != server_generation_) {
+    return false;
+  }
+  std::lock_guard<std::mutex> client_lock(client_lock_);
+  *old_client = temp_usb_client_;
+  temp_usb_client_ = client;
+  return true;
+}
+
+#if defined(TESTING)
+void SocketServer::WaitForClientListenerReleaseForTest() {
+  CountDownLatch *created_latch = client_listener_created_latch_for_test_;
+  CountDownLatch *release_latch = release_client_listener_latch_for_test_;
+  if (created_latch) {
+    created_latch->CountDown();
+  }
+  if (release_latch) {
+    release_latch->Await();
+  }
+}
+#endif
+
+bool SocketServer::IsListenerGenerationActive(uint64_t generation) {
+  std::lock_guard<std::mutex> lock(running_mutex_);
+  return !listener_should_exit_ &&
+         is_running_.load(std::memory_order_relaxed) &&
+         generation == server_generation_;
 }
 
 // close server socket
@@ -283,41 +431,61 @@ void SocketServer::Close() {
 }
 
 void SocketServer::Disconnect() {
-  thread::DebugRouterExecutor::GetInstance().Post([=]() {
-    std::shared_ptr<UsbClient> client_to_stop;
-    {
-      std::lock_guard<std::mutex> lock(client_lock_);
-      client_to_stop = usb_client_;
-      usb_client_ = nullptr;
-      if (temp_usb_client_ == client_to_stop) {
-        temp_usb_client_ = nullptr;
-      }
-    }
-    if (client_to_stop) {
-      LOGI("SocketServerApi Disconnect: stop curr client.");
-      ScheduleClientStop(client_to_stop);
-    }
-  });
+  uint64_t generation = 0;
+  std::shared_ptr<UsbClient> target;
+  if (!SnapshotClientForDisconnect(&generation, &target)) {
+    return;
+  }
+  std::weak_ptr<SocketServer> weak_server = weak_from_this();
+  thread::DebugRouterExecutor::GetInstance().Post(
+      [weak_server, generation, target = std::move(target)]() {
+        auto socket_server = weak_server.lock();
+        if (!socket_server) {
+          return;
+        }
+        std::shared_ptr<UsbClient> client_to_stop =
+            socket_server->TakeClientForDisconnect(generation, target);
+        if (client_to_stop) {
+          LOGI("SocketServerApi Disconnect: stop curr client.");
+          socket_server->ScheduleClientStop(client_to_stop);
+        }
+      });
 }
 
-SocketServer::~SocketServer() {
-  clean_executor_.shutdown();
-  std::shared_ptr<UsbClient> current_client;
-  std::shared_ptr<UsbClient> pending_client;
-  {
-    std::lock_guard<std::mutex> lock(client_lock_);
-    current_client = usb_client_;
-    pending_client = temp_usb_client_;
-    usb_client_ = nullptr;
+bool SocketServer::SnapshotClientForDisconnect(
+    uint64_t *generation, std::shared_ptr<UsbClient> *target) {
+  std::lock_guard<std::mutex> running_lock(running_mutex_);
+  if (listener_should_exit_ || !is_running_.load(std::memory_order_relaxed)) {
+    return false;
+  }
+  std::lock_guard<std::mutex> client_lock(client_lock_);
+  if (!usb_client_) {
+    return false;
+  }
+  *generation = server_generation_;
+  *target = usb_client_;
+  return true;
+}
+
+std::shared_ptr<UsbClient> SocketServer::TakeClientForDisconnect(
+    uint64_t generation, const std::shared_ptr<UsbClient> &target) {
+  std::lock_guard<std::mutex> running_lock(running_mutex_);
+  if (listener_should_exit_ || !is_running_.load(std::memory_order_relaxed) ||
+      generation != server_generation_) {
+    return nullptr;
+  }
+  std::lock_guard<std::mutex> client_lock(client_lock_);
+  if (usb_client_ != target) {
+    return nullptr;
+  }
+  usb_client_ = nullptr;
+  if (temp_usb_client_ == target) {
     temp_usb_client_ = nullptr;
   }
-  if (current_client) {
-    current_client->Stop();
-  }
-  if (pending_client && pending_client != current_client) {
-    pending_client->Stop();
-  }
+  return target;
 }
+
+SocketServer::~SocketServer() { clean_executor_.shutdown(); }
 
 }  // namespace socket_server
 }  // namespace debugrouter
