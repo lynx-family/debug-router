@@ -168,7 +168,7 @@ describe("multiplexer integration routing isolation", function () {
     }, 2000);
 
     web.socket.send(createCustomizedEnvelope(1, 1, "web-route"));
-    await client.call("sendMessage", {
+    await client.call("sendMessageWithoutReply", {
       target: "app",
       clientId: 1,
       message: createCustomizedEnvelope(1, 1, "control-route"),
@@ -247,12 +247,12 @@ describe("multiplexer integration routing isolation", function () {
     );
 
     await Promise.all([
-      controlA.call("sendMessage", {
+      controlA.call("sendMessageWithoutReply", {
         target: "app",
         clientId: 1,
         message: createCustomizedEnvelope(1, 1, "control-a"),
       }),
-      controlB.call("sendMessage", {
+      controlB.call("sendMessageWithoutReply", {
         target: "app",
         clientId: 1,
         message: createCustomizedEnvelope(1, 1, "control-b"),

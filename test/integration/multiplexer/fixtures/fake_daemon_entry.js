@@ -495,8 +495,7 @@ async function main() {
     controlPort: entryOption.controlPort,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
-    daemonVersion: entryOption.daemonVersion,
-    capabilities: entryOption.capabilities,
+    debugInfo: entryOption.debugInfo,
     legacyDriverDir: entryOption.legacyDriverDir,
     multiplexerDaemonIdleTimeout: entryOption.multiplexerDaemonIdleTimeout,
     enableWebSocket: entryOption.enableWebSocket,
@@ -548,8 +547,7 @@ async function main() {
     daemonLockPath: entryOption.daemonLockPath,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
-    daemonVersion: entryOption.daemonVersion,
-    capabilities: entryOption.capabilities,
+    debugInfo: entryOption.debugInfo,
     heartbeatInterval: entryOption.heartbeatInterval,
     hostOption:
       entryOption.multiplexerDaemonIdleTimeout === undefined

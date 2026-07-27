@@ -71,7 +71,7 @@ export class MultiplexerDevice {
 
   startWatchClient(): void {
     void this.getDaemonClient()
-      .call("startWatchClient", {
+      .call("startDeviceClientWatcher", {
         deviceId: this.serial,
       })
       .catch((error: Error) => {
@@ -82,7 +82,7 @@ export class MultiplexerDevice {
   }
 
   async stopWatchClient(): Promise<void> {
-    await this.getDaemonClient().call("stopWatchClient", {
+    await this.getDaemonClient().call("stopDeviceClientWatcher", {
       deviceId: this.serial,
     });
   }

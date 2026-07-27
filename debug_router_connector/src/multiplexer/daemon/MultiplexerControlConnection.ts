@@ -9,6 +9,7 @@ import {
   ControlRpcRequest,
   ControlRpcResponse,
 } from "../protocol/control";
+import type { MultiplexerDebugInfo } from "../protocol/debuginfo";
 import { ControlEvent } from "../protocol/event";
 import {
   isControlRpcRequest,
@@ -27,6 +28,7 @@ export type MultiplexerControlConnectionOption = {
     message: ControlRpcRequest,
   ) => void | Promise<void>;
   onClose: (controlId: number) => void;
+  createDebugInfo?: () => MultiplexerDebugInfo | undefined;
 };
 
 export class MultiplexerControlConnection {
@@ -37,6 +39,7 @@ export class MultiplexerControlConnection {
     message: ControlRpcRequest,
   ) => void | Promise<void>;
   private readonly onClose: (controlId: number) => void;
+  private readonly createDebugInfo?: () => MultiplexerDebugInfo | undefined;
   private subscribedValue = true;
   private closedValue = false;
 
@@ -45,6 +48,7 @@ export class MultiplexerControlConnection {
     this.socket = option.socket;
     this.onMessage = option.onMessage;
     this.onClose = option.onClose;
+    this.createDebugInfo = option.createDebugInfo;
 
     this.socket.on("message", this.handleSocketMessage);
     this.socket.on("close", this.handleClose);
@@ -68,7 +72,10 @@ export class MultiplexerControlConnection {
       return;
     }
 
-    this.socket.send(JSON.stringify(message));
+    const debugInfo = this.createDebugInfo?.();
+    this.socket.send(
+      JSON.stringify(debugInfo ? { ...message, debugInfo } : message),
+    );
   }
 
   sendResponse(rpcId: number, result: unknown): void {
@@ -76,7 +83,7 @@ export class MultiplexerControlConnection {
       kind: "rpc-response",
       id: rpcId,
       ok: true,
-      result,
+      result: result === undefined ? {} : result,
     } as ControlRpcResponse);
   }
 

@@ -3,10 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 import type { ClientDescription, DeviceDescription } from "../../utils/type";
-
-// protocolVersion is used for version arbitration when connecting to the Multiplexer daemon.
-// minSupportedProtocolVersion is used to check if the Multiplexer daemon supports the protocol version.
-// daemonVersion and clientVersion is only injected for testing or debugging purposes and is not used in version arbitration.
+import type { MultiplexerDebugInfo } from "./debuginfo";
 
 export type Snapshot = {
   protocolVersion: number;
@@ -15,8 +12,7 @@ export type Snapshot = {
   clients: ClientSnapshot[];
   websocketAppClients?: WebSocketClientSnapshot[];
   websocketWebClients?: WebSocketClientSnapshot[];
-  daemonVersion?: string;
-  capabilities?: string[];
+  debugInfo?: MultiplexerDebugInfo;
 };
 
 export type DeviceSnapshot = DeviceDescription & {

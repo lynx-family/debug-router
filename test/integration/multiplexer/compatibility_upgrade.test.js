@@ -45,7 +45,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     const daemonV1 = await currentDiscovery(1);
     assert.strictEqual(daemonV1.protocolVersion, 1);
     assert.strictEqual(daemonV1.minSupportedProtocolVersion, 1);
-    assert.strictEqual(daemonV1.daemonVersion, "connector-v1");
+    assert.strictEqual(daemonV1.debugInfo.daemonVersion, "connector-v1");
 
     const v2 = createVersionedControl("connector-v2", 2, 1);
     await connectRuntime(v2.client);
@@ -53,7 +53,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     assert.notStrictEqual(daemonV2.pid, daemonV1.pid);
     assert.strictEqual(daemonV2.protocolVersion, 2);
     assert.strictEqual(daemonV2.minSupportedProtocolVersion, 1);
-    assert.strictEqual(daemonV2.daemonVersion, "connector-v2");
+    assert.strictEqual(daemonV2.debugInfo.daemonVersion, "connector-v2");
     await waitFor(() => !processExists(daemonV1.pid), 3000);
 
     await v1.client.reconnect();
@@ -68,7 +68,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     assert.notStrictEqual(daemonV3.pid, daemonV2.pid);
     assert.strictEqual(daemonV3.protocolVersion, 3);
     assert.strictEqual(daemonV3.minSupportedProtocolVersion, 2);
-    assert.strictEqual(daemonV3.daemonVersion, "connector-v3");
+    assert.strictEqual(daemonV3.debugInfo.daemonVersion, "connector-v3");
     await waitFor(() => !processExists(daemonV2.pid), 3000);
 
     await assert.rejects(
@@ -167,7 +167,9 @@ describe("multiplexer integration compatibility upgrade", function () {
     const manager = context.createManager({
       localProtocolVersion: protocolVersion,
       minSupportedProtocolVersion: minSupportedVersion,
-      daemonVersion: name,
+      debugInfo: {
+        daemonVersion: name,
+      },
       readyPollInterval: 10,
       replacementTimeout: platformTimeout(50),
       enableWebSocket: true,
@@ -178,8 +180,10 @@ describe("multiplexer integration compatibility upgrade", function () {
     });
     const client = context.createClient({
       manager,
-      protocolVersion,
-      clientVersion: name,
+      debugInfo: {
+        protocolVersion,
+        clientVersion: name,
+      },
       rpcTimeout: platformTimeout(2000),
     });
     return { manager, client };

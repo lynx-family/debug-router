@@ -13,6 +13,7 @@ import {
   MULTIPLEXER_HEALTH_PATH,
   MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
+  MultiplexerDebugInfo,
   MultiplexerHealthResponse,
 } from "../protocol";
 import { ControlEvent } from "../protocol/event";
@@ -37,8 +38,7 @@ export type MultiplexerControlServerOption = {
   controlPath?: string;
   protocolVersion?: number;
   minSupportedProtocolVersion?: number;
-  daemonVersion?: string;
-  capabilities?: string[];
+  debugInfo?: MultiplexerDebugInfo;
 
   // only used for testing or embedding
   now?: () => number;
@@ -138,18 +138,18 @@ export class MultiplexerControlServer {
   }
 
   handleHealth(_request: IncomingMessage, response: ServerResponse): void {
+    const timestamp = this.now();
+    const debugInfo = this.createDebugInfo(timestamp);
     const payload: MultiplexerHealthResponse = {
       ok: true,
       pid: process.pid,
       protocolVersion:
         this.option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
-      minSupportedProtocolVersion: this.option.minSupportedProtocolVersion ??
+      minSupportedProtocolVersion:
+        this.option.minSupportedProtocolVersion ??
         MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
-      heartbeat: this.now(),
-      daemonVersion: this.option.daemonVersion,
-      capabilities: this.option.capabilities
-        ? [...this.option.capabilities]
-        : undefined,
+      heartbeat: timestamp,
+      ...(debugInfo ? { debugInfo } : {}),
     };
 
     this.writeJson(response, 200, payload);
@@ -177,6 +177,9 @@ export class MultiplexerControlServer {
       socket,
       onMessage: (id, message) => this.dispatchRpc(id, message),
       onClose: (id) => this.unregisterConnection(id),
+      ...(this.option.debugInfo
+        ? { createDebugInfo: () => this.createDebugInfo() }
+        : {}),
     });
 
     this.connections.set(controlId, connection);
@@ -214,6 +217,22 @@ export class MultiplexerControlServer {
 
   sendToControl(controlId: number, event: ControlEvent): void {
     this.connections.get(controlId)?.send(event);
+  }
+
+  private createDebugInfo(
+    timestamp: number = this.now(),
+  ): MultiplexerDebugInfo | undefined {
+    if (!this.option.debugInfo) {
+      return undefined;
+    }
+
+    return {
+      ...this.option.debugInfo,
+      protocolVersion:
+        this.option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
+      processId: process.pid,
+      timestamp,
+    };
   }
 
   private matchesPath(request: IncomingMessage, path: string): boolean {

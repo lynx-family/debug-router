@@ -3,12 +3,12 @@
 // LICENSE file in the root directory of this source tree.
 
 import type {
-  ControlMessageMeta,
   ControlRpcError,
   ControlRpcMethod,
   ControlRpcRequest,
   ControlRpcResponse,
 } from "./control";
+import type { MultiplexerDebugInfo } from "./debuginfo";
 import type {
   MultiplexerDiscoveryInfo,
   MultiplexerHealthResponse,
@@ -26,15 +26,15 @@ type JsonRecord = Record<string, unknown>;
 const CONTROL_RPC_METHODS: ControlRpcMethod[] = [
   "connectDevices",
   "connectUsbClients",
-  "startWatchClient",
-  "stopWatchClient",
+  "startDeviceClientWatcher",
+  "stopDeviceClientWatcher",
   "disconnectDevice",
   "shutdownDaemon",
   "startWSServer",
-  "startWatchAllClients",
-  "stopWatchAllClients",
-  "sendRawMessage",
-  "sendMessage",
+  "startAllDeviceClientWatchers",
+  "stopAllDeviceClientWatchers",
+  "sendMessageWithReply",
+  "sendMessageWithoutReply",
   "closeClient",
 ];
 
@@ -81,9 +81,9 @@ export function isControlRpcMethod(value: unknown): value is ControlRpcMethod {
   );
 }
 
-export function isControlMessageMeta(
+export function isMultiplexerDebugInfo(
   value: unknown,
-): value is ControlMessageMeta {
+): value is MultiplexerDebugInfo {
   if (!isRecord(value)) {
     return false;
   }
@@ -92,7 +92,8 @@ export function isControlMessageMeta(
     isOptional(value.protocolVersion, isNumber) &&
     isOptional(value.clientVersion, isString) &&
     isOptional(value.daemonVersion, isString) &&
-    isOptional(value.capabilities, isStringArray)
+    isOptional(value.processId, isNumber) &&
+    isOptional(value.timestamp, isNumber)
   );
 }
 
@@ -161,8 +162,7 @@ export function isSnapshot(value: unknown): value is Snapshot {
     value.clients.every(isClientSnapshot) &&
     isOptional(value.websocketAppClients, isWebSocketClientSnapshotArray) &&
     isOptional(value.websocketWebClients, isWebSocketClientSnapshotArray) &&
-    isOptional(value.daemonVersion, isString) &&
-    isOptional(value.capabilities, isStringArray)
+    isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
 }
 
@@ -177,8 +177,7 @@ export function isMultiplexerDiscoveryInfo(
     isNumber(value.controlPort) &&
     isNumber(value.heartbeat) &&
     isOptional(value.startedAt, isNumber) &&
-    isOptional(value.daemonVersion, isString) &&
-    isOptional(value.capabilities, isStringArray)
+    isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
 }
 
@@ -192,8 +191,7 @@ export function isMultiplexerHealthResponse(
     isNumber(value.protocolVersion) &&
     isOptional(value.minSupportedProtocolVersion, isNumber) &&
     isNumber(value.heartbeat) &&
-    isOptional(value.daemonVersion, isString) &&
-    isOptional(value.capabilities, isStringArray)
+    isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
 }
 
@@ -205,7 +203,7 @@ export function isControlRpcRequest(
     value.kind !== "rpc" ||
     !isNumber(value.id) ||
     !isControlRpcMethod(value.method) ||
-    !isOptional(value.meta, isControlMessageMeta)
+    !isOptional(value.debugInfo, isMultiplexerDebugInfo)
   ) {
     return false;
   }
@@ -222,7 +220,7 @@ export function isControlRpcResponse(
     value.kind !== "rpc-response" ||
     !isNumber(value.id) ||
     !isBoolean(value.ok) ||
-    !isOptional(value.meta, isControlMessageMeta)
+    !isOptional(value.debugInfo, isMultiplexerDebugInfo)
   ) {
     return false;
   }
@@ -239,7 +237,7 @@ export function isControlEvent(value: unknown): value is ControlEvent {
     !isRecord(value) ||
     value.kind !== "event" ||
     !isString(value.event) ||
-    !isOptional(value.meta, isControlMessageMeta)
+    !isOptional(value.debugInfo, isMultiplexerDebugInfo)
   ) {
     return false;
   }
@@ -285,8 +283,8 @@ function isControlRpcParams(
         isOptional(params.waitTimeout, isBoolean) &&
         isOptionalStringOrNull(params.clientName)
       );
-    case "startWatchClient":
-    case "stopWatchClient":
+    case "startDeviceClientWatcher":
+    case "stopDeviceClientWatcher":
       return (
         isString(params.deviceId) &&
         params.deviceId.length > 0 &&
@@ -298,13 +296,13 @@ function isControlRpcParams(
       return isOptional(params.reason, isString);
     case "startWSServer":
       return Object.keys(params).length === 0;
-    case "startWatchAllClients":
-      return isOptional(params.force, isBoolean);
-    case "stopWatchAllClients":
+    case "startAllDeviceClientWatchers":
       return Object.keys(params).length === 0;
-    case "sendRawMessage":
+    case "stopAllDeviceClientWatchers":
+      return Object.keys(params).length === 0;
+    case "sendMessageWithReply":
       return isNumber(params.clientId) && isRequireMessage(params.message);
-    case "sendMessage":
+    case "sendMessageWithoutReply":
       return (
         (params.target === "app" || params.target === "web") &&
         isNumber(params.clientId) &&
@@ -331,22 +329,26 @@ function isControlRpcResult(
       return Array.isArray(result) && result.every(isDeviceSnapshot);
     case "connectUsbClients":
       return Array.isArray(result) && result.every(isClientSnapshot);
-    case "sendRawMessage":
+    case "sendMessageWithReply":
       return isResponseMessage(result);
     case "startWSServer":
-      return result === undefined || isWebSocketServerInfo(result);
-    case "startWatchClient":
-    case "stopWatchClient":
-    case "startWatchAllClients":
-    case "stopWatchAllClients":
+      return isWebSocketServerInfo(result);
+    case "startDeviceClientWatcher":
+    case "stopDeviceClientWatcher":
+    case "startAllDeviceClientWatchers":
+    case "stopAllDeviceClientWatchers":
     case "disconnectDevice":
     case "shutdownDaemon":
-    case "sendMessage":
+    case "sendMessageWithoutReply":
     case "closeClient":
-      return result === undefined;
+      return isEmptyRecord(result);
     default:
       return false;
   }
+}
+
+function isEmptyRecord(value: unknown): boolean {
+  return isRecord(value) && Object.keys(value).length === 0;
 }
 
 function isLegacyOwnershipChangedEventData(value: unknown): boolean {

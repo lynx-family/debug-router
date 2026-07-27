@@ -24,8 +24,11 @@ function createInfo(overrides = {}) {
     controlPort: 9000,
     heartbeat: 1000,
     startedAt: 900,
-    daemonVersion: "0.0.1",
-    capabilities: ["discovery"],
+    debugInfo: {
+      daemonVersion: "0.0.1",
+      processId: 100,
+      timestamp: 1000,
+    },
     ...overrides,
   };
 }

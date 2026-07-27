@@ -555,7 +555,7 @@ async function runWebSocketMirrorRecoveryFlow() {
       "websocket mirror cleared after daemon kill"
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
-    assert.strictEqual(connector.desiredWatchAllClientsForce, false);
+    assert.strictEqual(connector.desiredWatchAllClientsStarted, true);
     assert.deepStrictEqual(disconnectedClients, [1]);
     assert.deepStrictEqual(disconnectedDevices, ["device-1"]);
     await waitFor(
@@ -603,13 +603,13 @@ async function runCompatibilityUpgradeFlow() {
     const v1 = createVersionedControl(context, "connector-v1", 1, 1);
     await connectRuntime(v1.client);
     const daemonV1 = await waitForDiscoveryProtocol(context, 1);
-    assert.strictEqual(daemonV1.daemonVersion, "connector-v1");
+    assert.strictEqual(daemonV1.debugInfo.daemonVersion, "connector-v1");
 
     const v2 = createVersionedControl(context, "connector-v2", 2, 1);
     await connectRuntime(v2.client);
     const daemonV2 = await waitForDiscoveryProtocol(context, 2);
     assert.notStrictEqual(daemonV2.pid, daemonV1.pid);
-    assert.strictEqual(daemonV2.daemonVersion, "connector-v2");
+    assert.strictEqual(daemonV2.debugInfo.daemonVersion, "connector-v2");
     await waitFor(
       () => !processExists(daemonV1.pid),
       3000,
@@ -624,7 +624,7 @@ async function runCompatibilityUpgradeFlow() {
     await connectRuntime(v3.client);
     const daemonV3 = await waitForDiscoveryProtocol(context, 3);
     assert.notStrictEqual(daemonV3.pid, daemonV2.pid);
-    assert.strictEqual(daemonV3.daemonVersion, "connector-v3");
+    assert.strictEqual(daemonV3.debugInfo.daemonVersion, "connector-v3");
     await waitFor(
       () => !processExists(daemonV2.pid),
       3000,
@@ -691,15 +691,19 @@ function createVersionedControl(
     heartbeatInterval: 25,
     localProtocolVersion: protocolVersion,
     minSupportedProtocolVersion: minSupportedVersion,
-    daemonVersion: name,
+    debugInfo: {
+      daemonVersion: name,
+    },
     multiplexerDaemonIdleTimeout: 150,
     enableWebSocket: false,
   });
   const client = new MultiplexerDaemonClient({
     daemonManager: manager,
     rpcTimeout: 2000,
-    protocolVersion,
-    clientVersion: name,
+    debugInfo: {
+      protocolVersion,
+      clientVersion: name,
+    },
   });
   return { manager, client };
 }

@@ -12,6 +12,8 @@ const {
   waitFor,
 } = require("./helpers/integration_harness");
 
+const TRACE_DAEMON_IDLE_TIMEOUT_MS = 1000;
+
 describe("multiplexer integration connection trace", function () {
   this.timeout(platformTimeout(10000));
 
@@ -28,7 +30,7 @@ describe("multiplexer integration connection trace", function () {
     context = createIntegrationContext("connection-trace", {
       heartbeatInterval: 25,
       staleTimeout: 500,
-      multiplexerDaemonIdleTimeout: 100,
+      multiplexerDaemonIdleTimeout: TRACE_DAEMON_IDLE_TIMEOUT_MS,
     });
     const tracePath = path.join(context.rootDir, "connection-trace.ndjson");
     const first = context.createConnector({
@@ -109,7 +111,7 @@ describe("multiplexer integration connection trace", function () {
       trace.find((node) => node.event === "daemon_idle_timeout_reached")
         .metadata,
       {
-        idleTimeout: 100,
+        idleTimeout: TRACE_DAEMON_IDLE_TIMEOUT_MS,
       }
     );
     assert.strictEqual(

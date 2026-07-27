@@ -88,8 +88,9 @@ describe("MultiplexerDaemon", function () {
       daemonLockPath,
       protocolVersion: 1,
       minSupportedProtocolVersion: 1,
-      daemonVersion: "0.0.1",
-      capabilities: ["daemon"],
+      debugInfo: {
+        daemonVersion: "0.0.1",
+      },
       heartbeatInterval: 100000,
       host,
       hostOption: { source: "test" },
@@ -115,8 +116,12 @@ describe("MultiplexerDaemon", function () {
       controlPort: 9100,
       heartbeat: 1000,
       startedAt: 1000,
-      daemonVersion: "0.0.1",
-      capabilities: ["daemon"],
+      debugInfo: {
+        protocolVersion: 1,
+        daemonVersion: "0.0.1",
+        processId: process.pid,
+        timestamp: 1000,
+      },
     });
     assert.ok(daemon.heartbeatTimer);
   });
@@ -146,8 +151,38 @@ describe("MultiplexerDaemon", function () {
       controlPort: 9100,
       heartbeat: 1500,
       startedAt: 1000,
-      daemonVersion: "0.0.1",
-      capabilities: ["daemon"],
+      debugInfo: {
+        protocolVersion: 1,
+        daemonVersion: "0.0.1",
+        processId: process.pid,
+        timestamp: 1500,
+      },
+    });
+  });
+
+  it("omits debug info from discovery when it is not configured", async function () {
+    const { host } = createHost();
+    createDaemon(host, { debugInfo: undefined });
+
+    await daemon.start();
+    assert.deepStrictEqual(readJson(discoveryPath), {
+      pid: process.pid,
+      protocolVersion: 1,
+      minSupportedProtocolVersion: 1,
+      controlPort: 9100,
+      heartbeat: 1000,
+      startedAt: 1000,
+    });
+
+    now = 1500;
+    daemon.refreshHeartbeat();
+    assert.deepStrictEqual(readJson(discoveryPath), {
+      pid: process.pid,
+      protocolVersion: 1,
+      minSupportedProtocolVersion: 1,
+      controlPort: 9100,
+      heartbeat: 1500,
+      startedAt: 1000,
     });
   });
 

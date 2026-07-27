@@ -128,7 +128,7 @@ export class MultiplexerUsbClient extends Client {
   }
 
   sendRawMessage(message: RequireMessageType): Promise<ResponseMessageType> {
-    return this.daemonClient.call("sendRawMessage", {
+    return this.daemonClient.call("sendMessageWithReply", {
       clientId: this.clientId(),
       message,
     });
@@ -136,7 +136,7 @@ export class MultiplexerUsbClient extends Client {
 
   sendMessage(message: unknown): void {
     void this.daemonClient
-      .call("sendMessage", {
+      .call("sendMessageWithoutReply", {
         target: "app",
         clientId: this.clientId(),
         message,

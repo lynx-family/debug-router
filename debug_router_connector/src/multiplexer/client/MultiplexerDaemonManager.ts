@@ -15,6 +15,7 @@ import {
   MULTIPLEXER_PROTOCOL_VERSION,
   MultiplexerDiscoveryInfo,
 } from "../protocol/discovery";
+import type { MultiplexerDebugInfo } from "../protocol/debuginfo";
 import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
 import {
   isMultiplexerHealthResponse,
@@ -69,8 +70,7 @@ export type MultiplexerDaemonManagerOption = {
   controlPort?: number;
   heartbeatInterval?: number;
   minSupportedProtocolVersion?: number;
-  daemonVersion?: string;
-  capabilities?: string[];
+  debugInfo?: MultiplexerDebugInfo;
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
   forceRespawnDaemon?: boolean;
@@ -103,8 +103,7 @@ export class MultiplexerDaemonManager {
   readonly controlPort: number;
   readonly heartbeatInterval?: number;
   readonly minSupportedProtocolVersion: number;
-  readonly daemonVersion?: string;
-  readonly capabilities?: string[];
+  readonly debugInfo?: MultiplexerDebugInfo;
   readonly legacyDriverDir?: string;
   readonly multiplexerDaemonIdleTimeout?: number;
   readonly enableWebSocket?: boolean;
@@ -143,8 +142,7 @@ export class MultiplexerDaemonManager {
     this.minSupportedProtocolVersion =
       option.minSupportedProtocolVersion ??
       MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
-    this.daemonVersion = option.daemonVersion;
-    this.capabilities = option.capabilities;
+    this.debugInfo = option.debugInfo ? { ...option.debugInfo } : undefined;
     this.legacyDriverDir = option.legacyDriverDir;
     this.multiplexerDaemonIdleTimeout = option.multiplexerDaemonIdleTimeout;
     this.forceRespawnDaemonPending = option.forceRespawnDaemon ?? false;
@@ -548,12 +546,8 @@ export class MultiplexerDaemonManager {
       args.push("--heartbeat-interval", String(this.heartbeatInterval));
     }
 
-    if (this.daemonVersion) {
-      args.push("--daemon-version", this.daemonVersion);
-    }
-
-    if (this.capabilities?.length) {
-      args.push("--capabilities", this.capabilities.join(","));
+    if (this.debugInfo) {
+      args.push("--debug-info", JSON.stringify(this.debugInfo));
     }
 
     if (this.legacyDriverDir) {
@@ -624,6 +618,7 @@ export class MultiplexerDaemonManager {
           port: info.controlPort,
           path: MULTIPLEXER_HEALTH_PATH,
           timeout: this.healthCheckTimeout,
+          agent: false,
         },
         (response) => {
           if (response.statusCode !== 200) {

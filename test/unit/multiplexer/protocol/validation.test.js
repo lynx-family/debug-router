@@ -8,7 +8,7 @@ require("../register_ts");
 
 const {
   isClientSnapshot,
-  isControlMessageMeta,
+  isMultiplexerDebugInfo,
   isControlEvent,
   isControlRpcMethod,
   isControlRpcRequest,
@@ -58,8 +58,12 @@ function createSnapshot() {
     generatedAt: 1000,
     devices: [createDeviceSnapshot()],
     clients: [createClientSnapshot()],
-    daemonVersion: "0.0.1",
-    capabilities: ["control"],
+    debugInfo: {
+      protocolVersion: 1,
+      daemonVersion: "0.0.1",
+      processId: 100,
+      timestamp: 1000,
+    },
     extraFutureField: true,
   };
 }
@@ -165,27 +169,34 @@ describe("multiplexer protocol validation", function () {
     assert.strictEqual(isControlRpcMethod("unknown"), false);
   });
 
-  it("validates meta optional fields and rejects invalid known optional fields", function () {
+  it("validates debugInfo optional fields and rejects invalid typed fields", function () {
     assert.strictEqual(
-      isControlMessageMeta({
+      isMultiplexerDebugInfo({
         protocolVersion: 1,
         clientVersion: "0.0.1",
         daemonVersion: "0.0.1",
-        capabilities: ["control"],
+        processId: 100,
+        timestamp: 1000,
         unknownFutureField: true,
       }),
       true
     );
-    assert.strictEqual(isControlMessageMeta(null), false);
+    assert.strictEqual(isMultiplexerDebugInfo(null), false);
     assert.strictEqual(
-      isControlMessageMeta({
-        capabilities: ["control", 1],
+      isMultiplexerDebugInfo({
+        protocolVersion: "1",
       }),
       false
     );
     assert.strictEqual(
-      isControlMessageMeta({
-        protocolVersion: "1",
+      isMultiplexerDebugInfo({
+        processId: "100",
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerDebugInfo({
+        timestamp: "1000",
       }),
       false
     );
@@ -246,20 +257,6 @@ describe("multiplexer protocol validation", function () {
     assert.strictEqual(
       isSnapshot({
         ...createSnapshot(),
-        daemonVersion: 1,
-      }),
-      false
-    );
-    assert.strictEqual(
-      isSnapshot({
-        ...createSnapshot(),
-        capabilities: ["control", 1],
-      }),
-      false
-    );
-    assert.strictEqual(
-      isSnapshot({
-        ...createSnapshot(),
         websocketAppClients: [
           { ...createWebSocketClientSnapshot(), network: "USB" },
         ],
@@ -304,7 +301,11 @@ describe("multiplexer protocol validation", function () {
         controlPort: 10000,
         heartbeat: Date.now(),
         startedAt: Date.now(),
-        capabilities: ["control"],
+        debugInfo: {
+          daemonVersion: "0.0.1",
+          processId: 123,
+          timestamp: 1000,
+        },
         extraFutureField: "ignored",
       }),
       true
@@ -339,24 +340,17 @@ describe("multiplexer protocol validation", function () {
       false
     );
     assert.strictEqual(
-      isMultiplexerDiscoveryInfo({
-        pid: 123,
-        protocolVersion: 1,
-        controlPort: 10000,
-        heartbeat: Date.now(),
-        capabilities: ["control", 1],
-      }),
-      false
-    );
-
-    assert.strictEqual(
       isMultiplexerHealthResponse({
         ok: true,
         pid: 123,
         protocolVersion: 1,
         minSupportedProtocolVersion: 1,
         heartbeat: Date.now(),
-        daemonVersion: "0.0.1",
+        debugInfo: {
+          daemonVersion: "0.0.1",
+          processId: 123,
+          timestamp: 1000,
+        },
       }),
       true
     );
@@ -379,16 +373,6 @@ describe("multiplexer protocol validation", function () {
       }),
       false
     );
-    assert.strictEqual(
-      isMultiplexerHealthResponse({
-        ok: true,
-        pid: 123,
-        protocolVersion: 1,
-        heartbeat: Date.now(),
-        capabilities: [1],
-      }),
-      false
-    );
   });
 
   it("validates every control RPC request method branch", function () {
@@ -408,17 +392,16 @@ describe("multiplexer protocol validation", function () {
         },
       ],
       ["connectUsbClients", { deviceId: "device-1", clientName: "demo" }],
-      ["startWatchClient", { deviceId: "device-1" }],
-      ["stopWatchClient", { deviceId: "device-1" }],
+      ["startDeviceClientWatcher", { deviceId: "device-1" }],
+      ["stopDeviceClientWatcher", { deviceId: "device-1" }],
       ["disconnectDevice", { deviceId: "device-1" }],
       ["shutdownDaemon", {}],
       ["shutdownDaemon", { reason: "daemon-protocol-older-than-connector" }],
       ["startWSServer", {}],
-      ["startWatchAllClients", {}],
-      ["startWatchAllClients", { force: true }],
-      ["stopWatchAllClients", {}],
+      ["startAllDeviceClientWatchers", {}],
+      ["stopAllDeviceClientWatchers", {}],
       [
-        "sendRawMessage",
+        "sendMessageWithReply",
         {
           clientId: 1,
           message: {
@@ -428,18 +411,18 @@ describe("multiplexer protocol validation", function () {
         },
       ],
       [
-        "sendRawMessage",
+        "sendMessageWithReply",
         {
           clientId: 1,
           message: createCustomizedRequestMessage(),
         },
       ],
-      ["sendMessage", { target: "app", clientId: 1, message: null }],
-      ["sendMessage", { target: "app", clientId: 1, message: undefined }],
-      ["sendMessage", { target: "web", clientId: -1, message: "broadcast" }],
-      ["sendMessage", { target: "web", clientId: 2, message: "targeted" }],
+      ["sendMessageWithoutReply", { target: "app", clientId: 1, message: null }],
+      ["sendMessageWithoutReply", { target: "app", clientId: 1, message: undefined }],
+      ["sendMessageWithoutReply", { target: "web", clientId: -1, message: "broadcast" }],
+      ["sendMessageWithoutReply", { target: "web", clientId: 2, message: "targeted" }],
       [
-        "sendMessage",
+        "sendMessageWithoutReply",
         { target: "web", clientId: -1, message: { event: "broadcast" } },
       ],
       ["closeClient", { clientId: 1 }],
@@ -449,9 +432,10 @@ describe("multiplexer protocol validation", function () {
       assert.strictEqual(
         isControlRpcRequest(
           createRpcRequest(method, params, {
-            meta: {
+            debugInfo: {
               protocolVersion: 1,
-              capabilities: ["control"],
+              processId: 100,
+              timestamp: 1000,
             },
           })
         ),
@@ -465,13 +449,6 @@ describe("multiplexer protocol validation", function () {
     const invalidCases = [
       { kind: "event", id: 1, method: "connectDevices", params: {} },
       { kind: "rpc", id: "1", method: "connectDevices", params: {} },
-      {
-        kind: "rpc",
-        id: 1,
-        method: "connectDevices",
-        params: {},
-        meta: { capabilities: [1] },
-      },
       createRpcRequest("unknown", {}),
       createRpcRequest("connectDevices", null),
       createRpcRequest("connectDevices", { timeout: "1000" }),
@@ -491,22 +468,23 @@ describe("multiplexer protocol validation", function () {
         action: "start",
         deviceId: "device-1",
       }),
-      createRpcRequest("startWatchClient", {}),
-      createRpcRequest("startWatchClient", { deviceId: 1 }),
-      createRpcRequest("startWatchClient", { deviceId: "" }),
-      createRpcRequest("startWatchClient", {
+      createRpcRequest("startDeviceClientWatcher", {}),
+      createRpcRequest("startDeviceClientWatcher", { deviceId: 1 }),
+      createRpcRequest("startDeviceClientWatcher", { deviceId: "" }),
+      createRpcRequest("startDeviceClientWatcher", {
         deviceId: "device-1",
         action: "start",
       }),
-      createRpcRequest("stopWatchClient", {}),
-      createRpcRequest("stopWatchClient", { deviceId: 1 }),
-      createRpcRequest("stopWatchClient", { deviceId: "" }),
-      createRpcRequest("stopWatchClient", {
+      createRpcRequest("stopDeviceClientWatcher", {}),
+      createRpcRequest("stopDeviceClientWatcher", { deviceId: 1 }),
+      createRpcRequest("stopDeviceClientWatcher", { deviceId: "" }),
+      createRpcRequest("stopDeviceClientWatcher", {
         deviceId: "device-1",
         action: "stop",
       }),
-      createRpcRequest("startWatchAllClients", { force: "true" }),
-      createRpcRequest("stopWatchAllClients", { force: false }),
+      createRpcRequest("startAllDeviceClientWatchers", { force: true }),
+      createRpcRequest("startAllDeviceClientWatchers", { force: "true" }),
+      createRpcRequest("stopAllDeviceClientWatchers", { force: false }),
       createRpcRequest("disconnectDevice", {}),
       createRpcRequest("disconnectDevice", { deviceId: 1 }),
       createRpcRequest("shutdownDaemon", { reason: 1 }),
@@ -520,16 +498,16 @@ describe("multiplexer protocol validation", function () {
         clientId: 1,
         method: "Runtime.evaluate",
       }),
-      createRpcRequest("sendRawMessage", { clientId: "1", message: {} }),
-      createRpcRequest("sendRawMessage", {
+      createRpcRequest("sendMessageWithReply", { clientId: "1", message: {} }),
+      createRpcRequest("sendMessageWithReply", {
         clientId: 1,
         message: { event: "Initialize", data: "1" },
       }),
-      createRpcRequest("sendRawMessage", {
+      createRpcRequest("sendMessageWithReply", {
         clientId: 1,
         message: { event: "Customized", data: null },
       }),
-      createRpcRequest("sendRawMessage", {
+      createRpcRequest("sendMessageWithReply", {
         clientId: 1,
         message: {
           ...createCustomizedRequestMessage(),
@@ -539,26 +517,26 @@ describe("multiplexer protocol validation", function () {
           },
         },
       }),
-      createRpcRequest("sendMessage", { message: "hello" }),
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", { message: "hello" }),
+      createRpcRequest("sendMessageWithoutReply", {
         target: "app",
         message: "hello",
       }),
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "app",
         clientId: -1,
         message: "hello",
       }),
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "web",
         message: "hello",
       }),
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "web",
         clientId: "2",
         message: "hello",
       }),
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "unknown",
         clientId: 1,
         message: "hello",
@@ -576,22 +554,32 @@ describe("multiplexer protocol validation", function () {
 
   it("validates all method-aware control RPC response result branches", function () {
     const validCases = [
-      createRpcResponse([createDeviceSnapshot()], "connectDevices"),
+      createRpcResponse([createDeviceSnapshot()], "connectDevices", {
+        debugInfo: {
+          protocolVersion: 1,
+          daemonVersion: "0.0.1",
+          processId: 100,
+          timestamp: 1000,
+        },
+      }),
       createRpcResponse([createClientSnapshot()], "connectUsbClients"),
-      createRpcResponse(undefined, "startWatchClient"),
-      createRpcResponse(undefined, "stopWatchClient"),
-      createRpcResponse(undefined, "startWatchAllClients"),
-      createRpcResponse(undefined, "stopWatchAllClients"),
-      createRpcResponse(undefined, "disconnectDevice"),
-      createRpcResponse(undefined, "shutdownDaemon"),
-      createRpcResponse(undefined, "startWSServer"),
-      createRpcResponse(createRegisterResponse(), "sendRawMessage"),
+      createRpcResponse({}, "startDeviceClientWatcher"),
+      createRpcResponse({}, "stopDeviceClientWatcher"),
+      createRpcResponse({}, "startAllDeviceClientWatchers"),
+      createRpcResponse({}, "stopAllDeviceClientWatchers"),
+      createRpcResponse({}, "disconnectDevice"),
+      createRpcResponse({}, "shutdownDaemon"),
+      createRpcResponse(
+        { port: 19783, host: "127.0.0.1:19783" },
+        "startWSServer"
+      ),
+      createRpcResponse(createRegisterResponse(), "sendMessageWithReply"),
       createRpcResponse(
         { event: "Customized", data: { ok: true } },
-        "sendRawMessage"
+        "sendMessageWithReply"
       ),
-      createRpcResponse(undefined, "sendMessage"),
-      createRpcResponse(undefined, "closeClient"),
+      createRpcResponse({}, "sendMessageWithoutReply"),
+      createRpcResponse({}, "closeClient"),
     ];
 
     for (const [response, method] of validCases) {
@@ -610,23 +598,17 @@ describe("multiplexer protocol validation", function () {
         { kind: "rpc-response", id: 1, ok: "true", result: undefined },
         "startWSServer",
       ],
-      [
-        {
-          kind: "rpc-response",
-          id: 1,
-          ok: true,
-          result: undefined,
-          meta: { capabilities: [1] },
-        },
-        "startWSServer",
-      ],
       createRpcResponse([createDeviceSnapshot()], "connectUsbClients"),
       createRpcResponse([createClientSnapshot()], "connectDevices"),
       createRpcResponse(
         { event: "Register", data: { id: 1, info: { app: 1 } } },
-        "sendRawMessage"
+        "sendMessageWithReply"
       ),
       createRpcResponse(null, "startWSServer"),
+      createRpcResponse({}, "startWSServer"),
+      createRpcResponse(undefined, "startWSServer"),
+      createRpcResponse(undefined, "closeClient"),
+      createRpcResponse({ unexpected: true }, "shutdownDaemon"),
       [
         {
           kind: "rpc-response",
@@ -707,7 +689,14 @@ describe("multiplexer protocol validation", function () {
 
   it("validates every control event branch", function () {
     const validEvents = [
-      createEvent("snapshot", createSnapshot()),
+      createEvent("snapshot", createSnapshot(), {
+        debugInfo: {
+          protocolVersion: 1,
+          daemonVersion: "0.0.1",
+          processId: 100,
+          timestamp: 1000,
+        },
+      }),
       createEvent("legacy-ownership-changed", {
         status: "attached",
         ownerPid: 100,
@@ -745,9 +734,6 @@ describe("multiplexer protocol validation", function () {
     const invalidEvents = [
       null,
       createEvent("snapshot", createSnapshot(), { kind: "rpc" }),
-      createEvent("snapshot", createSnapshot(), {
-        meta: { capabilities: [1] },
-      }),
       { kind: "event", event: 1, data: {} },
       createEvent("unknown", {}),
       createEvent("snapshot", { ...createSnapshot(), generatedAt: "1000" }),

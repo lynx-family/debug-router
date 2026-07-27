@@ -73,7 +73,7 @@ export class MultiplexerWebSocketClient extends WebSocketClient {
 
   sendMessage(message: string): void {
     void this.daemonClient
-      .call("sendMessage", {
+      .call("sendMessageWithoutReply", {
         target: this.type() === "Driver" ? "web" : "app",
         clientId: this.clientId(),
         message,
@@ -105,7 +105,7 @@ export class MultiplexerWebSocketClient extends WebSocketClient {
     };
 
     return this.daemonClient
-      .call("sendRawMessage", {
+      .call("sendMessageWithReply", {
         clientId: this.clientId(),
         message,
       })

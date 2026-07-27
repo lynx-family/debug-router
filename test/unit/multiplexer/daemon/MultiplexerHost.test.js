@@ -519,8 +519,7 @@ function createHost(options = {}) {
     physicalConnector: physical,
     protocolVersion: options.protocolVersion,
     minSupportedProtocolVersion: options.minSupportedProtocolVersion,
-    daemonVersion: options.daemonVersion,
-    capabilities: options.capabilities,
+    debugInfo: options.debugInfo,
     controlPort: options.controlPort,
     manualConnect: options.manualConnect,
     enableWebSocket: options.enableWebSocket,
@@ -784,7 +783,9 @@ describe("MultiplexerHost", function () {
     const { host } = createHost({
       protocolVersion: 3,
       minSupportedProtocolVersion: 2,
-      daemonVersion: "0.0.3",
+      debugInfo: {
+        daemonVersion: "0.0.3",
+      },
       connectionTrace: {
         enabled: true,
         output: {
@@ -817,7 +818,12 @@ describe("MultiplexerHost", function () {
         controlPort: 8899,
         protocolVersion: 3,
         minSupportedProtocolVersion: 2,
-        daemonVersion: "0.0.3",
+        debugInfo: {
+          protocolVersion: 3,
+          daemonVersion: "0.0.3",
+          processId: process.pid,
+          timestamp: 1000,
+        },
       });
       assert.deepStrictEqual(trace[1].metadata, {
         ownerPid: 100,
@@ -925,8 +931,9 @@ describe("MultiplexerHost", function () {
   it("sends an initial snapshot to newly connected controls", function () {
     const { host, physical } = createHost({
       protocolVersion: 2,
-      daemonVersion: "0.0.2",
-      capabilities: ["control", "snapshot"],
+      debugInfo: {
+        daemonVersion: "0.0.2",
+      },
       now: () => 1234,
     });
     const device = createDevice("device-1", {
@@ -982,8 +989,12 @@ describe("MultiplexerHost", function () {
                 },
               },
             ],
-            daemonVersion: "0.0.2",
-            capabilities: ["control", "snapshot"],
+            debugInfo: {
+              protocolVersion: 2,
+              daemonVersion: "0.0.2",
+              processId: process.pid,
+              timestamp: 1234,
+            },
           },
         },
       },
@@ -1195,8 +1206,6 @@ describe("MultiplexerHost", function () {
       generatedAt: 3000,
       devices: [],
       clients: [],
-      daemonVersion: undefined,
-      capabilities: undefined,
       websocketAppClients: [],
       websocketWebClients: [
         {
@@ -1312,7 +1321,7 @@ describe("MultiplexerHost", function () {
     assert.deepStrictEqual(physical.getDeviceUsbClientsCalls, []);
   });
 
-  it("startWatchAllClients reacquires legacy ownership and restores watchers", async function () {
+  it("startAllDeviceClientWatchers reacquires legacy ownership and restores watchers", async function () {
     const { host, physical } = createHost({
       connectionTrace: {
         enabled: true,
@@ -1328,7 +1337,7 @@ describe("MultiplexerHost", function () {
     host.legacyOwnershipGuard.emitStatus("unattached", "legacy-preempted", 200);
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchAllClients", { force: false })
+      createRpcRequest("startAllDeviceClientWatchers", {})
     );
     assert.deepStrictEqual(await host.getDevices(), [device]);
 
@@ -1763,26 +1772,26 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("startWatchClient starts device discovery and watches each device only once", async function () {
+  it("startDeviceClientWatcher starts device discovery and watches each device only once", async function () {
     const { host, physical } = createHost();
     const device = createDevice("device-1");
     physical.devices.set(device.serial, device);
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchClient", {
+      createRpcRequest("startDeviceClientWatcher", {
         deviceId: "device-1",
       })
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchClient", {
+      createRpcRequest("startDeviceClientWatcher", {
         deviceId: "device-1",
       })
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchClient", {
+      createRpcRequest("startDeviceClientWatcher", {
         deviceId: "missing-device",
       })
     );
@@ -1798,32 +1807,32 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(device.state.startWatchCalls, 1);
   });
 
-  it("stopWatchClient stops existing device watchers, ignores missing devices, and allows later restart", async function () {
+  it("stopDeviceClientWatcher stops existing device watchers, ignores missing devices, and allows later restart", async function () {
     const { host, physical } = createHost();
     const device = createDevice("device-1");
     physical.devices.set(device.serial, device);
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchClient", {
+      createRpcRequest("startDeviceClientWatcher", {
         deviceId: "device-1",
       })
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("stopWatchClient", {
+      createRpcRequest("stopDeviceClientWatcher", {
         deviceId: "device-1",
       })
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("stopWatchClient", {
+      createRpcRequest("stopDeviceClientWatcher", {
         deviceId: "missing-device",
       })
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchClient", {
+      createRpcRequest("startDeviceClientWatcher", {
         deviceId: "device-1",
       })
     );
@@ -1842,7 +1851,7 @@ describe("MultiplexerHost", function () {
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchClient", {
+      createRpcRequest("startDeviceClientWatcher", {
         deviceId: "device-1",
       })
     );
@@ -1860,7 +1869,7 @@ describe("MultiplexerHost", function () {
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchClient", {
+      createRpcRequest("startDeviceClientWatcher", {
         deviceId: "device-1",
       })
     );
@@ -1872,7 +1881,7 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("startWatchAllClients watches current and future devices", async function () {
+  it("startAllDeviceClientWatchers watches current and future devices", async function () {
     const { host, physical } = createHost();
     const firstDevice = createDevice("device-1");
     const secondDevice = createDevice("device-2");
@@ -1882,7 +1891,7 @@ describe("MultiplexerHost", function () {
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchAllClients", { force: true })
+      createRpcRequest("startAllDeviceClientWatchers", {})
     );
     physical.devices.set(secondDevice.serial, secondDevice);
     physical.emit("device-connected", secondDevice);
@@ -1894,7 +1903,7 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("stopWatchAllClients stops current watchers and ignores later devices", async function () {
+  it("stopAllDeviceClientWatchers stops current watchers and ignores later devices", async function () {
     const { host, physical } = createHost();
     const firstDevice = createDevice("device-1");
     const secondDevice = createDevice("device-2");
@@ -1906,9 +1915,9 @@ describe("MultiplexerHost", function () {
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("startWatchAllClients", { force: true })
+      createRpcRequest("startAllDeviceClientWatchers", {})
     );
-    await host.handleControlRpc(1, createRpcRequest("stopWatchAllClients", {}));
+    await host.handleControlRpc(1, createRpcRequest("stopAllDeviceClientWatchers", {}));
 
     physical.devices.set(laterDevice.serial, laterDevice);
     physical.emit("device-connected", laterDevice);
@@ -1929,7 +1938,7 @@ describe("MultiplexerHost", function () {
     );
   });
 
-  it("stopWatchAllClients cancels an in-flight startWatchAllClients request", async function () {
+  it("stopAllDeviceClientWatchers cancels an in-flight startAllDeviceClientWatchers request", async function () {
     const deferred = createDeferred();
     const { host, physical } = createHost({
       connectDevicesImpl: () => deferred.promise,
@@ -1939,10 +1948,10 @@ describe("MultiplexerHost", function () {
 
     const starting = host.handleControlRpc(
       1,
-      createRpcRequest("startWatchAllClients", { force: true })
+      createRpcRequest("startAllDeviceClientWatchers", {})
     );
     await nextTick();
-    await host.handleControlRpc(1, createRpcRequest("stopWatchAllClients", {}));
+    await host.handleControlRpc(1, createRpcRequest("stopAllDeviceClientWatchers", {}));
 
     deferred.resolve([device]);
     await starting;
@@ -1952,7 +1961,7 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(host.allClientWatchersRequested, false);
   });
 
-  it("routes sendRawMessage and sendMessage RPCs through Host", async function () {
+  it("routes sendMessageWithReply and sendMessageWithoutReply RPCs through Host", async function () {
     const { host, physical } = createHost();
     const controlServer = attachControlServer(host);
     const client = createClient(12);
@@ -1966,7 +1975,7 @@ describe("MultiplexerHost", function () {
 
     const rawResultPromise = host.handleControlRpc(
       1,
-      createRpcRequest("sendRawMessage", {
+      createRpcRequest("sendMessageWithReply", {
         clientId: 12,
         message: rawMessage,
       })
@@ -1991,7 +2000,7 @@ describe("MultiplexerHost", function () {
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "app",
         clientId: 12,
         message: createCustomizedEnvelope({
@@ -2057,14 +2066,14 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(client.state.closeCalls, 1);
   });
 
-  it("sendRawMessage rejects when Host cannot find the runtime client", async function () {
+  it("sendMessageWithReply rejects when Host cannot find the runtime client", async function () {
     const { host } = createHost();
 
     await assert.rejects(
       () =>
         host.handleControlRpc(
           1,
-          createRpcRequest("sendRawMessage", {
+          createRpcRequest("sendMessageWithReply", {
             clientId: 500,
             message: {
               event: "Initialize",
@@ -2083,14 +2092,14 @@ describe("MultiplexerHost", function () {
     );
   });
 
-  it("sendMessage app target rewrites USB messages, filters USB connect handshakes, and rejects invalid JSON", async function () {
+  it("sendMessageWithoutReply app target rewrites USB messages, filters USB connect handshakes, and rejects invalid JSON", async function () {
     const { host, physical } = createHost();
     const client = createClient(13);
     physical.usbClients.set(client.clientId(), client);
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "app",
         clientId: 13,
         message: JSON.stringify({
@@ -2107,7 +2116,7 @@ describe("MultiplexerHost", function () {
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "app",
         clientId: 13,
         message: JSON.stringify({
@@ -2120,7 +2129,7 @@ describe("MultiplexerHost", function () {
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "app",
         clientId: 13,
         message: JSON.stringify({
@@ -2135,7 +2144,7 @@ describe("MultiplexerHost", function () {
       () =>
         host.handleControlRpc(
           1,
-          createRpcRequest("sendMessage", {
+          createRpcRequest("sendMessageWithoutReply", {
             target: "app",
             clientId: 13,
             message: "{bad-json",
@@ -2161,14 +2170,14 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("sendMessage app target preserves missing and zero client_id values", async function () {
+  it("sendMessageWithoutReply app target preserves missing and zero client_id values", async function () {
     const { host, physical } = createHost();
     const client = createClient(14);
     physical.usbClients.set(client.clientId(), client);
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "app",
         clientId: 14,
         message: JSON.stringify({
@@ -2184,7 +2193,7 @@ describe("MultiplexerHost", function () {
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "app",
         clientId: 14,
         message: JSON.stringify({
@@ -2223,7 +2232,7 @@ describe("MultiplexerHost", function () {
     ]);
   });
 
-  it("sendMessage app target rejects missing clients before attempting control or websocket routing", async function () {
+  it("sendMessageWithoutReply app target rejects missing clients before attempting control or websocket routing", async function () {
     const disabled = createHost({
       enableWebSocket: false,
     });
@@ -2235,7 +2244,7 @@ describe("MultiplexerHost", function () {
       () =>
         disabled.host.handleControlRpc(
           1,
-          createRpcRequest("sendMessage", {
+          createRpcRequest("sendMessageWithoutReply", {
             target: "app",
             clientId: 404,
             message: "{}",
@@ -2254,7 +2263,7 @@ describe("MultiplexerHost", function () {
       () =>
         enabled.host.handleControlRpc(
           1,
-          createRpcRequest("sendMessage", {
+          createRpcRequest("sendMessageWithoutReply", {
             target: "app",
             clientId: 404,
             message: "{}",
@@ -2373,7 +2382,7 @@ describe("MultiplexerHost", function () {
 
     const pending = host.handleControlRpc(
       77,
-      createRpcRequest("sendRawMessage", {
+      createRpcRequest("sendMessageWithReply", {
         clientId: 91,
         message: createCustomizedEnvelope({
           id: 81,
@@ -2403,7 +2412,7 @@ describe("MultiplexerHost", function () {
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "app",
         clientId: 93,
         message: rawWifiMessage,
@@ -2411,7 +2420,7 @@ describe("MultiplexerHost", function () {
     );
     const resultPromise = host.handleControlRpc(
       1,
-      createRpcRequest("sendRawMessage", {
+      createRpcRequest("sendMessageWithReply", {
         clientId: 93,
         message: createCustomizedEnvelope({
           id: 82,
@@ -2453,14 +2462,21 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(driver.state.closeCalls, 0);
   });
 
-  it("startWSServer returns when websocket is disabled", async function () {
+  it("startWSServer rejects when websocket is disabled", async function () {
     const disabled = createHost({
       enableWebSocket: false,
     });
 
-    await disabled.host.handleControlRpc(
-      1,
-      createRpcRequest("startWSServer", {})
+    await assert.rejects(
+      () =>
+        disabled.host.handleControlRpc(
+          1,
+          createRpcRequest("startWSServer", {})
+        ),
+      (error) =>
+        error.code === "websocket-disabled" &&
+        error.message ===
+          "The multiplexer daemon does not support WebSocket because enableWebSocket is disabled"
     );
   });
 
@@ -2691,7 +2707,7 @@ describe("MultiplexerHost", function () {
     assert.strictEqual(calls, 2);
   });
 
-  it("sendMessage web broadcast returns when websocket is disabled or the server has not started", async function () {
+  it("sendMessageWithoutReply web broadcast returns when websocket is disabled or the server has not started", async function () {
     const disabled = createHost({
       enableWebSocket: false,
     });
@@ -2701,7 +2717,7 @@ describe("MultiplexerHost", function () {
 
     await disabled.host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "web",
         clientId: -1,
         message: "hello",
@@ -2709,7 +2725,7 @@ describe("MultiplexerHost", function () {
     );
     await enabled.host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "web",
         clientId: -1,
         message: "hello",
@@ -2717,7 +2733,7 @@ describe("MultiplexerHost", function () {
     );
   });
 
-  it("sendMessage web target sends to the specified Driver instead of an App runtime", async function () {
+  it("sendMessageWithoutReply web target sends to the specified Driver instead of an App runtime", async function () {
     const { host } = createHost({
       enableWebSocket: true,
     });
@@ -2726,7 +2742,7 @@ describe("MultiplexerHost", function () {
 
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "web",
         clientId: -1,
         message: { event: "broadcast" },
@@ -2734,7 +2750,7 @@ describe("MultiplexerHost", function () {
     );
     await host.handleControlRpc(
       1,
-      createRpcRequest("sendMessage", {
+      createRpcRequest("sendMessageWithoutReply", {
         target: "web",
         clientId: 42,
         message: "targeted",
@@ -3523,7 +3539,7 @@ describe("MultiplexerHost", function () {
 
     const pendingControl = host.handleControlRpc(
       77,
-      createRpcRequest("sendRawMessage", {
+      createRpcRequest("sendMessageWithReply", {
         clientId: 41,
         message: createCustomizedEnvelope({
           id: 83,

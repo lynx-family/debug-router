@@ -50,7 +50,7 @@ type WebSocketServerCompat = {
  * daemon entry and daemon-global options. The replacement is one-shot and
  * disconnects every Connector sharing that daemon. Unlike normal shared
  * daemon startup, the replacement uses this Connector's manualConnect and
- * capability enable flags exactly, so disabled-capability scenarios can be
+ * capability options exactly, so disabled-capability scenarios can be
  * tested. Closing this Connector force-stops the daemon and removes its
  * discovery/lock artifacts instead of waiting for the daemon idle timeout.
  * Close never starts or reconnects a daemon, but it still cleans up a daemon
@@ -74,6 +74,7 @@ export type DebugRouterConnectorOption = PhysicalConnectorOption & {
   multiplexerDaemonIdleTimeout?: number;
   multiplexerStartupTimeout?: number;
   multiplexerStaleTimeout?: number;
+  multiplexerHeartbeatInterval?: number;
   multiplexerRpcTimeout?: number;
   multiplexerRootDir?: string;
   multiplexerDataDir?: string;
@@ -125,7 +126,7 @@ export class DebugRouterConnector {
   private startingWSServer: Promise<void> | null = null;
   private desiredDeviceDiscoveryStarted = false;
   private desiredDeviceDiscoveryAutoListenClients = false;
-  private desiredWatchAllClientsForce: boolean | undefined;
+  private desiredWatchAllClientsStarted = false;
   private watchAllClientsStarted = false;
   private desiredRecoveryTimer: NodeJS.Timeout | null = null;
   private unsubscribeDaemonEvents: (() => void) | undefined;
@@ -133,11 +134,12 @@ export class DebugRouterConnector {
 
   constructor(
     /**
-     * Connector enable flags are normally instance-local. The shared daemon
-     * keeps the full set of generally available capabilities enabled, while
+     * Connector capability options are normally instance-local. The shared
+     * daemon keeps the generally available capabilities enabled, while
      * each Connector filters the devices, clients, snapshots, and events it
      * exposes. forceRespawnDaemon is the debug/test exception: its replacement
-     * daemon receives this Connector's enable and manualConnect values exactly.
+     * daemon receives this Connector's capability and manualConnect option
+     * values exactly.
      *
      * Options without merge semantics (for example websocketOption,
      * adbHostPort, hdcHostPort, networkDeviceOpt, retry/trace output, daemon
@@ -172,7 +174,7 @@ export class DebugRouterConnector {
     this.roomId = option.websocketOption?.roomId;
     if (this.forceRespawnDaemon) {
       defaultLogger.warn(
-        "forceRespawnDaemon is enabled; the first daemon access will replace the daemon shared by this multiplexerDataDir using this Connector's local daemon entry and exact capability configuration, and closing this Connector will force-stop that daemon and clean its artifacts.",
+        "forceRespawnDaemon is enabled; the first daemon access will replace the daemon shared by this multiplexerDataDir using this Connector's local daemon entry and exact capability options, and closing this Connector will force-stop that daemon and clean its artifacts.",
       );
     }
 
@@ -194,6 +196,7 @@ export class DebugRouterConnector {
       startupTimeout:
         option.multiplexerStartupTimeout ?? DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT,
       staleTimeout,
+      heartbeatInterval: option.multiplexerHeartbeatInterval,
       legacyDriverDir: option.multiplexerLegacyDriverDir ?? driver_dir,
       multiplexerDaemonIdleTimeout:
         option.multiplexerDaemonIdleTimeout ??
@@ -246,9 +249,9 @@ export class DebugRouterConnector {
     );
   }
 
-  startWatchAllClients(force: boolean = true): void {
-    this.desiredWatchAllClientsForce = force;
-    void this.ensureWatchAllClientsStarted(force).catch((error: Error) => {
+  startWatchAllClients(_force: boolean = true): void {
+    this.desiredWatchAllClientsStarted = true;
+    void this.ensureWatchAllClientsStarted().catch((error: Error) => {
       defaultLogger.warn(
         `Failed to start multiplexer client watchers: ${error.message}`,
       );
@@ -257,9 +260,9 @@ export class DebugRouterConnector {
   }
 
   stopWatchAllClients(): void {
-    this.desiredWatchAllClientsForce = undefined;
+    this.desiredWatchAllClientsStarted = false;
     void this.daemonClient
-      .call("stopWatchAllClients", {})
+      .call("stopAllDeviceClientWatchers", {})
       .then(() => {
         this.watchAllClientsStarted = false;
       })
@@ -270,20 +273,17 @@ export class DebugRouterConnector {
       });
   }
 
-  private async ensureWatchAllClientsStarted(force: boolean): Promise<void> {
-    await this.daemonClient.call("startWatchAllClients", { force });
+  private async ensureWatchAllClientsStarted(): Promise<void> {
+    await this.daemonClient.call("startAllDeviceClientWatchers", {});
     this.watchAllClientsStarted = true;
   }
 
   private restoreDesiredWatchAllClients(): Promise<void> | undefined {
-    if (
-      this.desiredWatchAllClientsForce === undefined ||
-      this.watchAllClientsStarted
-    ) {
+    if (!this.desiredWatchAllClientsStarted || this.watchAllClientsStarted) {
       return undefined;
     }
 
-    return this.ensureWatchAllClientsStarted(this.desiredWatchAllClientsForce);
+    return this.ensureWatchAllClientsStarted();
   }
 
   createClientId(): number {
@@ -530,7 +530,7 @@ export class DebugRouterConnector {
       data.data.data.client_id = -1;
     }
     void this.daemonClient
-      .call("sendMessage", {
+      .call("sendMessageWithoutReply", {
         target: "app",
         clientId: id,
         message: JSON.stringify(data),
@@ -566,7 +566,11 @@ export class DebugRouterConnector {
       return;
     }
     void this.daemonClient
-      .call("sendMessage", { target: "web", clientId: -1, message })
+      .call("sendMessageWithoutReply", {
+        target: "web",
+        clientId: -1,
+        message,
+      })
       .catch((error: Error) => {
         defaultLogger.warn(
           `Failed to send multiplexer message to web: ${error.message}`,
@@ -584,7 +588,11 @@ export class DebugRouterConnector {
       return;
     }
     void this.daemonClient
-      .call("sendMessage", { target: "app", clientId: id, message })
+      .call("sendMessageWithoutReply", {
+        target: "app",
+        clientId: id,
+        message,
+      })
       .catch((error: Error) => {
         defaultLogger.warn(
           `Failed to send multiplexer message to app: ${error.message}`,
@@ -617,11 +625,6 @@ export class DebugRouterConnector {
     this.startingWSServer = this.daemonClient
       .call("startWSServer", {})
       .then((info) => {
-        if (!info) {
-          this.clearWSServerMirror();
-          return;
-        }
-
         this.applyWebSocketServerInfo(info);
       })
       .finally(() => {
@@ -1189,7 +1192,7 @@ function resolveTransitivePackagePath(
 
 function createDaemonPhysicalConnectorOption(
   option: DebugRouterConnectorOption,
-  useConnectorCapabilities: boolean,
+  useConnectorOptionFlags: boolean,
 ): PhysicalConnectorOption {
   const connectionTrace = option.connectionTrace
     ? {
@@ -1212,23 +1215,23 @@ function createDaemonPhysicalConnectorOption(
   }
 
   return {
-    manualConnect: useConnectorCapabilities
+    manualConnect: useConnectorOptionFlags
       ? option.manualConnect ?? false
       : false,
-    enableWebSocket: useConnectorCapabilities
+    enableWebSocket: useConnectorOptionFlags
       ? option.enableWebSocket ?? false
       : true,
-    enableAndroid: useConnectorCapabilities
+    enableAndroid: useConnectorOptionFlags
       ? option.enableAndroid ?? true
       : true,
-    enableIOS: useConnectorCapabilities ? option.enableIOS ?? true : true,
-    enableHarmony: useConnectorCapabilities
+    enableIOS: useConnectorOptionFlags ? option.enableIOS ?? true : true,
+    enableHarmony: useConnectorOptionFlags
       ? option.enableHarmony ?? true
       : true,
-    enableDesktop: useConnectorCapabilities
+    enableDesktop: useConnectorOptionFlags
       ? option.enableDesktop ?? false
       : true,
-    enableNetworkDevice: useConnectorCapabilities
+    enableNetworkDevice: useConnectorOptionFlags
       ? option.enableNetworkDevice ?? false
       : option.networkDeviceOpt !== undefined,
     adbHostPort: option.adbHostPort,

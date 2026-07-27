@@ -70,7 +70,7 @@ function createRpcRequest(overrides = {}) {
   return {
     kind: "rpc",
     id: 1,
-    method: "sendMessage",
+    method: "sendMessageWithoutReply",
     params: {
       target: "web",
       clientId: -1,
@@ -81,7 +81,13 @@ function createRpcRequest(overrides = {}) {
 }
 
 function parseSent(socket, index = 0) {
-  return JSON.parse(socket.sent[index]);
+  return withoutDebugInfo(JSON.parse(socket.sent[index]));
+}
+
+function withoutDebugInfo(message) {
+  const result = { ...message };
+  delete result.debugInfo;
+  return result;
 }
 
 describe("MultiplexerControlServer", function () {
@@ -93,8 +99,9 @@ describe("MultiplexerControlServer", function () {
       },
       protocolVersion: 3,
       minSupportedProtocolVersion: 2,
-      daemonVersion: "0.0.3",
-      capabilities: ["control"],
+      debugInfo: {
+        daemonVersion: "0.0.3",
+      },
       now: () => 1000,
     });
 
@@ -111,8 +118,12 @@ describe("MultiplexerControlServer", function () {
       protocolVersion: 3,
       minSupportedProtocolVersion: 2,
       heartbeat: 1000,
-      daemonVersion: "0.0.3",
-      capabilities: ["control"],
+      debugInfo: {
+        protocolVersion: 3,
+        daemonVersion: "0.0.3",
+        processId: process.pid,
+        timestamp: 1000,
+      },
     });
   });
 
@@ -136,6 +147,34 @@ describe("MultiplexerControlServer", function () {
     });
   });
 
+  it("omits debug info from responses and events when it is not configured", function () {
+    const server = new MultiplexerControlServer({
+      host: {
+        handleControlRpc() {},
+      },
+    });
+    const socket = new FakeSocket();
+    const connection = server.registerConnection(socket);
+    const event = {
+      kind: "event",
+      event: "client-message",
+      data: { source: "usb-runtime", id: 1, message: "hello" },
+    };
+
+    connection.sendResponse(1, "ok");
+    server.sendToControl(connection.controlId, event);
+
+    assert.deepStrictEqual(socket.sent.map(JSON.parse), [
+      {
+        kind: "rpc-response",
+        id: 1,
+        ok: true,
+        result: "ok",
+      },
+      event,
+    ]);
+  });
+
   it("registers connections with incrementing ids and unregisters on close", function () {
     const server = new MultiplexerControlServer({
       host: {
@@ -153,6 +192,53 @@ describe("MultiplexerControlServer", function () {
 
     assert.strictEqual(server.connections.has(1), false);
     assert.strictEqual(server.connections.has(2), true);
+  });
+
+  it("attaches daemon debug info to responses and events", function () {
+    const server = new MultiplexerControlServer({
+      host: {
+        handleControlRpc() {},
+      },
+      protocolVersion: 3,
+      debugInfo: {
+        daemonVersion: "0.0.3",
+      },
+      now: () => 1234,
+    });
+    const socket = new FakeSocket();
+    const connection = server.registerConnection(socket);
+    const event = {
+      kind: "event",
+      event: "client-message",
+      data: { source: "usb-runtime", id: 1, message: "hello" },
+    };
+
+    connection.sendResponse(1, "ok");
+    server.sendToControl(connection.controlId, event);
+
+    assert.deepStrictEqual(socket.sent.map(JSON.parse), [
+      {
+        kind: "rpc-response",
+        id: 1,
+        ok: true,
+        result: "ok",
+        debugInfo: {
+          protocolVersion: 3,
+          daemonVersion: "0.0.3",
+          processId: process.pid,
+          timestamp: 1234,
+        },
+      },
+      {
+        ...event,
+        debugInfo: {
+          protocolVersion: 3,
+          daemonVersion: "0.0.3",
+          processId: process.pid,
+          timestamp: 1234,
+        },
+      },
+    ]);
   });
 
   it("isolates a socket error to the affected control connection", function () {
@@ -185,16 +271,19 @@ describe("MultiplexerControlServer", function () {
     assert.deepStrictEqual(disconnected, [first.controlId]);
     assert.strictEqual(server.connections.has(first.controlId), false);
     assert.strictEqual(server.connections.has(second.controlId), true);
-    assert.deepStrictEqual(secondSocket.sent.map(JSON.parse), [event]);
+    assert.deepStrictEqual(
+      secondSocket.sent.map((item) => withoutDebugInfo(JSON.parse(item))),
+      [event]
+    );
   });
 
-  it("dispatches RPCs to the host and sends successful responses", async function () {
+  it("encodes void RPC results as explicit empty objects", async function () {
     const calls = [];
     const server = new MultiplexerControlServer({
       host: {
         handleControlRpc(controlId, message) {
           calls.push([controlId, message]);
-          return "ok";
+          return undefined;
         },
       },
     });
@@ -209,7 +298,33 @@ describe("MultiplexerControlServer", function () {
       kind: "rpc-response",
       id: 10,
       ok: true,
-      result: "ok",
+      result: {},
+    });
+  });
+
+  it("preserves non-void RPC results", async function () {
+    const server = new MultiplexerControlServer({
+      host: {
+        handleControlRpc() {
+          return [];
+        },
+      },
+    });
+    const socket = new FakeSocket();
+    const connection = server.registerConnection(socket);
+    const message = createRpcRequest({
+      id: 11,
+      method: "connectDevices",
+      params: {},
+    });
+
+    await server.dispatchRpc(connection.controlId, message);
+
+    assert.deepStrictEqual(parseSent(socket), {
+      kind: "rpc-response",
+      id: 11,
+      ok: true,
+      result: [],
     });
   });
 
@@ -345,11 +460,17 @@ describe("MultiplexerControlServer", function () {
     server.sendToControl(second.controlId, targeted);
     server.sendToControl(999, targeted);
 
-    assert.deepStrictEqual(firstSocket.sent.map(JSON.parse), [broadcast]);
-    assert.deepStrictEqual(secondSocket.sent.map(JSON.parse), [
+    assert.deepStrictEqual(
+      firstSocket.sent.map((item) => withoutDebugInfo(JSON.parse(item))),
+      [broadcast]
+    );
+    assert.deepStrictEqual(
+      secondSocket.sent.map((item) => withoutDebugInfo(JSON.parse(item))),
+      [
       broadcast,
       targeted,
-    ]);
+      ]
+    );
     assert.strictEqual(first.controlId, 1);
     assert.strictEqual(second.controlId, 2);
   });

@@ -69,7 +69,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
       () => context.discovery.getReusableDiscovery(),
       3000,
     );
-    const pending = client.call("sendRawMessage", {
+    const pending = client.call("sendMessageWithReply", {
       clientId: 1,
       message: {
         event: "Customized",
@@ -256,7 +256,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
       3000,
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
-    assert.strictEqual(connector.desiredWatchAllClientsForce, false);
+    assert.strictEqual(connector.desiredWatchAllClientsStarted, true);
     assert.deepStrictEqual(disconnectedClients, [1]);
     assert.deepStrictEqual(disconnectedDevices, ["device-1"]);
     await waitFor(() => !processExists(initialInfo.pid), 3000);

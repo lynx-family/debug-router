@@ -103,6 +103,7 @@ describe("multiplexer public export indexes", function () {
       "isControlRpcRequest",
       "isControlRpcResponse",
       "isDeviceSnapshot",
+      "isMultiplexerDebugInfo",
       "isMultiplexerDiscoveryInfo",
       "isMultiplexerHealthResponse",
       "isSnapshot",

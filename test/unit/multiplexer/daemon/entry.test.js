@@ -113,8 +113,7 @@ function createEntryOption(overrides = {}) {
     minSupportedProtocolVersion: overrides.minSupportedProtocolVersion ?? 1,
     controlPort: overrides.controlPort ?? 0,
     heartbeatInterval: overrides.heartbeatInterval ?? 100000,
-    daemonVersion: overrides.daemonVersion,
-    capabilities: overrides.capabilities,
+    debugInfo: overrides.debugInfo,
     physicalConnectorOption: overrides.physicalConnectorOption,
   };
   if (overrides.legacyDriverDir !== undefined) {
@@ -153,15 +152,15 @@ describe("multiplexer daemon entry", function () {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("parses hyphenated options, defaults, and capabilities", function () {
+  it("parses hyphenated options, defaults, and debug info", function () {
     assert.deepStrictEqual(
       parseEntryOption([
         "--discovery-path",
         "/tmp/daemon.json",
         "--daemon-lock-path",
         "/tmp/daemon.lock",
-        "--capabilities",
-        "control, snapshot ,, routing",
+        "--debug-info",
+        '{"daemonVersion":"1.2.3"}',
       ]),
       {
         discoveryPath: "/tmp/daemon.json",
@@ -170,8 +169,9 @@ describe("multiplexer daemon entry", function () {
         minSupportedProtocolVersion: 1,
         controlPort: 0,
         heartbeatInterval: 1000,
-        daemonVersion: undefined,
-        capabilities: ["control", "snapshot", "routing"],
+        debugInfo: {
+          daemonVersion: "1.2.3",
+        },
       }
     );
   });
@@ -185,7 +185,7 @@ describe("multiplexer daemon entry", function () {
         "--minSupportedProtocolVersion=2",
         "--controlPort=9222",
         "--heartbeatInterval=200",
-        "--daemonVersion=1.2.3",
+        '--debugInfo={"daemonVersion":"1.2.3"}',
       ]),
       {
         discoveryPath: "/tmp/daemon.json",
@@ -194,8 +194,9 @@ describe("multiplexer daemon entry", function () {
         minSupportedProtocolVersion: 2,
         controlPort: 9222,
         heartbeatInterval: 200,
-        daemonVersion: "1.2.3",
-        capabilities: undefined,
+        debugInfo: {
+          daemonVersion: "1.2.3",
+        },
       }
     );
   });
@@ -214,32 +215,14 @@ describe("multiplexer daemon entry", function () {
     );
   });
 
-  it("treats blank optional strings as omitted and trims empty capabilities", function () {
-    assert.deepStrictEqual(
-      parseEntryOption([
+  it("rejects invalid debug info", function () {
+    assert.throws(
+      () => parseEntryOption([
         "--discovery-path=/tmp/daemon.json",
         "--daemon-lock-path=/tmp/daemon.lock",
-        "--daemon-version=",
-        "--capabilities= ,, ",
+        "--debug-info=",
       ]),
-      {
-        discoveryPath: "/tmp/daemon.json",
-        daemonLockPath: "/tmp/daemon.lock",
-        protocolVersion: 1,
-        minSupportedProtocolVersion: 1,
-        controlPort: 0,
-        heartbeatInterval: 1000,
-        daemonVersion: undefined,
-        capabilities: [],
-      }
-    );
-    assert.deepStrictEqual(
-      parseEntryOption([
-        "--discovery-path=/tmp/daemon.json",
-        "--daemon-lock-path=/tmp/daemon.lock",
-        "--capabilities",
-      ]).capabilities,
-      undefined
+      /Invalid multiplexer daemon option debugInfo/
     );
   });
 
@@ -407,8 +390,9 @@ describe("multiplexer daemon entry", function () {
       minSupportedProtocolVersion: 2,
       controlPort: 9333,
       heartbeatInterval: 100000,
-      daemonVersion: "0.0.3",
-      capabilities: ["control", "snapshot"],
+      debugInfo: {
+        daemonVersion: "0.0.3",
+      },
     });
 
     const info = daemon.createDiscoveryInfo();
@@ -416,15 +400,18 @@ describe("multiplexer daemon entry", function () {
     assert.strictEqual(info.controlPort, 9333);
     assert.strictEqual(info.protocolVersion, 3);
     assert.strictEqual(info.minSupportedProtocolVersion, 2);
-    assert.strictEqual(info.daemonVersion, "0.0.3");
-    assert.deepStrictEqual(info.capabilities, ["control", "snapshot"]);
+    assert.strictEqual(info.debugInfo.daemonVersion, "0.0.3");
+    assert.strictEqual(info.debugInfo.protocolVersion, 3);
+    assert.strictEqual(info.debugInfo.processId, process.pid);
+    assert.strictEqual(typeof info.debugInfo.timestamp, "number");
     assertDefaultReportServiceInstalled();
     assert.deepStrictEqual(daemon.host.option, {
       controlPort: 9333,
       protocolVersion: 3,
       minSupportedProtocolVersion: 2,
-      daemonVersion: "0.0.3",
-      capabilities: ["control", "snapshot"],
+      debugInfo: {
+        daemonVersion: "0.0.3",
+      },
     });
     assert.strictEqual(fs.existsSync(discoveryPath), false);
   });
@@ -447,8 +434,6 @@ describe("multiplexer daemon entry", function () {
       controlPort: 9001,
       protocolVersion: 1,
       minSupportedProtocolVersion: 1,
-      daemonVersion: undefined,
-      capabilities: undefined,
     });
   });
 
@@ -466,8 +451,9 @@ describe("multiplexer daemon entry", function () {
           protocolVersion: 4,
           minSupportedProtocolVersion: 2,
           controlPort: 9444,
-          daemonVersion: "0.0.4",
-          capabilities: ["control", "routing"],
+          debugInfo: {
+            daemonVersion: "0.0.4",
+          },
           legacyDriverDir: "/tmp/legacy-driver",
           physicalConnectorOption: {
             manualConnect: true,
@@ -490,8 +476,9 @@ describe("multiplexer daemon entry", function () {
           controlPort: 9444,
           protocolVersion: 4,
           minSupportedProtocolVersion: 2,
-          daemonVersion: "0.0.4",
-          capabilities: ["control", "routing"],
+          debugInfo: {
+            daemonVersion: "0.0.4",
+          },
           legacyDriverDir: "/tmp/legacy-driver",
           manualConnect: true,
           enableAndroid: true,
@@ -521,8 +508,9 @@ describe("multiplexer daemon entry", function () {
           discoveryPath,
           daemonLockPath,
           controlPort: 0,
-          daemonVersion: "0.0.5",
-          capabilities: ["control"],
+          debugInfo: {
+            daemonVersion: "0.0.5",
+          },
         })
       );
 
@@ -539,8 +527,12 @@ describe("multiplexer daemon entry", function () {
         controlPort: 9123,
         heartbeat: readJson(discoveryPath).heartbeat,
         startedAt: readJson(discoveryPath).startedAt,
-        daemonVersion: "0.0.5",
-        capabilities: ["control"],
+        debugInfo: {
+          protocolVersion: 1,
+          daemonVersion: "0.0.5",
+          processId: process.pid,
+          timestamp: readJson(discoveryPath).heartbeat,
+        },
       });
 
       await daemon.stop();
@@ -569,10 +561,8 @@ describe("multiplexer daemon entry", function () {
         daemonLockPath,
         "--control-port",
         "9555",
-        "--daemon-version",
-        "0.0.6",
-        "--capabilities",
-        "control,snapshot",
+        "--debug-info",
+        '{"daemonVersion":"0.0.6"}',
       ]);
 
       assert.strictEqual(FakeEntryHost.instances.length, 1);
@@ -583,8 +573,9 @@ describe("multiplexer daemon entry", function () {
           controlPort: 9555,
           protocolVersion: 1,
           minSupportedProtocolVersion: 1,
-          daemonVersion: "0.0.6",
-          capabilities: ["control", "snapshot"],
+          debugInfo: {
+            daemonVersion: "0.0.6",
+          },
         }
       );
       assert.deepStrictEqual(

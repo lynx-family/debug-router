@@ -5,6 +5,7 @@
 import {
   MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
+  MultiplexerDebugInfo,
   MultiplexerDiscoveryInfo,
 } from "../protocol";
 import { removeFileIfExists, writeJsonAtomic } from "../utils/atomic_file";
@@ -25,8 +26,7 @@ export type MultiplexerDaemonOption = {
   daemonLockPath: string;
   protocolVersion?: number;
   minSupportedProtocolVersion?: number;
-  daemonVersion?: string;
-  capabilities?: string[];
+  debugInfo?: MultiplexerDebugInfo;
   host: MultiplexerDaemonHost;
   hostOption?: unknown;
 
@@ -102,9 +102,12 @@ export class MultiplexerDaemon {
   }
 
   refreshHeartbeat(): void {
+    const heartbeat = this.now();
+    const debugInfo = this.createDebugInfo(heartbeat);
     this.discoveryInfo = {
       ...this.discoveryInfo!,
-      heartbeat: this.now(),
+      heartbeat,
+      ...(debugInfo ? { debugInfo } : {}),
     };
     this.writeDiscovery();
   }
@@ -128,6 +131,8 @@ export class MultiplexerDaemon {
   createDiscoveryInfo(): MultiplexerDiscoveryInfo {
     const controlPort = this.resolveControlPort();
     const startedAt = this.startedAt ?? this.now();
+    const heartbeat = this.now();
+    const debugInfo = this.createDebugInfo(heartbeat);
 
     return {
       pid: process.pid,
@@ -137,12 +142,9 @@ export class MultiplexerDaemon {
         this.option.minSupportedProtocolVersion ??
         MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
       controlPort,
-      heartbeat: this.now(),
+      heartbeat,
       startedAt,
-      daemonVersion: this.option.daemonVersion,
-      capabilities: this.option.capabilities
-        ? [...this.option.capabilities]
-        : undefined,
+      ...(debugInfo ? { debugInfo } : {}),
     };
   }
 
@@ -199,6 +201,20 @@ export class MultiplexerDaemon {
 
   private now(): number {
     return this.option?.now?.() ?? this.defaultNow();
+  }
+
+  private createDebugInfo(timestamp: number): MultiplexerDebugInfo | undefined {
+    if (!this.option.debugInfo) {
+      return undefined;
+    }
+
+    return {
+      ...this.option.debugInfo,
+      protocolVersion:
+        this.option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
+      processId: process.pid,
+      timestamp,
+    };
   }
 
   private async stopForHostRequest(

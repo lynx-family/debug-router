@@ -3,8 +3,10 @@
 // LICENSE file in the root directory of this source tree.
 
 import {
+  isMultiplexerDebugInfo,
   MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
+  MultiplexerDebugInfo,
 } from "../protocol";
 import { defaultLogger } from "../../utils/logger";
 import {
@@ -27,8 +29,7 @@ export type MultiplexerDaemonEntryOption = {
   minSupportedProtocolVersion: number;
   controlPort: number;
   heartbeatInterval: number;
-  daemonVersion?: string;
-  capabilities?: string[];
+  debugInfo?: MultiplexerDebugInfo;
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
   enableWebSocket?: boolean;
@@ -59,9 +60,8 @@ const OPTION_ALIASES: Record<string, EntryArgKey> = {
   controlPort: "controlPort",
   "heartbeat-interval": "heartbeatInterval",
   heartbeatInterval: "heartbeatInterval",
-  "daemon-version": "daemonVersion",
-  daemonVersion: "daemonVersion",
-  capabilities: "capabilities",
+  "debug-info": "debugInfo",
+  debugInfo: "debugInfo",
   "legacy-driver-dir": "legacyDriverDir",
   legacyDriverDir: "legacyDriverDir",
   "multiplexer-daemon-idle-timeout": "multiplexerDaemonIdleTimeout",
@@ -113,8 +113,7 @@ export function createMultiplexerDaemon(
     daemonLockPath: entryOption.daemonLockPath,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
-    daemonVersion: entryOption.daemonVersion,
-    capabilities: entryOption.capabilities,
+    ...(entryOption.debugInfo ? { debugInfo: entryOption.debugInfo } : {}),
     heartbeatInterval: entryOption.heartbeatInterval,
     host,
     onIdleTimeout: (stopError) => {
@@ -140,6 +139,7 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   const enableWebSocket = getOptionalBoolean(rawArgs, "enableWebSocket");
   const websocketOption = parseWebSocketOption(rawArgs);
   const physicalConnectorOption = parsePhysicalConnectorOption(rawArgs);
+  const debugInfo = parseDebugInfo(rawArgs);
 
   const option: MultiplexerDaemonEntryOption = {
     discoveryPath,
@@ -160,9 +160,10 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
       "heartbeatInterval",
       DEFAULT_MULTIPLEXER_HEARTBEAT_INTERVAL,
     ),
-    daemonVersion: getOptionalString(rawArgs, "daemonVersion"),
-    capabilities: parseCapabilities(getOptionalString(rawArgs, "capabilities")),
   };
+  if (debugInfo !== undefined) {
+    option.debugInfo = debugInfo;
+  }
   const legacyDriverDir = getOptionalString(rawArgs, "legacyDriverDir");
   if (legacyDriverDir !== undefined) {
     option.legacyDriverDir = legacyDriverDir;
@@ -195,8 +196,7 @@ function createEntryHost(
     controlPort: entryOption.controlPort,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
-    daemonVersion: entryOption.daemonVersion,
-    capabilities: entryOption.capabilities,
+    ...(entryOption.debugInfo ? { debugInfo: entryOption.debugInfo } : {}),
   };
   if (entryOption.legacyDriverDir !== undefined) {
     Object.assign(hostOption, { legacyDriverDir: entryOption.legacyDriverDir });
@@ -428,15 +428,34 @@ function parseWebSocketOption(
     : option;
 }
 
-function parseCapabilities(value?: string): string[] | undefined {
-  if (!value) {
+function parseDebugInfo(
+  rawArgs: RawEntryArgs,
+): MultiplexerDebugInfo | undefined {
+  const value = rawArgs.debugInfo;
+  if (value === undefined) {
     return undefined;
   }
 
-  return value
-    .split(",")
-    .map((capability) => capability.trim())
-    .filter(Boolean);
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Invalid multiplexer daemon option debugInfo: ${value}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error: any) {
+    throw new Error(
+      `Invalid multiplexer daemon option debugInfo: ${error?.message}`,
+    );
+  }
+
+  if (!isMultiplexerDebugInfo(parsed)) {
+    throw new Error(
+      "Invalid multiplexer daemon option debugInfo: expected MultiplexerDebugInfo",
+    );
+  }
+
+  return parsed;
 }
 
 function parsePhysicalConnectorOption(

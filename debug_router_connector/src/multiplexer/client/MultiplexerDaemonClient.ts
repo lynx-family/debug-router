@@ -8,7 +8,7 @@ import { defaultLogger } from "../../utils/logger";
 import {
   ControlRpcError,
   ControlEvent,
-  ControlMessageMeta,
+  MultiplexerDebugInfo,
   ControlRpcMethod,
   ControlRpcParams,
   ControlRpcRequest,
@@ -34,12 +34,11 @@ export type MultiplexerDaemonClientOption = {
   daemonManager: MultiplexerDaemonManager;
   controlPath?: string;
   rpcTimeout?: number;
-  protocolVersion?: number;
-  clientVersion?: string;
-  capabilities?: string[];
+  debugInfo?: MultiplexerDebugInfo;
 
   // only used for tests or embedding
   WebSocketCtor?: typeof WebSocket;
+  now?: () => number;
 };
 
 type PendingRpc = {
@@ -58,10 +57,9 @@ export class MultiplexerDaemonClient {
   private readonly daemonManager: MultiplexerDaemonManager;
   private readonly controlPath: string;
   private readonly rpcTimeout: number;
-  private readonly protocolVersion: number;
-  private readonly clientVersion?: string;
-  private readonly capabilities?: string[];
+  private readonly debugInfo?: MultiplexerDebugInfo;
   private readonly WebSocketCtor: typeof WebSocket;
+  private readonly now: () => number;
   private eventListener?: (event: ControlEvent) => void;
   private readonly connectionListeners = new Set<
     (state: MultiplexerDaemonConnectionState) => void
@@ -75,11 +73,15 @@ export class MultiplexerDaemonClient {
     this.daemonManager = option.daemonManager;
     this.controlPath = option.controlPath ?? MULTIPLEXER_CONTROL_PATH;
     this.rpcTimeout = option.rpcTimeout ?? DEFAULT_MULTIPLEXER_RPC_TIMEOUT;
-    this.protocolVersion =
-      option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION;
-    this.clientVersion = option.clientVersion;
-    this.capabilities = option.capabilities;
+    this.debugInfo = option.debugInfo
+      ? {
+          protocolVersion:
+            option.debugInfo.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
+          ...option.debugInfo,
+        }
+      : undefined;
     this.WebSocketCtor = option.WebSocketCtor ?? WebSocket;
+    this.now = option.now ?? Date.now;
     this.daemonManager.setDaemonClient?.(this);
   }
 
@@ -142,12 +144,13 @@ export class MultiplexerDaemonClient {
     }
 
     const id = this.createRpcId();
+    const debugInfo = this.createDebugInfo();
     const request: ControlRpcRequest<M> = {
       kind: "rpc",
       id,
       method,
       params,
-      meta: this.createMeta(),
+      ...(debugInfo ? { debugInfo } : {}),
     };
 
     return new Promise<ControlRpcResult[M]>((resolve, reject) => {
@@ -186,12 +189,13 @@ export class MultiplexerDaemonClient {
     method: M,
     params: ControlRpcParams[M],
   ): void {
+    const debugInfo = this.createDebugInfo();
     const request: ControlRpcRequest<M> = {
       kind: "rpc",
       id: 0,
       method,
       params,
-      meta: this.createMeta(),
+      ...(debugInfo ? { debugInfo } : {}),
     };
     if (!isControlRpcRequest(request)) {
       throw new Error(`Invalid multiplexer RPC ${method} params`);
@@ -432,11 +436,15 @@ export class MultiplexerDaemonClient {
     return Math.max(this.rpcTimeout, operationTimeout + RPC_TIMEOUT_BUFFER_MS);
   }
 
-  private createMeta(): ControlMessageMeta {
+  private createDebugInfo(): MultiplexerDebugInfo | undefined {
+    if (!this.debugInfo) {
+      return undefined;
+    }
+
     return {
-      protocolVersion: this.protocolVersion,
-      clientVersion: this.clientVersion,
-      capabilities: this.capabilities ? [...this.capabilities] : undefined,
+      ...this.debugInfo,
+      processId: process.pid,
+      timestamp: this.now(),
     };
   }
 

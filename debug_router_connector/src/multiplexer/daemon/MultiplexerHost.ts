@@ -30,6 +30,7 @@ import {
   DeviceSnapshot,
   MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
+  MultiplexerDebugInfo,
   Snapshot,
   WebSocketClientSnapshot,
   WebSocketServerInfo,
@@ -97,8 +98,7 @@ export type MultiplexerHostOption = Omit<
   controlPort?: number;
   protocolVersion?: number;
   minSupportedProtocolVersion?: number;
-  daemonVersion?: string;
-  capabilities?: string[];
+  debugInfo?: MultiplexerDebugInfo;
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
   memoizedNotificationTtlMs?: number;
@@ -143,7 +143,7 @@ export class MultiplexerHost
   >();
   private allClientWatchersRequested = false;
   private webSocketServerStarted = false;
-  private webSocketServerStarting: Promise<void> | null = null;
+  private webSocketServerStarting: Promise<WebSocketServerInfo> | null = null;
   private readonly activeControlIds = new Set<number>();
   private readonly webSocketRequesterControlIds = new Set<number>();
   private readonly activeWebSocketDriverIds = new Set<number>();
@@ -296,8 +296,7 @@ export class MultiplexerHost
       controlPort: this.option.controlPort,
       protocolVersion: this.protocolVersion,
       minSupportedProtocolVersion: this.minSupportedProtocolVersion,
-      daemonVersion: this.option.daemonVersion,
-      capabilities: this.option.capabilities,
+      ...(this.option.debugInfo ? { debugInfo: this.option.debugInfo } : {}),
       now: this.now,
     });
 
@@ -306,12 +305,13 @@ export class MultiplexerHost
     try {
       await controlServer.start();
       this.started = true;
+      const debugInfo = this.createDebugInfo();
       this.connectionTraceRecorder?.recordDaemonStarted({
         pid: process.pid,
         controlPort: controlServer.controlPort,
         protocolVersion: this.protocolVersion,
         minSupportedProtocolVersion: this.minSupportedProtocolVersion,
-        daemonVersion: this.option.daemonVersion,
+        ...(debugInfo ? { debugInfo } : {}),
       });
       this.legacyOwnershipGuard.start();
       this.scheduleIdleTimeoutIfNeeded();
@@ -448,21 +448,23 @@ export class MultiplexerHost
         return this.connectUsbClients(
           message.params as ControlRpcParams["connectUsbClients"],
         );
-      case "startWatchClient":
+      case "startDeviceClientWatcher":
         return this.startWatchClient(
-          (message.params as ControlRpcParams["startWatchClient"]).deviceId,
+          (message.params as ControlRpcParams["startDeviceClientWatcher"])
+            .deviceId,
         );
-      case "stopWatchClient":
+      case "stopDeviceClientWatcher":
         return this.stopWatchClient(
-          (message.params as ControlRpcParams["stopWatchClient"]).deviceId,
+          (message.params as ControlRpcParams["stopDeviceClientWatcher"])
+            .deviceId,
         );
-      case "startWatchAllClients":
+      case "startAllDeviceClientWatchers":
         return this.startWatchAllClients(
-          message.params as ControlRpcParams["startWatchAllClients"],
+          message.params as ControlRpcParams["startAllDeviceClientWatchers"],
         );
-      case "stopWatchAllClients":
+      case "stopAllDeviceClientWatchers":
         return this.stopWatchAllClients(
-          message.params as ControlRpcParams["stopWatchAllClients"],
+          message.params as ControlRpcParams["stopAllDeviceClientWatchers"],
         );
       case "disconnectDevice":
         return this.disconnectDevice(
@@ -475,14 +477,14 @@ export class MultiplexerHost
         return undefined;
       case "startWSServer":
         return this.startWSServer(controlId);
-      case "sendRawMessage":
+      case "sendMessageWithReply":
         return this.sendRawMessage(
-          message.params as ControlRpcParams["sendRawMessage"],
+          message.params as ControlRpcParams["sendMessageWithReply"],
           controlId,
         );
-      case "sendMessage":
+      case "sendMessageWithoutReply":
         this.sendMessageFromConnector(
-          message.params as ControlRpcParams["sendMessage"],
+          message.params as ControlRpcParams["sendMessageWithoutReply"],
           controlId,
         );
         return undefined;
@@ -586,21 +588,20 @@ export class MultiplexerHost
   }
 
   createSnapshot(): Snapshot {
+    const generatedAt = this.now();
     const physicalDevices = this.legacyOwnershipAttached
       ? Array.from(this.physicalConnector.devices.values())
       : [];
     const physicalClients = this.legacyOwnershipAttached
       ? this.physicalConnector.getAllUsbClients()
       : [];
+    const debugInfo = this.createDebugInfo(generatedAt);
     const snapshot: Snapshot = {
       protocolVersion: this.protocolVersion,
-      generatedAt: this.now(),
+      generatedAt,
       devices: this.serializeDevices(physicalDevices),
       clients: this.serializeClients(physicalClients),
-      daemonVersion: this.option.daemonVersion,
-      capabilities: this.option.capabilities
-        ? [...this.option.capabilities]
-        : undefined,
+      ...(debugInfo ? { debugInfo } : {}),
     };
     const websocketAppClients = this.getWebSocketAppClients();
     const websocketWebClients = this.getWebSocketWebClients();
@@ -1072,7 +1073,7 @@ export class MultiplexerHost
   }
 
   private async startWatchAllClients(
-    _params: ControlRpcParams["startWatchAllClients"],
+    _params: ControlRpcParams["startAllDeviceClientWatchers"],
   ): Promise<void> {
     this.legacyOwnershipGuard.reacquire();
     const generation = this.physicalDiscoveryGeneration;
@@ -1096,7 +1097,7 @@ export class MultiplexerHost
    * Explicit watcher RPCs can enable discovery again.
    */
   private async stopWatchAllClients(
-    _params: ControlRpcParams["stopWatchAllClients"],
+    _params: ControlRpcParams["stopAllDeviceClientWatchers"],
   ): Promise<void> {
     this.clientWatchGeneration++;
     this.allClientWatchersRequested = false;
@@ -1118,17 +1119,27 @@ export class MultiplexerHost
 
   private async startWSServer(
     controlId: number,
-  ): Promise<WebSocketServerInfo | undefined> {
+  ): Promise<WebSocketServerInfo> {
     if (!this.option.enableWebSocket) {
-      return;
+      throw createControlError(
+        "websocket-disabled",
+        "The multiplexer daemon does not support WebSocket because enableWebSocket is disabled",
+      );
     }
 
     this.webSocketRequesterControlIds.add(controlId);
 
     try {
       if (this.webSocketServerStarted) {
+        const info = this.webSocketServerInfo;
+        if (!info) {
+          throw createControlError(
+            "websocket-server-info-unavailable",
+            "The multiplexer daemon WebSocket server information is unavailable",
+          );
+        }
         this.sendSnapshotToControl(controlId);
-        return this.webSocketServerInfo;
+        return info;
       }
 
       if (!this.webSocketServerStarting) {
@@ -1137,17 +1148,18 @@ export class MultiplexerHost
             this.webSocketServerStarted = true;
             this.webSocketServerInfo = info;
             this.connectionTraceRecorder?.recordWebsocketServerStarted(info);
+            return info;
           })
           .finally(() => {
             this.webSocketServerStarting = null;
           });
       }
 
-      await this.webSocketServerStarting;
+      const info = await this.webSocketServerStarting;
       if (this.webSocketRequesterControlIds.has(controlId)) {
         this.sendSnapshotToControl(controlId);
       }
-      return this.webSocketServerInfo;
+      return info;
     } catch (error) {
       this.webSocketRequesterControlIds.delete(controlId);
       throw error;
@@ -1192,7 +1204,7 @@ export class MultiplexerHost
   }
 
   private async sendRawMessage(
-    params: ControlRpcParams["sendRawMessage"],
+    params: ControlRpcParams["sendMessageWithReply"],
     controlId: number,
   ): Promise<ResponseMessageType> {
     return new Promise<ResponseMessageType>((resolve, reject) => {
@@ -1237,7 +1249,7 @@ export class MultiplexerHost
   }
 
   private sendMessageFromConnector(
-    params: ControlRpcParams["sendMessage"],
+    params: ControlRpcParams["sendMessageWithoutReply"],
     controlId: number,
   ): void {
     const message =
@@ -1579,6 +1591,21 @@ export class MultiplexerHost
       this.nextGlobalMessageId = 1;
     }
     return this.nextGlobalMessageId++;
+  }
+
+  private createDebugInfo(
+    timestamp: number = this.now(),
+  ): MultiplexerDebugInfo | undefined {
+    if (!this.option.debugInfo) {
+      return undefined;
+    }
+
+    return {
+      ...this.option.debugInfo,
+      protocolVersion: this.protocolVersion,
+      processId: process.pid,
+      timestamp,
+    };
   }
 
   private rejectRoutes(routes: PendingRoute[], error: Error): void {

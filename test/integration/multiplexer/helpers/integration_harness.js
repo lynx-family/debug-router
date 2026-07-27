@@ -99,8 +99,7 @@ function createIntegrationContext(name, option = {}) {
     replacementTimeout: option.replacementTimeout ?? 100,
     localProtocolVersion: option.localProtocolVersion,
     minSupportedProtocolVersion: option.minSupportedProtocolVersion,
-    daemonVersion: option.daemonVersion,
-    capabilities: option.capabilities,
+    debugInfo: option.debugInfo,
     legacyDriverDir,
     multiplexerDaemonIdleTimeout:
       option.multiplexerDaemonIdleTimeout ?? DEFAULT_TEST_DAEMON_IDLE_TIMEOUT,
@@ -149,8 +148,7 @@ function createIntegrationContext(name, option = {}) {
         minSupportedProtocolVersion:
           extra.minSupportedProtocolVersion ??
           option.minSupportedProtocolVersion,
-        daemonVersion: extra.daemonVersion ?? option.daemonVersion,
-        capabilities: extra.capabilities ?? option.capabilities,
+        debugInfo: extra.debugInfo ?? option.debugInfo,
         legacyDriverDir: extra.legacyDriverDir ?? legacyDriverDir,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??
@@ -161,17 +159,22 @@ function createIntegrationContext(name, option = {}) {
       });
     },
     createClient(extra = {}) {
-      const client = new MultiplexerDaemonClient({
+      const configuredDebugInfo = extra.debugInfo ?? option.debugInfo;
+      const clientOption = {
         daemonManager: extra.manager ?? manager,
         controlPath: extra.controlPath ?? MULTIPLEXER_CONTROL_PATH,
         rpcTimeout: extra.rpcTimeout ?? 1000,
-        protocolVersion:
-          extra.protocolVersion ??
-          extra.manager?.localProtocolVersion ??
-          manager.localProtocolVersion,
-        clientVersion: extra.clientVersion,
-        capabilities: extra.capabilities,
-      });
+      };
+      if (configuredDebugInfo) {
+        clientOption.debugInfo = {
+          protocolVersion:
+            configuredDebugInfo.protocolVersion ??
+            extra.manager?.localProtocolVersion ??
+            manager.localProtocolVersion,
+          ...configuredDebugInfo,
+        };
+      }
+      const client = new MultiplexerDaemonClient(clientOption);
       clients.push(client);
       return client;
     },
@@ -195,6 +198,8 @@ function createIntegrationContext(name, option = {}) {
           platformTimeout(DEFAULT_STARTUP_TIMEOUT),
         multiplexerStaleTimeout:
           extra.staleTimeout ?? option.staleTimeout ?? 1000,
+        multiplexerHeartbeatInterval:
+          extra.heartbeatInterval ?? option.heartbeatInterval ?? 50,
         multiplexerRpcTimeout: extra.rpcTimeout ?? 1000,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??
@@ -258,8 +263,7 @@ function createManager(option) {
     replacementTimeout: option.replacementTimeout,
     localProtocolVersion: option.localProtocolVersion,
     minSupportedProtocolVersion: option.minSupportedProtocolVersion,
-    daemonVersion: option.daemonVersion,
-    capabilities: option.capabilities,
+    debugInfo: option.debugInfo,
     legacyDriverDir: option.legacyDriverDir,
     controlPort: 0,
     multiplexerDaemonIdleTimeout: option.multiplexerDaemonIdleTimeout,
@@ -403,6 +407,7 @@ function getHealth(port) {
         port,
         path: MULTIPLEXER_HEALTH_PATH,
         timeout: 1000,
+        agent: false,
       },
       (response) => {
         let body = "";

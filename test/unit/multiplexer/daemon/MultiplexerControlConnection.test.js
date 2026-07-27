@@ -42,7 +42,7 @@ function createRpcRequest(overrides = {}) {
   return {
     kind: "rpc",
     id: 1,
-    method: "sendMessage",
+    method: "sendMessageWithoutReply",
     params: {
       target: "web",
       clientId: -1,
@@ -197,6 +197,7 @@ describe("MultiplexerControlConnection", function () {
           kind: "rpc-response",
           id: 23,
           ok: true,
+          result: {},
         },
         event,
       ]

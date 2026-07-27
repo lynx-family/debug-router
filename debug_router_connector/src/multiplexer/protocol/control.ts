@@ -4,24 +4,14 @@
 
 import type { ClientSnapshot, DeviceSnapshot } from "./snapshot";
 import type { RequireMessageType, ResponseMessageType } from "../../utils/type";
-
-// protocolVersion is used for version arbitration when connecting to the Multiplexer daemon.
-// minSupportedProtocolVersion is used to check if the Multiplexer daemon supports the protocol version.
-// daemonVersion and clientVersion is only injected for testing or debugging purposes and is not used in version arbitration.
-
-export type ControlMessageMeta = {
-  protocolVersion?: number;
-  clientVersion?: string;
-  daemonVersion?: string;
-  capabilities?: string[];
-};
+import type { MultiplexerDebugInfo } from "./debuginfo";
 
 export type ControlRpcRequest<M extends ControlRpcMethod = ControlRpcMethod> = {
   kind: "rpc";
   id: number;
   method: M;
   params: ControlRpcParams[M];
-  meta?: ControlMessageMeta;
+  debugInfo?: MultiplexerDebugInfo;
 };
 
 export type ControlRpcResponse<M extends ControlRpcMethod = ControlRpcMethod> =
@@ -30,14 +20,14 @@ export type ControlRpcResponse<M extends ControlRpcMethod = ControlRpcMethod> =
       id: number;
       ok: true;
       result: ControlRpcResult[M];
-      meta?: ControlMessageMeta;
+      debugInfo?: MultiplexerDebugInfo;
     }
   | {
       kind: "rpc-response";
       id: number;
       ok: false;
       error: ControlRpcError;
-      meta?: ControlMessageMeta;
+      debugInfo?: MultiplexerDebugInfo;
     };
 
 export type ControlRpcError = {
@@ -55,15 +45,15 @@ export type WebSocketServerInfo = {
 export type ControlRpcMethod =
   | "connectDevices"
   | "connectUsbClients"
-  | "startWatchClient"
-  | "stopWatchClient"
+  | "startDeviceClientWatcher"
+  | "stopDeviceClientWatcher"
   | "disconnectDevice"
   | "shutdownDaemon"
   | "startWSServer"
-  | "startWatchAllClients"
-  | "stopWatchAllClients"
-  | "sendRawMessage"
-  | "sendMessage"
+  | "startAllDeviceClientWatchers"
+  | "stopAllDeviceClientWatchers"
+  | "sendMessageWithReply"
+  | "sendMessageWithoutReply"
   | "closeClient";
 
 export type ControlRpcParams = {
@@ -78,10 +68,10 @@ export type ControlRpcParams = {
     waitTimeout?: boolean;
     clientName?: string | null;
   };
-  startWatchClient: {
+  startDeviceClientWatcher: {
     deviceId: string;
   };
-  stopWatchClient: {
+  stopDeviceClientWatcher: {
     deviceId: string;
   };
   disconnectDevice: {
@@ -97,24 +87,24 @@ export type ControlRpcParams = {
   startWSServer: {
     // This RPC has no parameters.
   };
-  startWatchAllClients: {
-    force?: boolean;
+  startAllDeviceClientWatchers: {
+    // This RPC has no parameters.
   };
-  stopWatchAllClients: {
+  stopAllDeviceClientWatchers: {
     // This RPC has no parameters.
   };
   /**
    * Sends a request-response message to one USB or WiFi Runtime and returns
    * the complete raw response envelope.
    */
-  sendRawMessage: {
+  sendMessageWithReply: {
     clientId: number;
     message: RequireMessageType;
   };
   /**
    * Sends a fire-and-forget message to an App Runtime or WebSocket Driver.
    */
-  sendMessage: {
+  sendMessageWithoutReply: {
     target: "app" | "web";
     clientId: number;
     message: unknown;
@@ -127,14 +117,17 @@ export type ControlRpcParams = {
 export type ControlRpcResult = {
   connectDevices: DeviceSnapshot[];
   connectUsbClients: ClientSnapshot[];
-  startWatchClient: void;
-  stopWatchClient: void;
-  disconnectDevice: void;
-  shutdownDaemon: void;
-  startWSServer: WebSocketServerInfo | undefined;
-  startWatchAllClients: void;
-  stopWatchAllClients: void;
-  sendRawMessage: ResponseMessageType;
-  sendMessage: void;
-  closeClient: void;
+  startDeviceClientWatcher: {};
+  stopDeviceClientWatcher: {};
+  disconnectDevice: {};
+  shutdownDaemon: {};
+  startWSServer: WebSocketServerInfo;
+  startAllDeviceClientWatchers: {};
+  stopAllDeviceClientWatchers: {};
+  sendMessageWithReply: ResponseMessageType;
+  sendMessageWithoutReply: {};
+  closeClient: {};
+
+  // `{}` means the RPC has no business result data. Its successful response
+  // still contains an explicit `result: {}` on the wire.
 };

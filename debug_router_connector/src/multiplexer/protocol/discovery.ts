@@ -2,6 +2,8 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
+import type { MultiplexerDebugInfo } from "./debuginfo";
+
 export const MULTIPLEXER_PROTOCOL_VERSION = 1;
 export const MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION = 1;
 export const MULTIPLEXER_HEALTH_PATH = "/health";
@@ -9,8 +11,6 @@ export const MULTIPLEXER_CONTROL_PATH = "/debug-router-multiplexer/control";
 
 // protocolVersion is used for version arbitration when connecting to the Multiplexer daemon.
 // minSupportedProtocolVersion is used to check if the Multiplexer daemon supports the protocol version.
-// daemonVersion and clientVersion is only injected for testing or debugging purposes and is not used in version arbitration.
-
 export type MultiplexerDiscoveryInfo = {
   pid: number;
   protocolVersion: number;
@@ -18,8 +18,7 @@ export type MultiplexerDiscoveryInfo = {
   controlPort: number;
   heartbeat: number;
   startedAt?: number;
-  daemonVersion?: string;
-  capabilities?: string[];
+  debugInfo?: MultiplexerDebugInfo;
 };
 
 export type MultiplexerHealthResponse = {
@@ -28,6 +27,5 @@ export type MultiplexerHealthResponse = {
   protocolVersion: number;
   minSupportedProtocolVersion?: number;
   heartbeat: number;
-  daemonVersion?: string;
-  capabilities?: string[];
+  debugInfo?: MultiplexerDebugInfo;
 };

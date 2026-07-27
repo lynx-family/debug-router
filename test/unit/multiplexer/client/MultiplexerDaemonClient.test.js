@@ -111,9 +111,8 @@ function createClient(overrides = {}) {
     WebSocketCtor,
     rpcTimeout: overrides.rpcTimeout ?? 50,
     controlPath: overrides.controlPath,
-    protocolVersion: overrides.protocolVersion,
-    clientVersion: overrides.clientVersion,
-    capabilities: overrides.capabilities,
+    debugInfo: overrides.debugInfo,
+    now: overrides.now,
   });
 
   return {
@@ -235,15 +234,17 @@ describe("MultiplexerDaemonClient", function () {
     assert.strictEqual(client.ready, false);
   });
 
-  it("sends RPC requests with metadata and resolves successful responses", async function () {
+  it("sends RPC requests with debug info and resolves successful responses", async function () {
     const { client, WebSocketCtor } = createClient({
-      protocolVersion: 3,
-      clientVersion: "1.2.3",
-      capabilities: ["client", "test"],
+      debugInfo: {
+        protocolVersion: 3,
+        clientVersion: "1.2.3",
+      },
+      now: () => 1234,
     });
     const socket = await openClient(client, WebSocketCtor);
 
-    const result = client.call("sendRawMessage", {
+    const result = client.call("sendMessageWithReply", {
       clientId: 1,
       message: createInitializeMessage(1),
     });
@@ -253,15 +254,16 @@ describe("MultiplexerDaemonClient", function () {
     assert.deepStrictEqual(request, {
       kind: "rpc",
       id: 1,
-      method: "sendRawMessage",
+      method: "sendMessageWithReply",
       params: {
         clientId: 1,
         message: createInitializeMessage(1),
       },
-      meta: {
+      debugInfo: {
         protocolVersion: 3,
         clientVersion: "1.2.3",
-        capabilities: ["client", "test"],
+        processId: process.pid,
+        timestamp: 1234,
       },
     });
 
@@ -274,13 +276,39 @@ describe("MultiplexerDaemonClient", function () {
     assert.strictEqual(client.pendingRpc.size, 0);
   });
 
+  it("omits debug info from RPC requests when it is not configured", async function () {
+    const { client, WebSocketCtor } = createClient();
+    const socket = await openClient(client, WebSocketCtor);
+
+    const result = client.call("closeClient", {
+      clientId: 1,
+    });
+    await waitFor(() => socket.sent.length === 1);
+    const request = parseSent(socket);
+
+    assert.deepStrictEqual(request, {
+      kind: "rpc",
+      id: 1,
+      method: "closeClient",
+      params: {
+        clientId: 1,
+      },
+    });
+
+    sendRpcResponse(socket, request.id, {
+      ok: true,
+      result: {},
+    });
+    assert.deepStrictEqual(await result, {});
+  });
+
   it("rejects invalid single-device watch params before sending the RPC", async function () {
     const { client, WebSocketCtor, daemonManagerState } = createClient();
     const invalidCalls = [
-      ["startWatchClient", { deviceId: "" }],
-      ["startWatchClient", { deviceId: "device-1", action: "start" }],
-      ["stopWatchClient", { deviceId: "" }],
-      ["stopWatchClient", { deviceId: "device-1", action: "stop" }],
+      ["startDeviceClientWatcher", { deviceId: "" }],
+      ["startDeviceClientWatcher", { deviceId: "device-1", action: "start" }],
+      ["stopDeviceClientWatcher", { deviceId: "" }],
+      ["stopDeviceClientWatcher", { deviceId: "device-1", action: "stop" }],
     ];
 
     for (const [method, params] of invalidCalls) {
@@ -323,10 +351,10 @@ describe("MultiplexerDaemonClient", function () {
 
     sendRpcResponse(socket, request.id, {
       ok: true,
-      result: undefined,
+      result: {},
     });
 
-    assert.strictEqual(await promise, undefined);
+    assert.deepStrictEqual(await promise, {});
     assert.strictEqual(socket.closeCalls, 0);
     assert.strictEqual(client.ready, true);
     assert.strictEqual(daemonManagerState.daemonClient, client);
@@ -336,7 +364,7 @@ describe("MultiplexerDaemonClient", function () {
     const { client, WebSocketCtor } = createClient();
     const socket = await openClient(client, WebSocketCtor);
 
-    const result = client.call("sendRawMessage", {
+    const result = client.call("sendMessageWithReply", {
       clientId: 2,
       message: createInitializeMessage(2),
     });
@@ -359,7 +387,7 @@ describe("MultiplexerDaemonClient", function () {
     assert.strictEqual(client.pendingRpc.size, 0);
   });
 
-  it("rejects method-aware RPC responses with invalid result payloads", async function () {
+  it("rejects startWSServer responses without an explicit result", async function () {
     const { client, WebSocketCtor } = createClient();
     const socket = await openClient(client, WebSocketCtor);
 
@@ -369,7 +397,6 @@ describe("MultiplexerDaemonClient", function () {
 
     sendRpcResponse(socket, request.id, {
       ok: true,
-      result: "should-be-undefined",
     });
 
     await assert.rejects(
@@ -383,7 +410,7 @@ describe("MultiplexerDaemonClient", function () {
     const { client, WebSocketCtor } = createClient();
     const socket = await openClient(client, WebSocketCtor);
 
-    const result = client.call("sendRawMessage", {
+    const result = client.call("sendMessageWithReply", {
       clientId: 4,
       message: createInitializeMessage(4),
     });
@@ -410,7 +437,7 @@ describe("MultiplexerDaemonClient", function () {
 
     await assert.rejects(
       () =>
-        client.call("sendRawMessage", {
+        client.call("sendMessageWithReply", {
           clientId: 5,
           message: createInitializeMessage(5),
         }),
@@ -423,7 +450,7 @@ describe("MultiplexerDaemonClient", function () {
     const { client, WebSocketCtor } = createClient({ rpcTimeout: 1 });
     const socket = await openClient(client, WebSocketCtor);
 
-    const result = client.call("sendRawMessage", {
+    const result = client.call("sendMessageWithReply", {
       clientId: 6,
       message: createInitializeMessage(6),
     });
@@ -431,7 +458,7 @@ describe("MultiplexerDaemonClient", function () {
 
     await assert.rejects(
       () => result,
-      /Timed out waiting for multiplexer RPC sendRawMessage response/
+      /Timed out waiting for multiplexer RPC sendMessageWithReply response/
     );
     assert.strictEqual(client.pendingRpc.size, 0);
   });
@@ -574,7 +601,7 @@ describe("MultiplexerDaemonClient", function () {
   it("rejects pending RPCs and removes listeners when the socket closes", async function () {
     const { client, WebSocketCtor } = createClient();
     const socket = await openClient(client, WebSocketCtor);
-    const result = client.call("sendRawMessage", {
+    const result = client.call("sendMessageWithReply", {
       clientId: 7,
       message: createInitializeMessage(7),
     });
@@ -629,7 +656,7 @@ describe("MultiplexerDaemonClient", function () {
     const socket = await openClient(client, WebSocketCtor);
     const events = [];
     client.subscribe((event) => events.push(event));
-    const result = client.call("sendRawMessage", {
+    const result = client.call("sendMessageWithReply", {
       clientId: 8,
       message: createInitializeMessage(8),
     });

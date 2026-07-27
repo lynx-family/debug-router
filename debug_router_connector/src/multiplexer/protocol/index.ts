@@ -3,7 +3,6 @@
 // LICENSE file in the root directory of this source tree.
 
 export type {
-  ControlMessageMeta,
   ControlRpcError,
   ControlRpcMethod,
   ControlRpcParams,
@@ -12,6 +11,7 @@ export type {
   ControlRpcResult,
   WebSocketServerInfo,
 } from "./control";
+export type { MultiplexerDebugInfo } from "./debuginfo";
 export {
   MULTIPLEXER_CONTROL_PATH,
   MULTIPLEXER_HEALTH_PATH,
@@ -33,7 +33,7 @@ export {
   isBoolean,
   isClientSnapshot,
   isControlEvent,
-  isControlMessageMeta,
+  isMultiplexerDebugInfo,
   isControlRpcMethod,
   isControlRpcRequest,
   isControlRpcResponse,

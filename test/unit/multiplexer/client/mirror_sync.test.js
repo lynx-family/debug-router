@@ -195,13 +195,13 @@ describe("multiplexer client mirror sync", function () {
     assert.strictEqual(device.isConnected, false);
     assert.deepStrictEqual(daemonClient.state.calls, [
       {
-        method: "startWatchClient",
+        method: "startDeviceClientWatcher",
         params: {
           deviceId: "device-1",
         },
       },
       {
-        method: "stopWatchClient",
+        method: "stopDeviceClientWatcher",
         params: {
           deviceId: "device-1",
         },
@@ -217,7 +217,7 @@ describe("multiplexer client mirror sync", function () {
 
   it("does not throw when fire-and-forget MultiplexerDevice RPCs reject", async function () {
     const daemonClient = createDaemonClient({
-      rejectMethods: new Set(["startWatchClient", "disconnectDevice"]),
+      rejectMethods: new Set(["startDeviceClientWatcher", "disconnectDevice"]),
     });
     const device = MultiplexerDevice.fromSnapshot(
       createDeviceSnapshot(),
@@ -230,7 +230,7 @@ describe("multiplexer client mirror sync", function () {
 
     assert.deepStrictEqual(
       daemonClient.state.calls.map((call) => call.method),
-      ["startWatchClient", "disconnectDevice"]
+      ["startDeviceClientWatcher", "disconnectDevice"]
     );
   });
 
@@ -290,7 +290,7 @@ describe("multiplexer client mirror sync", function () {
     };
     const daemonClient = createDaemonClient({
       call(method, params) {
-        if (method !== "sendRawMessage") {
+        if (method !== "sendMessageWithReply") {
           return `${method}-result`;
         }
         if (params.message.event === "Initialize") {
@@ -340,7 +340,7 @@ describe("multiplexer client mirror sync", function () {
         clientId: 1,
       },
     });
-    assert.strictEqual(calls[1].method, "sendRawMessage");
+    assert.strictEqual(calls[1].method, "sendMessageWithReply");
     assert.strictEqual(calls[1].params.clientId, 1);
     assert.deepStrictEqual(
       {
@@ -378,14 +378,14 @@ describe("multiplexer client mirror sync", function () {
     assert(Number.isSafeInteger(calls[1].params.message.data.data.message.id));
     assert.deepStrictEqual(calls.slice(2, 4), [
       {
-        method: "sendRawMessage",
+        method: "sendMessageWithReply",
         params: {
           clientId: 1,
           message: rawMessage,
         },
       },
       {
-        method: "sendMessage",
+        method: "sendMessageWithoutReply",
         params: {
           target: "app",
           clientId: 1,
@@ -395,7 +395,7 @@ describe("multiplexer client mirror sync", function () {
         },
       },
     ]);
-    assert.strictEqual(calls[4].method, "sendRawMessage");
+    assert.strictEqual(calls[4].method, "sendMessageWithReply");
     assert.strictEqual(calls[4].params.clientId, 1);
     assert.deepStrictEqual(
       {
@@ -435,7 +435,7 @@ describe("multiplexer client mirror sync", function () {
 
   it("does not throw when fire-and-forget MultiplexerUsbClient RPCs reject", async function () {
     const daemonClient = createDaemonClient({
-      rejectMethods: new Set(["closeClient", "sendMessage"]),
+      rejectMethods: new Set(["closeClient", "sendMessageWithoutReply"]),
     });
     const client = MultiplexerUsbClient.fromSnapshot(
       createClientSnapshot(),
@@ -452,7 +452,7 @@ describe("multiplexer client mirror sync", function () {
 
     assert.deepStrictEqual(
       daemonClient.state.calls.map((call) => call.method),
-      ["closeClient", "sendMessage"]
+      ["closeClient", "sendMessageWithoutReply"]
     );
   });
 
@@ -518,7 +518,7 @@ describe("multiplexer client mirror sync", function () {
   it("forwards MultiplexerWebSocketClient compatibility APIs to daemon RPC", async function () {
     const daemonClient = createDaemonClient({
       call(method, params) {
-        if (method === "sendRawMessage") {
+        if (method === "sendMessageWithReply") {
           return createCustomizedResponse(
             params.message.data.type,
             "wifi-result",
@@ -550,7 +550,7 @@ describe("multiplexer client mirror sync", function () {
         params: { clientId: 100 },
       },
       {
-        method: "sendMessage",
+        method: "sendMessageWithoutReply",
         params: {
           target: "app",
           clientId: 100,
@@ -559,7 +559,7 @@ describe("multiplexer client mirror sync", function () {
       },
     ]);
     const rawCall = daemonClient.state.calls[2];
-    assert.strictEqual(rawCall.method, "sendRawMessage");
+    assert.strictEqual(rawCall.method, "sendMessageWithReply");
     assert.strictEqual(rawCall.params.clientId, 100);
     assert.deepStrictEqual(
       {
@@ -607,7 +607,7 @@ describe("multiplexer client mirror sync", function () {
 
     assert.deepStrictEqual(daemonClient.state.calls, [
       {
-        method: "sendMessage",
+        method: "sendMessageWithoutReply",
         params: {
           target: "web",
           clientId: 101,
@@ -617,14 +617,14 @@ describe("multiplexer client mirror sync", function () {
     ]);
   });
 
-  it("forwards sendRawMessage RPC errors without legacy rewrapping", async function () {
+  it("forwards sendMessageWithReply RPC errors without legacy rewrapping", async function () {
     const daemonClient = createDaemonClient({
-      rejectMethods: new Set(["sendRawMessage"]),
+      rejectMethods: new Set(["sendMessageWithReply"]),
     });
     daemonClient.call = async (method, params) => {
       daemonClient.state.calls.push({ method, params });
       throw new Error(
-        "Timed out waiting for multiplexer RPC sendRawMessage response"
+        "Timed out waiting for multiplexer RPC sendMessageWithReply response"
       );
     };
     const client = MultiplexerWebSocketClient.fromSnapshot(
@@ -642,7 +642,7 @@ describe("multiplexer client mirror sync", function () {
       (error) => {
         assert.strictEqual(
           error.message,
-          "Timed out waiting for multiplexer RPC sendRawMessage response"
+          "Timed out waiting for multiplexer RPC sendMessageWithReply response"
         );
         return true;
       }
@@ -651,7 +651,7 @@ describe("multiplexer client mirror sync", function () {
 
   it("contains rejected fire-and-forget WebSocket proxy RPCs", async function () {
     const daemonClient = createDaemonClient({
-      rejectMethods: new Set(["closeClient", "sendMessage"]),
+      rejectMethods: new Set(["closeClient", "sendMessageWithoutReply"]),
     });
     const client = MultiplexerWebSocketClient.fromSnapshot(
       createWebSocketClientSnapshot(),
@@ -667,7 +667,7 @@ describe("multiplexer client mirror sync", function () {
       await nextTick();
       assert.deepStrictEqual(
         daemonClient.state.calls.map((call) => call.method),
-        ["closeClient", "sendMessage"]
+        ["closeClient", "sendMessageWithoutReply"]
       );
       assert.deepStrictEqual(warnings, []);
     } finally {

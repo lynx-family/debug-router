@@ -2,14 +2,14 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import type { ControlMessageMeta } from "./control";
+import type { MultiplexerDebugInfo } from "./debuginfo";
 import type { Snapshot } from "./snapshot";
 
 export type ControlEventEnvelope<Event extends string, Data> = {
   kind: "event";
   event: Event;
   data: Data;
-  meta?: ControlMessageMeta;
+  debugInfo?: MultiplexerDebugInfo;
 };
 
 export type ControlEvent =

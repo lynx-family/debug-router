@@ -30,8 +30,9 @@ describe("multiplexer integration daemon lifecycle", function () {
     context = createIntegrationContext("daemon-lifecycle", {
       heartbeatInterval: 25,
       staleTimeout: 500,
-      daemonVersion: "integration-test-daemon",
-      capabilities: ["fake-physical", "integration"],
+      debugInfo: {
+        daemonVersion: "integration-test-daemon",
+      },
     });
 
     const info = await context.manager.ensureDaemon();
@@ -41,8 +42,9 @@ describe("multiplexer integration daemon lifecycle", function () {
     assert.strictEqual(info.protocolVersion > 0, true);
     assert.strictEqual(info.minSupportedProtocolVersion > 0, true);
     assert.strictEqual(info.controlPort > 0, true);
-    assert.strictEqual(info.daemonVersion, "integration-test-daemon");
-    assert.deepStrictEqual(info.capabilities, ["fake-physical", "integration"]);
+    assert.strictEqual(info.debugInfo.daemonVersion, "integration-test-daemon");
+    assert.strictEqual(info.debugInfo.processId, info.pid);
+    assert.strictEqual(typeof info.debugInfo.timestamp, "number");
 
     const health = await getHealth(info.controlPort);
     assert.strictEqual(health.statusCode, 200);
@@ -52,11 +54,12 @@ describe("multiplexer integration daemon lifecycle", function () {
       health.body.minSupportedProtocolVersion,
       info.minSupportedProtocolVersion
     );
-    assert.strictEqual(health.body.daemonVersion, "integration-test-daemon");
-    assert.deepStrictEqual(health.body.capabilities, [
-      "fake-physical",
-      "integration",
-    ]);
+    assert.strictEqual(
+      health.body.debugInfo.daemonVersion,
+      "integration-test-daemon"
+    );
+    assert.strictEqual(health.body.debugInfo.processId, info.pid);
+    assert.strictEqual(typeof health.body.debugInfo.timestamp, "number");
 
     assert(
       context
