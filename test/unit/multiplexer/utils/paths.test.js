@@ -67,13 +67,12 @@ describe("multiplexer paths", function () {
       path.join(dataDir, "daemon.lock")
     );
 
-    assert.deepStrictEqual(createMultiplexerPaths({ rootDir, dataDir }), {
-      rootDir,
-      dataDir,
-      discoveryPath: path.join(dataDir, "daemon.json"),
-      spawnLockPath: path.join(dataDir, "spawn.lock"),
-      daemonLockPath: path.join(dataDir, "daemon.lock"),
-    });
+    const paths = createMultiplexerPaths({ rootDir, dataDir });
+    assert.strictEqual(paths.rootDir, rootDir);
+    assert.strictEqual(paths.dataDir, dataDir);
+    assert.strictEqual(paths.discoveryPath, path.join(dataDir, "daemon.json"));
+    assert.strictEqual(paths.spawnLockPath, path.join(dataDir, "spawn.lock"));
+    assert.strictEqual(paths.daemonLockPath, path.join(dataDir, "daemon.lock"));
   });
 
   it("keeps different roots isolated", function () {

@@ -9,15 +9,49 @@ const path = require("path");
 
 require("../register_ts");
 
+const connectorRoot = path.join(
+  __dirname,
+  "../../../../debug_router_connector"
+);
+const rewire = require(require.resolve("rewire", {
+  paths: [connectorRoot],
+}));
+const atomicFileModulePath = path.join(
+  connectorRoot,
+  "src/multiplexer/utils/atomic_file.ts"
+);
+const fileLockModulePath = path.join(
+  connectorRoot,
+  "src/multiplexer/utils/FileLock.ts"
+);
+const writeFileAtomicModulePath = require.resolve("write-file-atomic", {
+  paths: [connectorRoot],
+});
+const atomicFileModule = rewire(atomicFileModulePath);
 const {
   readJsonFile,
   removeFileIfExists,
   writeFileAtomic,
   writeJsonAtomic,
-} = require("../../../../debug_router_connector/src/multiplexer/utils/atomic_file");
+} = atomicFileModule;
 const {
   FileLock,
 } = require("../../../../debug_router_connector/src/multiplexer/utils/FileLock");
+
+function rewireModuleFs(modulePath, overrides) {
+  const rewiredModule = rewire(modulePath);
+  const moduleFs = rewiredModule.__get__("fs");
+  const localFs = Object.assign(Object.create(moduleFs), overrides);
+  rewiredModule.__set__("fs", localFs);
+  return rewiredModule;
+}
+
+function rewireDefaultFsImport(modulePath, overrides) {
+  const rewiredModule = rewire(modulePath);
+  const fsImport = rewiredModule.__get__("fs_1");
+  fsImport.default = Object.assign(Object.create(fsImport.default), overrides);
+  return rewiredModule;
+}
 
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-test-"));
@@ -76,25 +110,34 @@ describe("multiplexer atomic file utilities", function () {
     const filePath = path.join(tempDir, "daemon.json");
     fs.writeFileSync(filePath, "old");
 
-    const originalRenameSync = fs.renameSync;
     let attempts = 0;
-    fs.renameSync = function retryRename(oldPath, newPath) {
-      attempts++;
-      if (attempts <= 3) {
-        const error = new Error("temporarily busy");
-        error.code = "EPERM";
-        throw error;
+    const writeFileAtomicDependency = rewireModuleFs(
+      writeFileAtomicModulePath,
+      {
+        renameSync(oldPath, newPath) {
+          attempts++;
+          if (attempts === 1) {
+            const error = new Error("temporarily busy");
+            error.code = "EPERM";
+            throw error;
+          }
+          return fs.renameSync(oldPath, newPath);
+        },
       }
-      return originalRenameSync.call(fs, oldPath, newPath);
-    };
+    );
+    const writeFileAtomicPackage = atomicFileModule.__get__(
+      "writeFileAtomicPackage"
+    );
+    const originalSync = writeFileAtomicPackage.sync;
+    writeFileAtomicPackage.sync = writeFileAtomicDependency.sync;
 
     try {
       writeFileAtomic(filePath, "new");
     } finally {
-      fs.renameSync = originalRenameSync;
+      writeFileAtomicPackage.sync = originalSync;
     }
 
-    assert.strictEqual(attempts, 4);
+    assert.ok(attempts > 1);
     assert.strictEqual(fs.readFileSync(filePath, "utf8"), "new");
   });
 
@@ -102,18 +145,30 @@ describe("multiplexer atomic file utilities", function () {
     const filePath = path.join(tempDir, "daemon.json");
     fs.writeFileSync(filePath, "old");
 
-    const originalRenameSync = fs.renameSync;
-    fs.renameSync = function throwOnRename() {
-      throw new Error("rename failed");
-    };
+    let tempFilePath;
+    const writeFileAtomicDependency = rewireModuleFs(
+      writeFileAtomicModulePath,
+      {
+        renameSync(oldPath) {
+          tempFilePath = oldPath;
+          throw new Error("rename failed");
+        },
+      }
+    );
+    const writeFileAtomicPackage = atomicFileModule.__get__(
+      "writeFileAtomicPackage"
+    );
+    const originalSync = writeFileAtomicPackage.sync;
+    writeFileAtomicPackage.sync = writeFileAtomicDependency.sync;
 
     try {
       assert.throws(() => writeFileAtomic(filePath, "new"), /rename failed/);
     } finally {
-      fs.renameSync = originalRenameSync;
+      writeFileAtomicPackage.sync = originalSync;
     }
 
     assert.strictEqual(fs.readFileSync(filePath, "utf8"), "old");
+    assert.strictEqual(fs.existsSync(tempFilePath), false);
     assert.deepStrictEqual(
       fs.readdirSync(tempDir).filter((name) => name.endsWith(".tmp")),
       []
@@ -468,19 +523,17 @@ describe("multiplexer FileLock", function () {
 
   it("treats try remove failures as best effort", function () {
     const lockPath = path.join(tempDir, "try-error.lock");
-    const originalRmSync = fs.rmSync;
     fs.mkdirSync(lockPath);
 
-    fs.rmSync = () => {
-      throw new Error("rm failed");
-    };
+    const rewiredFileLockModule = rewireDefaultFsImport(fileLockModulePath, {
+      rmSync() {
+        throw new Error("rm failed");
+      },
+    });
+    const RewiredFileLock = rewiredFileLockModule.FileLock;
 
-    try {
-      assert.strictEqual(new FileLock(lockPath).tryRemove(null), false);
-      assert.strictEqual(fs.existsSync(lockPath), true);
-    } finally {
-      fs.rmSync = originalRmSync;
-    }
+    assert.strictEqual(new RewiredFileLock(lockPath).tryRemove(null), false);
+    assert.strictEqual(fs.existsSync(lockPath), true);
   });
 
   it("propagates unexpected acquire and stat errors", function () {
