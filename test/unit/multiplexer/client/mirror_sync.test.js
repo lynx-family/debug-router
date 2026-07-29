@@ -4,21 +4,19 @@
 
 const assert = require("assert");
 
-require("../register_ts");
-
 const {
   MultiplexerDevice,
   MultiplexerUsbClient,
-} = require("../../../../debug_router_connector/src/multiplexer/client");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client");
 const {
   MultiplexerWebSocketClient,
-} = require("../../../../debug_router_connector/src/multiplexer/client/MultiplexerWebSocketClient");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerWebSocketClient");
 const {
   defaultLogger,
-} = require("../../../../debug_router_connector/src/utils/logger");
+} = require("../../../../debug_router_connector/dist/cjs/src/utils/logger");
 const {
   WebSocketClient,
-} = require("../../../../debug_router_connector/src/websocket/WebSocketConnection");
+} = require("../../../../debug_router_connector/dist/cjs/src/websocket/WebSocketConnection");
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));

@@ -5,31 +5,29 @@
 const assert = require("assert");
 const path = require("path");
 
-require("../register_ts");
-
 const daemonClientPath = require.resolve(
-  "../../../../debug_router_connector/src/multiplexer/client/MultiplexerDaemonClient"
+  "../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDaemonClient"
 );
 const daemonManagerPath = require.resolve(
-  "../../../../debug_router_connector/src/multiplexer/client/MultiplexerDaemonManager"
+  "../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDaemonManager"
 );
 const discoveryPath = require.resolve(
-  "../../../../debug_router_connector/src/multiplexer/client/MultiplexerDiscovery"
+  "../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDiscovery"
 );
 const connectorPath = require.resolve(
-  "../../../../debug_router_connector/src/connector/DebugRouterConnector"
+  "../../../../debug_router_connector/dist/cjs/src/connector/DebugRouterConnector"
 );
 const connectorIndexPath = require.resolve(
-  "../../../../debug_router_connector/src/connector"
+  "../../../../debug_router_connector/dist/cjs/src/connector"
 );
-const rootIndexPath = require.resolve("../../../../debug_router_connector/src");
+const rootIndexPath = require.resolve("../../../../debug_router_connector/dist/cjs/src");
 
 const {
   defaultLogger,
-} = require("../../../../debug_router_connector/src/utils/logger");
+} = require("../../../../debug_router_connector/dist/cjs/src/utils/logger");
 const {
   MultiOpenStatus,
-} = require("../../../../debug_router_connector/src/connector/MultiOpenCallBack");
+} = require("../../../../debug_router_connector/dist/cjs/src/connector/MultiOpenCallBack");
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));

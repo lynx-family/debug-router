@@ -5,17 +5,15 @@
 const assert = require("assert");
 const { EventEmitter } = require("events");
 
-require("../register_ts");
-
 const {
   MultiplexerDaemonClient,
-} = require("../../../../debug_router_connector/src/multiplexer/client/MultiplexerDaemonClient");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDaemonClient");
 const {
   setDriverReportService,
-} = require("../../../../debug_router_connector/src/report/interface/DriverReportService");
+} = require("../../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportService");
 const {
   defaultLogger,
-} = require("../../../../debug_router_connector/src/utils/logger");
+} = require("../../../../debug_router_connector/dist/cjs/src/utils/logger");
 
 const WS_CONNECTING = 0;
 const WS_OPEN = 1;

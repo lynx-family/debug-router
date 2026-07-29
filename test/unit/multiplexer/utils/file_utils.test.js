@@ -7,8 +7,6 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-require("../register_ts");
-
 const connectorRoot = path.join(
   __dirname,
   "../../../../debug_router_connector"
@@ -18,11 +16,11 @@ const rewire = require(require.resolve("rewire", {
 }));
 const atomicFileModulePath = path.join(
   connectorRoot,
-  "src/multiplexer/utils/atomic_file.ts"
+  "dist/cjs/src/multiplexer/utils/atomic_file.js"
 );
 const fileLockModulePath = path.join(
   connectorRoot,
-  "src/multiplexer/utils/FileLock.ts"
+  "dist/cjs/src/multiplexer/utils/FileLock.js"
 );
 const writeFileAtomicModulePath = require.resolve("write-file-atomic", {
   paths: [connectorRoot],
@@ -36,7 +34,7 @@ const {
 } = atomicFileModule;
 const {
   FileLock,
-} = require("../../../../debug_router_connector/src/multiplexer/utils/FileLock");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/FileLock");
 
 function rewireModuleFs(modulePath, overrides) {
   const rewiredModule = rewire(modulePath);

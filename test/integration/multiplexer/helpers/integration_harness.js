@@ -11,27 +11,25 @@ const { WebSocket } = require(require.resolve("ws", {
   paths: [path.join(__dirname, "../../../../debug_router_connector")],
 }));
 
-require("../../../unit/multiplexer/register_ts");
-
 const {
   DebugRouterConnector,
-} = require("../../../../debug_router_connector/src/connector/DebugRouterConnector");
+} = require("../../../../debug_router_connector/dist/cjs/src/connector/DebugRouterConnector");
 const {
   MultiplexerDaemonClient,
-} = require("../../../../debug_router_connector/src/multiplexer/client/MultiplexerDaemonClient");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDaemonClient");
 const {
   MultiplexerDaemonManager,
-} = require("../../../../debug_router_connector/src/multiplexer/client/MultiplexerDaemonManager");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDaemonManager");
 const {
   MultiplexerDiscovery,
-} = require("../../../../debug_router_connector/src/multiplexer/client/MultiplexerDiscovery");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDiscovery");
 const {
   MULTIPLEXER_CONTROL_PATH,
   MULTIPLEXER_HEALTH_PATH,
-} = require("../../../../debug_router_connector/src/multiplexer/protocol/discovery");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol/discovery");
 const {
   createMultiplexerPaths,
-} = require("../../../../debug_router_connector/src/multiplexer/utils/paths");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/paths");
 
 const fakeDaemonEntry = path.join(
   __dirname,

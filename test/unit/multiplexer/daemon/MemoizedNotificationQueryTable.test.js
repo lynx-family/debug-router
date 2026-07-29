@@ -4,12 +4,10 @@
 
 const assert = require("assert");
 
-require("../register_ts");
-
 const {
   DEFAULT_MEMOIZED_NOTIFICATION_TTL_MS,
   MemoizedNotificationQueryTable,
-} = require("../../../../debug_router_connector/src/multiplexer/daemon/MemoizedNotificationQueryTable");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MemoizedNotificationQueryTable");
 
 function createCustomizedMessage(type, data = []) {
   return {

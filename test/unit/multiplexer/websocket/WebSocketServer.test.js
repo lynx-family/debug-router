@@ -5,11 +5,9 @@
 const assert = require("assert");
 const { EventEmitter } = require("events");
 
-require("../register_ts");
-
 const {
   WebSocketController,
-} = require("../../../../debug_router_connector/src/websocket/WebSocketServer");
+} = require("../../../../debug_router_connector/dist/cjs/src/websocket/WebSocketServer");
 
 function createSocket() {
   const socket = new EventEmitter();

@@ -4,12 +4,10 @@
 
 const assert = require("assert");
 
-require("../register_ts");
-
 const {
   DEFAULT_PENDING_ROUTE_TIMEOUT_MS,
   PendingRouteTable,
-} = require("../../../../debug_router_connector/src/multiplexer/daemon/PendingRouteTable");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/PendingRouteTable");
 
 function createTimers() {
   const timers = [];

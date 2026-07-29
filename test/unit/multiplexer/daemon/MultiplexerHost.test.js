@@ -9,24 +9,22 @@ const rewire = require(require.resolve("rewire", {
   paths: [path.join(__dirname, "../../../../debug_router_connector")],
 }));
 
-require("../register_ts");
-
 const hostModule = rewire(
   path.join(
     __dirname,
-    "../../../../debug_router_connector/src/multiplexer/daemon/MultiplexerHost"
+    "../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerHost"
   )
 );
 const { MultiplexerHost } = hostModule;
 const {
   defaultLogger,
-} = require("../../../../debug_router_connector/src/utils/logger");
+} = require("../../../../debug_router_connector/dist/cjs/src/utils/logger");
 const {
   UsbClient,
-} = require("../../../../debug_router_connector/src/usb/Client");
+} = require("../../../../debug_router_connector/dist/cjs/src/usb/Client");
 const {
   isControlEvent,
-} = require("../../../../debug_router_connector/src/multiplexer/protocol/validation");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol/validation");
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));

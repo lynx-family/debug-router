@@ -5,11 +5,9 @@
 const assert = require("assert");
 const { EventEmitter } = require("events");
 
-require("../register_ts");
-
 const {
   MultiplexerControlConnection,
-} = require("../../../../debug_router_connector/src/multiplexer/daemon/MultiplexerControlConnection");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerControlConnection");
 
 const WS_OPEN = 1;
 const WS_CLOSING = 2;

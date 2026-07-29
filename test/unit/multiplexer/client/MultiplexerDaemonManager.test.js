@@ -8,17 +8,15 @@ const http = require("http");
 const os = require("os");
 const path = require("path");
 
-require("../register_ts");
-
 const {
   MultiplexerDaemonManager,
-} = require("../../../../debug_router_connector/src/multiplexer/client/MultiplexerDaemonManager");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDaemonManager");
 const {
   MultiplexerDiscovery,
-} = require("../../../../debug_router_connector/src/multiplexer/client/MultiplexerDiscovery");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDiscovery");
 const {
   FileLock,
-} = require("../../../../debug_router_connector/src/multiplexer/utils/FileLock");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/FileLock");
 
 class HealthReadyManager extends MultiplexerDaemonManager {
   async checkDaemonHealth() {

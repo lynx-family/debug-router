@@ -10,12 +10,10 @@ const rewire = require(require.resolve("rewire", {
   paths: [path.join(__dirname, "../../../../debug_router_connector")],
 }));
 
-require("../register_ts");
-
 const guardModule = rewire(
   path.join(
     __dirname,
-    "../../../../debug_router_connector/src/multiplexer/daemon/LegacyOwnershipGuard"
+    "../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/LegacyOwnershipGuard"
   )
 );
 const { LegacyOwnershipGuard } = guardModule;

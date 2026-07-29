@@ -4,8 +4,6 @@
 
 const assert = require("assert");
 
-require("../register_ts");
-
 const {
   isClientSnapshot,
   isMultiplexerDebugInfo,
@@ -22,7 +20,7 @@ const {
   isWebSocketClientSnapshot,
   parseJsonObject,
   parseJsonValue,
-} = require("../../../../debug_router_connector/src/multiplexer/protocol/validation");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol/validation");
 
 function createDeviceSnapshot() {
   return {

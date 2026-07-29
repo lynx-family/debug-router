@@ -4,15 +4,13 @@
 
 const assert = require("assert");
 
-require("../multiplexer/register_ts");
-
 const {
   PhysicalConnector,
-} = require("../../../debug_router_connector/src/physical/PhysicalConnector");
+} = require("../../../debug_router_connector/dist/cjs/src/physical/PhysicalConnector");
 const {
   getDriverReportService,
   setDriverReportService,
-} = require("../../../debug_router_connector/src/report/interface/DriverReportService");
+} = require("../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportService");
 
 function delay(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, ms));

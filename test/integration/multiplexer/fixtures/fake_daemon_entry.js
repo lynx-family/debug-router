@@ -6,17 +6,15 @@ const fs = require("fs");
 const path = require("path");
 const { EventEmitter } = require("events");
 
-require("../../../unit/multiplexer/register_ts");
-
 const {
   parseEntryOption,
-} = require("../../../../debug_router_connector/src/multiplexer/daemon/entry");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/entry");
 const {
   MultiplexerDaemon,
-} = require("../../../../debug_router_connector/src/multiplexer/daemon/MultiplexerDaemon");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerDaemon");
 const {
   MultiplexerHost,
-} = require("../../../../debug_router_connector/src/multiplexer/daemon/MultiplexerHost");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerHost");
 
 const STATE_FILE_NAME = "fake_physical_state.json";
 const COMMAND_FILE_NAME = "fake_physical_commands.jsonl";

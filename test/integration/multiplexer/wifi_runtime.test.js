@@ -21,7 +21,7 @@ const {
 } = require("./helpers/integration_harness");
 const {
   WebSocketClient,
-} = require("../../../debug_router_connector/src/websocket/WebSocketConnection");
+} = require("../../../debug_router_connector/dist/cjs/src/websocket/WebSocketConnection");
 
 describe("multiplexer integration WiFi runtime ideal behavior", function () {
   this.timeout(platformTimeout(12000));

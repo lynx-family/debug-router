@@ -110,8 +110,10 @@ Daemon side:
 Protocol and utilities:
 
 - `debug_router_connector/src/multiplexer/protocol/control.ts`
+- `debug_router_connector/src/multiplexer/protocol/debuginfo.ts`
 - `debug_router_connector/src/multiplexer/protocol/discovery.ts`
 - `debug_router_connector/src/multiplexer/protocol/event.ts`
+- `debug_router_connector/src/multiplexer/protocol/index.ts`
 - `debug_router_connector/src/multiplexer/protocol/snapshot.ts`
 - `debug_router_connector/src/multiplexer/protocol/validation.ts`
 - `debug_router_connector/src/multiplexer/utils/paths.ts`
@@ -203,7 +205,7 @@ Current public facade behavior:
 - `connectUsbClients()` asks the daemon to start the runtime client watcher for a device, then upserts returned snapshots into local `MultiplexerUsbClient` objects.
 - `getDevices()`, `getDeviceUsbClients()`, and `getAllUsbClients()` read from the local mirrors and wait for local events when necessary.
 - `startWSServer()` asks the daemon to start the WebSocket server and mirrors returned `WebSocketServerInfo` into compatibility fields: `wssPort`, `wssHost`, `roomId`, and `wss.wssPath`.
-- After a facade calls `startWSServer()`, it becomes a WebSocket-state requester. Host sends it a targeted current WebSocket snapshot, later snapshots, and `client-message` events whose source is `websocket-runtime` or `websocket-driver`. Facades that did not request the WebSocket service do not consume this state.
+- After a facade calls `startWSServer()`, it becomes a WebSocket-state requester. Host immediately sends it a targeted current snapshot, then targets later WebSocket lifecycle snapshots to the requester set. Physical lifecycle snapshots are broadcast to every control and may also contain WebSocket fields, but facades that did not request the WebSocket service ignore those fields and do not expose WebSocket messages or lifecycle events.
 - `getAllWebsocketAppClients()` and `getAllAppClients()` continue to expose WiFi runtimes through `MultiplexerWebSocketClient` proxies. Proxy send and close operations become daemon RPCs.
 - `sendMessageToWeb()` and `sendMessageToApp()` keep the original public call shape, but both forward through the daemon's unified `sendMessageWithoutReply` RPC.
 - `disableAllClients()` and `addDeviceManager()` no longer operate on physical objects in the Multiplexer-only facade; they only log warnings.
@@ -249,7 +251,7 @@ healthCheckTimeout = 500ms
 spawnLockStaleTimeout = startupTimeout + replacementTimeout + 1000ms
 ```
 
-Spawn uses the current Node executable to start `multiplexer/daemon/entry.js` as a detached child with `stdio: "ignore"`, then calls `unref()`. Startup arguments include discovery/lock paths, protocol versions, control port, heartbeat, serialized `debugInfo`, legacy driver dir, idle timeout, WebSocket config, and daemon-side `PhysicalConnectorOption`.
+Spawn uses the current Node executable to start `multiplexer/daemon/entry.js` as a detached child with `stdio: "ignore"`, then calls `unref()`. Startup arguments include discovery/lock paths, protocol versions, control port, heartbeat, legacy driver dir, idle timeout, WebSocket config, and daemon-side `PhysicalConnectorOption`. Serialized `debugInfo` is included only when diagnostic context was explicitly configured.
 
 ## 7. Daemon Process and Host
 
@@ -286,32 +288,70 @@ Spawn uses the current Node executable to start `multiplexer/daemon/entry.js` as
 
 ### 8.1 RPC
 
-Control RPC methods are defined by `ControlRpcMethod`:
+Every request explicitly contains `kind`, `id`, `method`, and `params`. Even an RPC with no business parameters sends `params: {}`:
 
-| RPC                     | Purpose                                                                                                     |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `connectDevices`        | Start physical device discovery and return device snapshots.                                                |
-| `connectUsbClients`     | Start the runtime client watcher for a device and return client snapshots.                                  |
-| `startDeviceClientWatcher` | Start the runtime-client watcher for one device.                                                          |
-| `stopDeviceClientWatcher`  | Stop the runtime-client watcher for one device without disconnecting it.                                  |
-| `disconnectDevice`      | Disconnect a device.                                                                                        |
-| `shutdownDaemon`        | Request graceful daemon shutdown, used by replacement/yield.                                                |
-| `startWSServer`         | Start the WebSocket server inside the daemon; this RPC takes an empty `{}` parameter object.                 |
-| `startAllDeviceClientWatchers` | Start watchers for all current and future devices.                                                   |
-| `stopAllDeviceClientWatchers`  | Stop all current watchers and disable automatic watching for later devices.                          |
-| `sendMessageWithReply`         | Forward a request-response message to a USB or WiFi runtime and return the complete response envelope. |
-| `sendMessageWithoutReply`      | Send a fire-and-forget message to one App runtime, one Web Driver, or all Web Drivers.                 |
-| `closeClient`           | Close a runtime client.                                                                                     |
+```ts
+type ControlRpcRequest<M extends ControlRpcMethod> = {
+  kind: "rpc";
+  id: number;
+  method: M;
+  params: ControlRpcParams[M];
+  debugInfo?: MultiplexerDebugInfo;
+};
+```
 
-Single-device watching uses separate `startDeviceClientWatcher({ deviceId })` and `stopDeviceClientWatcher({ deviceId })` RPCs; `deviceId` must be non-empty and extra fields are rejected at runtime. All-device watching uses `startAllDeviceClientWatchers({ force? })` and `stopAllDeviceClientWatchers({})`. Stopping all watchers also disables automatic watching for devices discovered later; either start RPC can enable watching again. The Connector validates the complete RPC request before sending it, and the daemon validates it again when receiving it. `connectUsbClients` remains separate because it returns the resulting client snapshot while watcher RPCs return no payload.
+A successful response always contains `result`. RPCs without business result data use an explicit empty object rather than omitting the field:
 
-`sendCustomizedMessage` remains a public mirror-client API but is no longer a control RPC. `MultiplexerUsbClient` and `MultiplexerWebSocketClient` allocate the inner message id and assemble the legacy `Customized` envelope locally, send it through the `sendMessageWithReply` RPC, then extract `response.data.data.message` from the complete response envelope and return that string to the caller. This keeps one request-response transport RPC while preserving the existing public return types: `sendRawMessage` returns `ResponseMessageType`, while `sendCustomizedMessage` returns the inner message string.
+```ts
+type ControlRpcResponse<M extends ControlRpcMethod> =
+  | {
+      kind: "rpc-response";
+      id: number;
+      ok: true;
+      result: ControlRpcResult[M];
+      debugInfo?: MultiplexerDebugInfo;
+    }
+  | {
+      kind: "rpc-response";
+      id: number;
+      ok: false;
+      error: {
+        code: string;
+        message: string;
+        details?: unknown;
+      };
+      debugInfo?: MultiplexerDebugInfo;
+    };
+```
+
+The current method contracts are:
+
+| RPC                            | Parameters                                             | Successful result     | Purpose                                                                       |
+| ------------------------------ | ------------------------------------------------------ | --------------------- | ----------------------------------------------------------------------------- |
+| `connectDevices`               | `{ timeout?, serial?, isAutoListenClients? }`          | `DeviceSnapshot[]`    | Start physical discovery and return the current matching devices.             |
+| `connectUsbClients`            | `{ deviceId, timeout?, waitTimeout?, clientName? }`    | `ClientSnapshot[]`    | Start one device's runtime watcher and return the current matching runtimes.   |
+| `startDeviceClientWatcher`     | `{ deviceId }`                                         | `{}`                  | Start one device's runtime watcher without returning a snapshot.               |
+| `stopDeviceClientWatcher`      | `{ deviceId }`                                         | `{}`                  | Stop one device's runtime watcher without disconnecting the device.            |
+| `disconnectDevice`             | `{ deviceId }`                                         | `{}`                  | Disconnect one physical device.                                               |
+| `shutdownDaemon`               | `{ reason? }`                                          | `{}`                  | Request graceful daemon shutdown for replacement or explicit shutdown.         |
+| `startWSServer`                | `{}`                                                   | `WebSocketServerInfo` | Start or reuse the WebSocket server and return `{ port, host, roomId? }`.       |
+| `startAllDeviceClientWatchers` | `{}`                                                   | `{}`                  | Watch all current devices and automatically watch later devices.               |
+| `stopAllDeviceClientWatchers`  | `{}`                                                   | `{}`                  | Stop all watchers and disable automatic watching for later devices.            |
+| `sendMessageWithReply`         | `{ clientId, message: RequireMessageType }`            | `ResponseMessageType` | Send a request-response message to one USB or WiFi runtime.                    |
+| `sendMessageWithoutReply`      | `{ target: "app" \| "web", clientId, message }`        | `{}`                  | Send a fire-and-forget message to an App runtime or WebSocket Driver.           |
+| `closeClient`                  | `{ clientId }`                                         | `{}`                  | Close one USB or WiFi runtime client.                                           |
+
+Single-device watching uses separate `startDeviceClientWatcher({ deviceId })` and `stopDeviceClientWatcher({ deviceId })` RPCs; `deviceId` must be non-empty and extra fields are rejected at runtime. All-device watching uses `startAllDeviceClientWatchers({})` and `stopAllDeviceClientWatchers({})`; the wire protocol has no `force` field. The public `DebugRouterConnector.startWatchAllClients(_force)` parameter remains only for source compatibility and is intentionally not forwarded. Stopping all watchers also disables `connectDevices()` auto-watch behavior for devices discovered later; either start RPC can enable watching again. `connectUsbClients` remains separate because it returns `ClientSnapshot[]`, while watcher RPCs return `result: {}`.
+
+`startWSServer` never succeeds with an empty or missing result. It returns a concrete `WebSocketServerInfo`; if daemon WebSocket support is disabled, Host returns an RPC error with code `websocket-disabled`. `MultiplexerControlConnection.sendResponse()` is the single transport-level fallback that converts an internal `undefined` from no-result Host methods into the required wire value `result: {}`.
+
+`sendCustomizedMessage` remains a public mirror-client API but is no longer a control RPC. `MultiplexerUsbClient` and `MultiplexerWebSocketClient` allocate the inner message id and assemble the legacy `Customized` envelope locally, send it through the `sendMessageWithReply` RPC, then read `response.data.data.message`. A string is returned directly; another defined JSON value is serialized before it is returned. This keeps one request-response transport RPC while preserving the existing public return types: `sendRawMessage` returns `ResponseMessageType`, while `sendCustomizedMessage` returns a string representation of the inner message.
 
 `sendMessageWithoutReply` always uses the fixed `{ target, clientId, message }` shape. `{ target: "app", clientId, message }` sends to one USB or WiFi Runtime App, `{ target: "web", clientId, message }` sends to one Web Driver, and `{ target: "web", clientId: -1, message }` broadcasts to all Web Drivers. `target: "app"` rejects the `-1` broadcast sentinel because App broadcast is not supported. This explicit target domain prevents equal numeric App and Driver ids from redirecting a message to the wrong client kind.
 
-`MultiplexerDebugInfo` is shared by discovery, health, snapshots, RPC requests, RPC responses, and events. It contains only optional diagnostic context: `protocolVersion`, `clientVersion`, `daemonVersion`, `processId`, and `timestamp`. Version strings no longer appear as standalone DTO or constructor fields. `processId` identifies the process that generated the context, while `timestamp` records when it was generated. The `capabilities` field has been removed from the complete Multiplexer protocol and daemon startup path because compatibility follows protocol-version negotiation and an additive protocol evolution policy rather than per-feature declarations. The required top-level `protocolVersion` and optional `minSupportedProtocolVersion` remain in discovery and health because they perform actual compatibility arbitration.
+`MultiplexerDaemonClient` validates the complete request before connecting and sending, and `MultiplexerControlConnection` validates it again on receipt. The client first accepts the common response envelope, then validates a successful `result` against the pending RPC's method. Recognized optional fields and most DTOs allow unknown additional fields for additive protocol evolution; exact no-parameter RPCs and the two single-device watcher parameter objects intentionally reject extra fields.
 
-RPC requests and responses both contain `kind` and `id`. Connector requests populate `debugInfo` with the Connector process and timestamp; daemon discovery, health, snapshots, responses, and events populate it with the Daemon process and timestamp. `MultiplexerDaemonClient` has a default RPC timeout of 5000 ms. RPCs with a positive operation `timeout` use `max(rpcTimeout, timeout + 1000ms)`; RPCs without an operation timeout continue to use the default timeout, with no method-specific exception.
+The default RPC timeout is 5000 ms. RPCs with a positive operation `timeout` use `max(rpcTimeout, timeout + 1000ms)`; RPCs without an operation timeout continue to use the default timeout, with no method-specific exception.
 
 ### 8.2 Event
 
@@ -323,15 +363,107 @@ legacy-ownership-changed
 client-message
 ```
 
+All three events use the same envelope, so transport handling can validate `kind`, `event`, optional diagnostics, and event-specific `data` independently:
+
+```ts
+type ControlEventEnvelope<Event extends string, Data> = {
+  kind: "event";
+  event: Event;
+  data: Data;
+  debugInfo?: MultiplexerDebugInfo;
+};
+```
+
 After a control connection is established, Host first sends a `snapshot` to that control id. Every physical-device, USB-runtime, WebSocket-runtime, and WebSocket-Driver lifecycle change is represented by a new snapshot rather than a dedicated lifecycle event. The Connector diffs consecutive snapshots and emits the legacy public lifecycle events locally. Additions are reported in dependency order (device before runtime), while removals are reported in reverse dependency order (runtime and WebSocket clients before device).
 
-Runtime routing is transport-independent: USB and WiFi share ID restoration, route lookup, targeted replies, unknown-response dropping, and notification fanout. All message traffic uses `client-message` with `source: "usb-runtime" | "websocket-runtime" | "websocket-driver"`. WebSocket snapshots and messages are sent only to controls that requested `startWSServer`; facades that did not request the server filter shared WebSocket state and messages. When an already-connected control requests the shared server, Host sends it a fresh targeted snapshot so existing WiFi runtimes are mirrored immediately.
+`legacy-ownership-changed` is retained as an operational status event rather than a device/client lifecycle delta. Its data contains `status`, `ownerPid`, optional `previousOwnerPid`, and a reason. `client-message` carries transient traffic that cannot be reconstructed from state:
+
+```ts
+type LegacyOwnershipChangedEventData = {
+  status: "attached" | "unattached";
+  ownerPid: number;
+  previousOwnerPid?: number;
+  reason:
+    | "daemon-started"
+    | "legacy-preempted"
+    | "reacquire-requested"
+    | "stale-owner"
+    | "invalid-owner";
+};
+
+type ClientMessageEventData = {
+  source: "usb-runtime" | "websocket-runtime" | "websocket-driver";
+  id: number;
+  message: string;
+};
+```
+
+Runtime routing is transport-independent: USB and WiFi share ID restoration, route lookup, targeted replies, unknown-response dropping, and notification fanout. WebSocket lifecycle changes trigger snapshots only for controls that requested `startWSServer()`. Physical lifecycle snapshots are broadcast and can include WebSocket arrays, and unsolicited WiFi runtime notifications can also traverse the shared control broadcast; non-requesting facades deliberately ignore WebSocket state and message sources. When an already-connected control requests the shared server, Host sends it a fresh targeted snapshot so existing WiFi runtimes and Drivers are mirrored immediately.
+
+`DebugRouterConnector.applyHostEvent()` synchronizes snapshots into local mirrors and maps unified `client-message` sources back to compatibility event names such as `usb-client-message`, `ws-client-message`, and `ws-web-message`. The public Connector event surface therefore remains unchanged.
+
+### 8.3 Snapshot
+
+`snapshot` is the daemon's authoritative full state at one point in time, not an incremental change list:
+
+```ts
+type Snapshot = {
+  protocolVersion: number;
+  generatedAt: number;
+  devices: DeviceSnapshot[];
+  clients: ClientSnapshot[];
+  websocketAppClients?: WebSocketClientSnapshot[];
+  websocketWebClients?: WebSocketClientSnapshot[];
+  debugInfo?: MultiplexerDebugInfo;
+};
+
+type DeviceSnapshot = DeviceDescription & {
+  ports?: number[];
+  host?: string;
+};
+
+type ClientSnapshot = ClientDescription;
+
+type WebSocketClientSnapshot = {
+  id: number;
+  app: string;
+  debugRouterVersion: string;
+  deviceModel: string;
+  network: "WiFi";
+  osVersion: string;
+  sdkVersion: string;
+  type: string;
+  raw_info: unknown;
+};
+```
+
+`devices` and `clients` are always present. The two WebSocket arrays are optional because they are unavailable before the daemon-side WebSocket controller exists. Once present, each snapshot contains the complete current arrays; an empty array therefore means “the authoritative current set is empty,” not “there was no update.” `raw_info` is required on every `WebSocketClientSnapshot` and is preserved as opaque data.
+
+The full-state model handles initial connection, late WebSocket requesters, reconnect, missed-event correction, and lifecycle ordering with one representation. Connector mirrors calculate additions and removals by comparing the new snapshot with their current Maps; no device/client connected or disconnected event is sent over the control protocol.
+
+### 8.4 Diagnostic Context and Version Arbitration
+
+`MultiplexerDebugInfo` may be attached to discovery, health, snapshots, RPC requests, RPC responses, and events:
+
+```ts
+type MultiplexerDebugInfo = {
+  protocolVersion?: number;
+  clientVersion?: string;
+  daemonVersion?: string;
+  processId?: number;
+  timestamp?: number;
+};
+```
+
+Every field is optional and diagnostic only. `processId` identifies the process that generated the context, and `timestamp` is its Unix timestamp in milliseconds. Ordinary `DebugRouterConnector` construction does not configure this context, so normal protocol messages omit `debugInfo`; internal embedding and tests can opt in, after which producers add current process and timestamp information. Consumers must not use `debugInfo` for feature detection or compatibility decisions.
+
+The former `capabilities` field is removed. Actual compatibility arbitration uses the required top-level `protocolVersion` and optional `minSupportedProtocolVersion` in discovery and health. Version strings used only for troubleshooting remain inside `MultiplexerDebugInfo` rather than appearing as standalone protocol fields.
+
+### 8.5 Connection Trace Is Not a Control Protocol
 
 Connection trace is daemon-owned and is not part of `snapshot` or the control protocol. `MultiplexerHost` is the only owner that constructs `ConnectionTraceRecorder` from `connectionTrace`, passes that same instance to the `PhysicalConnector` it creates, records whole-chain connection facts, and closes the recorder. It does not reuse a recorder from an injected `PhysicalConnector` or an incoming `traceRecorder` option. In addition to the legacy device, runtime, and WebSocket-client connection facts, Host records daemon lifecycle and stop triggers, control-socket connections, shared WebSocket-server lifecycle, and legacy-ownership acquisition or loss. Control-socket events include the `controlId` and the resulting active-connection count; server and ownership events carry their endpoint or owner metadata. The Connector facade no longer exposes `getConnectionTrace()` or `onConnectionTrace()`, and the daemon exposes no trace query/subscription RPC or trace control event. The recorder's existing buffer, listener, and query capabilities remain available internally for now but are not exposed across processes.
 
 Trace configuration is daemon-startup-global. The first Connector that actually starts the daemon determines `connectionTrace`; later Connectors reuse that daemon and cannot replace its recorder configuration until the daemon restarts. The daemon constructs the recorder using the original `ConnectionTraceOptions` rules and `process.env.DriverConnectionTracePath`, so the default remains disabled when neither provides an output. A string `connectionTrace.output` is converted to an absolute path and serialized to the daemon. A `WritableStream` remains valid for an in-process `PhysicalConnector`, but cannot cross the Multiplexer process boundary, so the facade ignores that output and logs a warning while forwarding the other trace options. `MultiplexerDaemonManager` explicitly removes `traceRecorder` from daemon startup serialization; the daemon entry also rejects a manually supplied recorder instance.
-
-`DebugRouterConnector.applyHostEvent()` synchronizes snapshots into local mirrors and maps unified `client-message` sources back to compatibility event names such as `usb-client-message`, `ws-client-message`, and `ws-web-message`. The public Connector event surface therefore remains unchanged.
 
 ## 9. Connector-side Mirror Objects
 
@@ -375,7 +507,7 @@ Local mirror synchronization rules:
 2. Use `ip.address()` to build the host and return `WebSocketServerInfo`.
 3. Create `WebSocketController` and listen on `/mdevices/page/android`.
 
-After startup, the shared WebSocket server remains running even when every control that requested it disconnects. Requester removal only stops snapshot/event delivery to that control; the server is closed together with the daemon during idle shutdown, explicit shutdown, or replacement.
+After startup, the shared WebSocket server remains running even when every control that requested it disconnects. Requester removal stops requester-targeted WebSocket snapshots and prevents that facade from exposing shared WebSocket state or messages; the server is closed together with the daemon during idle shutdown, explicit shutdown, or replacement.
 
 WebSocket client handshake:
 
@@ -399,7 +531,7 @@ Current implementation boundaries:
 - In the current daemon path, Driver frontend `Customized` messages carry `fromWebClientId`, so they enter Host unified routing.
 - Host unified outbound routing supports both `PhysicalConnector.usbClients` and `WebSocketController.websocketAppClients`; both runtime types share message-ID rewriting, pending routes, and targeted response delivery.
 - `sendMessageWithReply` and `closeClient` remain Runtime-only RPC operations. The public `sendCustomizedMessage` helper reuses `sendMessageWithReply`. `sendMessageWithoutReply` selects the client identity domain first: `target: "app"` checks only WebSocket App and USB clients, while `target: "web"` routes only through the Web Driver controller, so overlapping numeric ids cannot redirect a message across domains.
-- Runtime `Customized` messages are associated with the registered WebSocket app client id, so they still enter unified routing when the payload omits `sender`. `WebSocketClient` does not emit an eager duplicate message for this branch; Host emits the routed or broadcast result exactly once. Non-`Customized` runtime messages and Driver messages continue to use requester-scoped `client-message` events with distinct sources.
+- Runtime `Customized` messages are associated with the registered WebSocket app client id, so they still enter unified routing when the payload omits `sender`. `WebSocketClient` does not emit an eager duplicate message for this branch; Host emits the routed or broadcast result exactly once. Non-`Customized` runtime messages and Driver messages continue to use `client-message` with distinct sources; the facade's WebSocket requester state determines whether those messages are exposed publicly.
 - WebSocket parsing and routing errors are contained and logged by the client handler instead of escaping or closing the socket. On close, the controller also checks the source client instance before removing a Map entry, so a WiFi runtime and Driver frontend with the same numeric id cannot disconnect each other.
 - WebSocket app clients appear in `ClientList` and are synchronized to requesting Connector facades through snapshots. Driver-to-WiFi, Connector-to-WiFi, targeted responses, raw events, disconnect cleanup, and late-requester snapshot recovery are covered by integration and E2E tests.
 
@@ -620,13 +752,13 @@ When Host loses legacy owner, it:
 
 1. Sets `legacyOwnershipAttached = false`.
 2. Rejects and clears all pending routes.
-3. Stops physical discovery and device client watchers, then removes all devices because Host no longer controls them.
+3. Invalidates Host physical-discovery state and stops every device client watcher. `PhysicalConnector.devices` is preserved internally so an already-known device can be watched again after ownership is reacquired, but Host snapshots and getters hide all physical devices while ownership is unattached.
 4. Closes and removes all USB runtime clients, and clears the selected runtime.
 5. Actively closes and removes all WebSocket app/WiFi runtime clients, while retaining live WebSocket Driver frontend connections.
 6. Publishes a snapshot from those authoritative Maps and refreshes WebSocket `ClientList` / `DeviceList`: only live Driver clients remain; devices and USB/WiFi runtimes are absent.
 7. Broadcasts `legacy-ownership-changed`, and the connector facade converts it into a `MultiOpenStatus.unattached` callback.
 
-There is no synthetic empty snapshot and no ownership-loss-only mirror reset. Host first removes devices and runtimes from their authoritative daemon-side Maps, then serializes those Maps together with the retained Driver Map. WebSocket `ClientList` reads the same USB and WiFi runtime Maps, and the facade reconciles all mirrors from that snapshot. Therefore `ClientList`, Host snapshot, and facade mirrors converge on one real state even when a WiFi runtime and Driver frontend use the same numeric client id.
+There is no synthetic empty snapshot and no ownership-loss-only mirror reset. Host preserves the internal physical device table for later reacquisition, but serializes no physical devices or USB runtimes while unattached; it clears the USB/WiFi runtime Maps and serializes the retained Driver Map. WebSocket `ClientList` observes the same ownership-filtered USB state and WiFi runtime Map, and the facade reconciles all mirrors from that snapshot. Therefore `ClientList`, Host snapshot, and facade mirrors converge on one visible state even when a WiFi runtime and Driver frontend use the same numeric client id.
 
 Later `connectDevices()`, `startAllDeviceClientWatchers()`, and desired-state recovery reacquire ownership inside the Host before restoring physical discovery. This does not return to the old connector implementation; it only lets the daemon regain the owner file required by the legacy physical layer.
 
@@ -643,7 +775,7 @@ Recovery flow:
 3. If `startAllDeviceClientWatchers()` was previously requested, start all runtime watchers again.
 4. If the WebSocket server was previously started, run `startWSServer()` again.
 
-State recovery converges on daemon snapshot. Even if incremental events were lost, the full snapshot after reconnect overwrites local mirrors and realigns state.
+State recovery converges on daemon snapshot. Even if an earlier control message or snapshot was lost, the full snapshot after reconnect overwrites local mirrors and realigns state.
 
 | State                                                   | Owner                                        | Recovery                                                                                                                                                                                                                          |
 | ------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -652,7 +784,7 @@ State recovery converges on daemon snapshot. Even if incremental events were los
 | Connector pending RPC                                   | Connector-side `MultiplexerDaemonClient`     | Rejected when control socket disconnects; caller retries through existing logic.                                                                                                                                                  |
 | pending route                                           | Daemon-side `PendingRouteTable`              | Created for request lifecycle; cleared on control/WebSocket disconnect, Host reset, or timeout.                                                                                                                                   |
 | memoized notification query                             | Daemon-side `MemoizedNotificationQueryTable` | Starts empty after daemon recovery and is repopulated opportunistically by matching runtime notifications; isolated by runtime client; cleared on runtime disconnect or Host/physical reset; stale entries are ignored after TTL. |
-| WiFi runtime / WebSocket frontend connection            | Daemon-side `WebSocketController`            | The app/frontend reconnects after WebSocket disconnect; Driver count is used for daemon idle detection, while requester-scoped snapshots/events restore facade mirrors.                                                           |
+| WiFi runtime / WebSocket frontend connection            | Daemon-side `WebSocketController`            | The app/frontend reconnects after WebSocket disconnect; Driver count is used for daemon idle detection, while requester-targeted snapshots and facade-side filtering restore the WebSocket mirrors.                               |
 
 ### 13.2 Daemon Idle Auto-shutdown
 
@@ -690,17 +822,19 @@ Current Multiplexer-related `DebugRouterConnectorOption` fields:
 | `multiplexerDaemonIdleTimeout` | Daemon idle shutdown timeout. Facade default is 600000 ms.                   |
 | `multiplexerStartupTimeout`    | Timeout for waiting for daemon readiness. Default is 5000 ms.                |
 | `multiplexerStaleTimeout`      | Timeout for judging discovery heartbeat as stale. Facade default is 5000 ms. |
+| `multiplexerHeartbeatInterval` | Daemon discovery heartbeat interval. Default is 1000 ms.                    |
 | `multiplexerRpcTimeout`        | Default control RPC timeout. Default is 5000 ms.                             |
 | `multiplexerRootDir`           | Multiplexer root directory. Default is `~/.DebugRouterConnector`.            |
 | `multiplexerDataDir`           | Multiplexer data directory. Takes precedence over root dir.                  |
 | `multiplexerDaemonEntry`       | Daemon entry js path, used by tests or special packaging scenarios.          |
 | `multiplexerLegacyDriverDir`   | Directory containing the legacy `LatestDriverProcess`.                       |
+| `forceRespawnDaemon`           | Debug/test-only one-shot replacement using this Connector's exact options.   |
 | `websocketOption.port`         | Desired daemon WebSocket server port. Default is 19783.                      |
 | `websocketOption.roomId`       | Room id returned by WebSocket `RoomJoined`.                                  |
 
 `MultiplexerHostOption.memoizedNotificationTtlMs` controls the daemon-side pending and cache TTL and defaults to 1000 ms. It is currently an internal Host option used for embedding and deterministic tests, not a public `DebugRouterConnectorOption` propagated through daemon startup.
 
-Original physical options are passed to the daemon-side `PhysicalConnector`, including `manualConnect`, `enableWebSocket`, `enableAndroid`, `enableIOS`, `enableHarmony`, `enableDesktop`, `enableNetworkDevice`, `adbHostPort`, `hdcHostPort`, `usbConnectOpt`, `networkDeviceOpt`, and serializable `connectionTrace` fields. The daemon entry validates `connectionTrace.enabled` as boolean, `connectionTrace.output` as a string path, and `connectionTrace.bufferSize` as a non-negative finite number; recorder instances are rejected. `reportService` is not passed to the daemon-side physical connector; the facade still initializes report service.
+The daemon-side `PhysicalConnector` receives transport endpoints and serializable options such as `adbHostPort`, `hdcHostPort`, `usbConnectOpt`, `networkDeviceOpt`, and `connectionTrace`. In the normal shared-daemon path, generally available platform options are enabled in the daemon and each Connector filters the devices, clients, snapshots, and events it exposes according to its own option flags. Only `forceRespawnDaemon` makes the replacement daemon use that Connector's `manualConnect`, WebSocket, and platform enable flags exactly. The daemon entry validates `connectionTrace.enabled` as boolean, `connectionTrace.output` as a string path, and `connectionTrace.bufferSize` as a non-negative finite number; recorder instances are rejected. `reportService` is not serialized across the process boundary; the daemon creates its own local report service.
 
 The public facade no longer treats `enableMultiplexer`, `enableProxy`, `proxyDaemonIdleTimeout`, or `DEBUG_ROUTER_PROXY*` as compatibility entries. Callers should use the `multiplexer*` naming.
 
@@ -728,7 +862,7 @@ Protocol compatibility rules:
 1. Facade reads existing `daemon.json`.
 2. Discovery is fresh and health is OK, so it connects to the existing control server.
 3. The new control connection receives current snapshot.
-4. Later physical-device and USB-runtime lifecycle changes are broadcast as snapshots to all control clients. USB/WiFi runtime routing shares one processing strategy and emits `client-message` with the matching source. WebSocket lifecycle state remains visible only to facades that requested `startWSServer()`.
+4. Later physical-device and USB-runtime lifecycle changes are broadcast as snapshots to all control clients. USB/WiFi runtime routing shares one processing strategy and emits `client-message` with the matching source. Connector facades expose WebSocket lifecycle and message state only after requesting `startWSServer()`.
 
 ### 15.3 Driver Frontend Requests a Runtime
 
@@ -766,6 +900,8 @@ The current test layers cover the main behavior introduced by this design:
 | Package-entry E2E without devices | Shared daemon/facade behavior, WebSocket routing, WiFi runtime registration and proxy APIs, Driver preservation during ownership loss, and snapshot/`ClientList` convergence.                                              |
 | Real-device USB E2E               | Android/iOS discovery, runtime watcher recovery, request-response routing, legacy ownership preemption, and stress/churn flows through `real_device.js` and `real_device_stress.js`.                                       |
 | Real-device WiFi E2E              | Android WiFi registration, public lifecycle/mirrors, Driver and Connector round trips, proxy calls, and disconnect cleanup through `real_device_wifi.js`.                                                                  |
+
+Protocol validator unit tests cover every RPC method's parameter and method-aware result branch, all three control event variants, snapshot DTOs, optional diagnostic fields, malformed envelopes, and the exact empty-object contracts. This keeps the MR1 protocol foundation independently reviewable before the later daemon and facade implementation slices.
 
 Primary commands are:
 

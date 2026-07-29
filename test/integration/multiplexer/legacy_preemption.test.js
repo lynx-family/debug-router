@@ -15,7 +15,7 @@ const {
 } = require("./helpers/integration_harness");
 const {
   MultiOpenStatus,
-} = require("../../../debug_router_connector/src/connector/MultiOpenCallBack");
+} = require("../../../debug_router_connector/dist/cjs/src/connector/MultiOpenCallBack");
 
 describe("multiplexer integration legacy preemption", function () {
   this.timeout(platformTimeout(12000));

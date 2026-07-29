@@ -5,14 +5,12 @@
 const assert = require("assert");
 const { EventEmitter } = require("events");
 
-require("../register_ts");
-
 const {
   WebSocketClient,
-} = require("../../../../debug_router_connector/src/websocket/WebSocketConnection");
+} = require("../../../../debug_router_connector/dist/cjs/src/websocket/WebSocketConnection");
 const {
   Client,
-} = require("../../../../debug_router_connector/src/connector/Client");
+} = require("../../../../debug_router_connector/dist/cjs/src/connector/Client");
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));

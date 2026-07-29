@@ -4,17 +4,15 @@
 
 const assert = require("assert");
 
-require("../multiplexer/register_ts");
-
 const {
   monitorUnregisterClient,
   monitorUnregisterDevice,
   setClientTimeMap,
   setDeviceTimeMap,
-} = require("../../../debug_router_connector/src/physical/MonitorUtils");
+} = require("../../../debug_router_connector/dist/cjs/src/physical/MonitorUtils");
 const {
   setDriverReportService,
-} = require("../../../debug_router_connector/src/report/interface/DriverReportService");
+} = require("../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportService");
 
 function createReportService() {
   const reports = [];

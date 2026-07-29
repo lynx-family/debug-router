@@ -6,8 +6,6 @@ const assert = require("assert");
 const os = require("os");
 const path = require("path");
 
-require("../register_ts");
-
 const {
   createMultiplexerPaths,
   getDefaultMultiplexerRootDir,
@@ -15,7 +13,7 @@ const {
   getMultiplexerDataDir,
   getMultiplexerDiscoveryPath,
   getMultiplexerSpawnLockPath,
-} = require("../../../../debug_router_connector/src/multiplexer/utils/paths");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/paths");
 
 describe("multiplexer paths", function () {
   it("uses the connector data directory as default root", function () {

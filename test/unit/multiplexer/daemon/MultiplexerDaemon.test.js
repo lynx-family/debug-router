@@ -7,11 +7,9 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-require("../register_ts");
-
 const {
   MultiplexerDaemon,
-} = require("../../../../debug_router_connector/src/multiplexer/daemon/MultiplexerDaemon");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerDaemon");
 
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-daemon-"));

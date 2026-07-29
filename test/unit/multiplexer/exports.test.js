@@ -4,8 +4,6 @@
 
 const assert = require("assert");
 
-require("./register_ts");
-
 function keys(moduleExports) {
   return Object.keys(moduleExports).sort();
 }
@@ -32,7 +30,7 @@ function assertNoInternalExports(moduleExports) {
 
 describe("multiplexer public export indexes", function () {
   it("connector index exposes only the DebugRouterConnector runtime facade", function () {
-    const connector = require("../../../debug_router_connector/src/connector");
+    const connector = require("../../../debug_router_connector/dist/cjs/src/connector");
 
     assert.deepStrictEqual(keys(connector), ["DebugRouterConnector"]);
     assert.strictEqual(typeof connector.DebugRouterConnector, "function");
@@ -40,7 +38,7 @@ describe("multiplexer public export indexes", function () {
   });
 
   it("multiplexer client index exposes connector-side mirror classes only", function () {
-    const client = require("../../../debug_router_connector/src/multiplexer/client");
+    const client = require("../../../debug_router_connector/dist/cjs/src/multiplexer/client");
 
     assert.deepStrictEqual(keys(client), [
       "MultiplexerDevice",
@@ -52,7 +50,7 @@ describe("multiplexer public export indexes", function () {
   });
 
   it("multiplexer root index exposes only public mirror classes at runtime", function () {
-    const multiplexer = require("../../../debug_router_connector/src/multiplexer");
+    const multiplexer = require("../../../debug_router_connector/dist/cjs/src/multiplexer");
 
     assert.deepStrictEqual(keys(multiplexer), [
       "MultiplexerDevice",
@@ -64,7 +62,7 @@ describe("multiplexer public export indexes", function () {
   });
 
   it("package root keeps legacy public exports and adds multiplexer mirrors without daemon internals", function () {
-    const root = require("../../../debug_router_connector/src");
+    const root = require("../../../debug_router_connector/dist/cjs/src");
 
     [
       "BaseDevice",
@@ -91,7 +89,7 @@ describe("multiplexer public export indexes", function () {
   });
 
   it("protocol index keeps runtime constants and validators available for package internals", function () {
-    const protocol = require("../../../debug_router_connector/src/multiplexer/protocol");
+    const protocol = require("../../../debug_router_connector/dist/cjs/src/multiplexer/protocol");
 
     [
       "MULTIPLEXER_CONTROL_PATH",

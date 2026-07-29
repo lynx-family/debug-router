@@ -10,12 +10,10 @@ const rewire = require(require.resolve("rewire", {
   paths: [path.join(__dirname, "../../../../debug_router_connector")],
 }));
 
-require("../register_ts");
-
 const entryModule = rewire(
   path.join(
     __dirname,
-    "../../../../debug_router_connector/src/multiplexer/daemon/entry"
+    "../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/entry"
   )
 );
 const {
@@ -25,17 +23,17 @@ const {
 } = entryModule;
 const {
   MultiplexerHost,
-} = require("../../../../debug_router_connector/src/multiplexer/daemon/MultiplexerHost");
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerHost");
 const {
   defaultLogger,
-} = require("../../../../debug_router_connector/src/utils/logger");
+} = require("../../../../debug_router_connector/dist/cjs/src/utils/logger");
 const {
   DriverReportServiceImpl,
-} = require("../../../../debug_router_connector/src/report/interface/DriverReportServiceImpl");
+} = require("../../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportServiceImpl");
 const {
   getDriverReportService,
   setDriverReportService,
-} = require("../../../../debug_router_connector/src/report/interface/DriverReportService");
+} = require("../../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportService");
 
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-entry-"));
