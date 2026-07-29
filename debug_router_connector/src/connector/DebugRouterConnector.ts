@@ -15,8 +15,8 @@ import HarmonyDeviceManager from "../device/Harmony/HarmonyDeviceManager";
 import { DebugerRouterDriverEvents } from "../utils/type";
 import { WebSocketController } from "../websocket/WebSocketServer";
 import detectPort from "detect-port";
-import { address } from "ip";
 import { defaultLogger } from "../utils/logger";
+import { InternalIpDetector } from "../utils/InternalIpDetector";
 import {
   getDriverReportService,
   DriverReportService,
@@ -851,23 +851,26 @@ export class DebugRouterConnector {
   }
 
   async startWSServer(): Promise<void> {
-    return new Promise(async (resolve) => {
-      if (this.enableWebSocket) {
-        const port = this.wssPort;
-        this.wssPort = await detectPort(port);
-        this.wssHost = `${address()}:${this.wssPort}`;
-        getDriverReportService()?.report("websocket_server_init", null, {
-          port: "wssPort:" + this.wssHost,
-        });
-        this.wss = new WebSocketController(this, {
-          port: this.wssPort,
-          host: this.wssHost,
-          roomId: this.roomId,
-          callback: resolve,
-        });
-      } else {
-        resolve();
-      }
+    if (!this.enableWebSocket) {
+      return;
+    }
+
+    const port = this.wssPort;
+    this.wssPort = await detectPort(port);
+    const detectionResult = await InternalIpDetector.detectInternalIPv4();
+    const wssHost = `${detectionResult.selected.address}:${this.wssPort}`;
+    this.wssHost = wssHost;
+    getDriverReportService()?.report("websocket_server_init", null, {
+      port: "wssPort:" + wssHost,
+    });
+
+    return new Promise((resolve) => {
+      this.wss = new WebSocketController(this, {
+        port: this.wssPort,
+        host: wssHost,
+        roomId: this.roomId,
+        callback: resolve,
+      });
     });
   }
   private setOptionByEnv() {
