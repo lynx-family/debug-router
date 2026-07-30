@@ -163,6 +163,7 @@ function createManager(tempDir, overrides = {}) {
     debugInfo: overrides.debugInfo,
     legacyDriverDir: overrides.legacyDriverDir,
     forceRespawnDaemon: overrides.forceRespawnDaemon,
+    connectionTrace: overrides.connectionTrace,
     physicalConnectorOption: overrides.physicalConnectorOption,
     readyPollInterval: overrides.readyPollInterval ?? 10,
     replacementTimeout: overrides.replacementTimeout ?? 20,
@@ -331,7 +332,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(fs.existsSync(spawnLockPath), false);
   });
 
-  it("passes serialized physical connector options to the daemon entry", async function () {
+  it("passes connection trace and physical connector options to the daemon entry", async function () {
     let now = 0;
     const readyInfo = createInfo({ pid: 203 });
     const discovery = createSequenceDiscovery(
@@ -361,12 +362,15 @@ describe("MultiplexerDaemonManager", function () {
       usbConnectOpt: {
         retryTime: 5000,
       },
-      traceRecorder: {
-        shouldNotCrossProcessBoundary: true,
-      },
+    };
+    const connectionTrace = {
+      enabled: true,
+      output: "/tmp/connection-trace.ndjson",
+      bufferSize: 100,
     };
     const { manager, spawnRecorder } = createManager(tempDir, {
       discovery,
+      connectionTrace,
       physicalConnectorOption,
       startupTimeout: 30,
       readyPollInterval: 10,
@@ -379,10 +383,12 @@ describe("MultiplexerDaemonManager", function () {
     assert.deepStrictEqual(await manager.ensureDaemon(), readyInfo);
     assert.strictEqual(spawnRecorder.calls.length, 1);
     const args = spawnRecorder.calls[0].args;
+    const traceIndex = args.indexOf("--connection-trace");
+    assert.notStrictEqual(traceIndex, -1);
+    assert.deepStrictEqual(JSON.parse(args[traceIndex + 1]), connectionTrace);
     const optionIndex = args.indexOf("--physical-connector-option");
     assert.notStrictEqual(optionIndex, -1);
     const serializedOption = JSON.parse(args[optionIndex + 1]);
-    assert.strictEqual("traceRecorder" in serializedOption, false);
     assert.deepStrictEqual(serializedOption, {
       manualConnect: true,
       enableAndroid: true,

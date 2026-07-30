@@ -18,6 +18,7 @@ import {
 import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
 import { setDriverReportService } from "../../report/interface/DriverReportService";
 import { DriverReportServiceImpl } from "../../report/interface/DriverReportServiceImpl";
+import type { ConnectionTraceOptions } from "../../trace/ConnectionTraceRecorder";
 import { MultiplexerHost } from "./MultiplexerHost";
 
 const ENTRY_CLEANUP_TIMEOUT = 3000;
@@ -33,6 +34,7 @@ export type MultiplexerDaemonEntryOption = {
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
   enableWebSocket?: boolean;
+  connectionTrace?: ConnectionTraceOptions;
   websocketOption?: {
     port?: number;
     roomId?: string;
@@ -68,6 +70,8 @@ const OPTION_ALIASES: Record<string, EntryArgKey> = {
   multiplexerDaemonIdleTimeout: "multiplexerDaemonIdleTimeout",
   "enable-websocket": "enableWebSocket",
   enableWebSocket: "enableWebSocket",
+  "connection-trace": "connectionTrace",
+  connectionTrace: "connectionTrace",
   "websocket-port": "websocketPort",
   websocketPort: "websocketPort",
   "websocket-room-id": "websocketRoomId",
@@ -137,6 +141,7 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   const discoveryPath = getRequiredString(rawArgs, "discoveryPath");
   const daemonLockPath = getRequiredString(rawArgs, "daemonLockPath");
   const enableWebSocket = getOptionalBoolean(rawArgs, "enableWebSocket");
+  const connectionTrace = parseConnectionTraceOption(rawArgs);
   const websocketOption = parseWebSocketOption(rawArgs);
   const physicalConnectorOption = parsePhysicalConnectorOption(rawArgs);
   const debugInfo = parseDebugInfo(rawArgs);
@@ -178,6 +183,9 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   if (enableWebSocket !== undefined) {
     option.enableWebSocket = enableWebSocket;
   }
+  if (connectionTrace !== undefined) {
+    option.connectionTrace = connectionTrace;
+  }
   if (websocketOption !== undefined) {
     option.websocketOption = websocketOption;
   }
@@ -208,6 +216,9 @@ function createEntryHost(
   }
   if (entryOption.enableWebSocket !== undefined) {
     Object.assign(hostOption, { enableWebSocket: entryOption.enableWebSocket });
+  }
+  if (entryOption.connectionTrace !== undefined) {
+    Object.assign(hostOption, { connectionTrace: entryOption.connectionTrace });
   }
   if (entryOption.websocketOption !== undefined) {
     Object.assign(hostOption, { websocketOption: entryOption.websocketOption });
@@ -486,45 +497,48 @@ function parsePhysicalConnectorOption(
     );
   }
 
-  validateSerializedConnectionTraceOption(
-    (parsed as Record<string, unknown>).connectionTrace,
-  );
-  if ("traceRecorder" in (parsed as Record<string, unknown>)) {
-    throw new Error(
-      "Invalid multiplexer daemon option physicalConnectorOption.traceRecorder: recorder instances are not serializable",
-    );
-  }
-  if ("reportService" in (parsed as Record<string, unknown>)) {
-    throw new Error(
-      "Invalid multiplexer daemon option physicalConnectorOption.reportService: report service implementations are daemon-local and not serializable",
-    );
-  }
-
   return parsed as PhysicalConnectorOption;
 }
 
-function validateSerializedConnectionTraceOption(value: unknown): void {
+function parseConnectionTraceOption(
+  rawArgs: RawEntryArgs,
+): ConnectionTraceOptions | undefined {
+  const value = rawArgs.connectionTrace;
   if (value === undefined) {
-    return;
+    return undefined;
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (typeof value !== "string" || value.length === 0) {
     throw new Error(
-      "Invalid multiplexer daemon option physicalConnectorOption.connectionTrace: expected object",
+      `Invalid multiplexer daemon option connectionTrace: ${value}`,
     );
   }
 
-  const option = value as Record<string, unknown>;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error: any) {
+    throw new Error(
+      `Invalid multiplexer daemon option connectionTrace: ${error?.message}`,
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      "Invalid multiplexer daemon option connectionTrace: expected object",
+    );
+  }
+
+  const option = parsed as Record<string, unknown>;
   if (
     option.enabled !== undefined &&
     typeof option.enabled !== "boolean"
   ) {
     throw new Error(
-      "Invalid multiplexer daemon option physicalConnectorOption.connectionTrace.enabled: expected boolean",
+      "Invalid multiplexer daemon option connectionTrace.enabled: expected boolean",
     );
   }
   if (option.output !== undefined && typeof option.output !== "string") {
     throw new Error(
-      "Invalid multiplexer daemon option physicalConnectorOption.connectionTrace.output: expected string path",
+      "Invalid multiplexer daemon option connectionTrace.output: expected string path",
     );
   }
   if (
@@ -534,9 +548,11 @@ function validateSerializedConnectionTraceOption(value: unknown): void {
       option.bufferSize < 0)
   ) {
     throw new Error(
-      "Invalid multiplexer daemon option physicalConnectorOption.connectionTrace.bufferSize: expected non-negative finite number",
+      "Invalid multiplexer daemon option connectionTrace.bufferSize: expected non-negative finite number",
     );
   }
+
+  return parsed as ConnectionTraceOptions;
 }
 
 if (require.main === module) {

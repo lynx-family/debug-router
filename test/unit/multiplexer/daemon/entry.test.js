@@ -112,6 +112,7 @@ function createEntryOption(overrides = {}) {
     controlPort: overrides.controlPort ?? 0,
     heartbeatInterval: overrides.heartbeatInterval ?? 100000,
     debugInfo: overrides.debugInfo,
+    connectionTrace: overrides.connectionTrace,
     physicalConnectorOption: overrides.physicalConnectorOption,
   };
   if (overrides.legacyDriverDir !== undefined) {
@@ -224,12 +225,18 @@ describe("multiplexer daemon entry", function () {
     );
   });
 
-  it("parses physical connector options from JSON", function () {
+  it("parses connection trace and physical connector options from JSON", function () {
     const parsed = parseEntryOption([
       "--discovery-path",
       "/tmp/daemon.json",
       "--daemon-lock-path",
       "/tmp/daemon.lock",
+      "--connection-trace",
+      JSON.stringify({
+        enabled: true,
+        output: "/tmp/connection-trace.ndjson",
+        bufferSize: 100,
+      }),
       "--physical-connector-option",
       JSON.stringify({
         manualConnect: true,
@@ -243,14 +250,14 @@ describe("multiplexer daemon entry", function () {
         usbConnectOpt: {
           retryTime: 5000,
         },
-        connectionTrace: {
-          enabled: true,
-          output: "/tmp/connection-trace.ndjson",
-          bufferSize: 100,
-        },
       }),
     ]);
 
+    assert.deepStrictEqual(parsed.connectionTrace, {
+      enabled: true,
+      output: "/tmp/connection-trace.ndjson",
+      bufferSize: 100,
+    });
     assert.deepStrictEqual(parsed.physicalConnectorOption, {
       manualConnect: true,
       enableAndroid: true,
@@ -262,11 +269,6 @@ describe("multiplexer daemon entry", function () {
       },
       usbConnectOpt: {
         retryTime: 5000,
-      },
-      connectionTrace: {
-        enabled: true,
-        output: "/tmp/connection-trace.ndjson",
-        bufferSize: 100,
       },
     });
   });
@@ -296,13 +298,14 @@ describe("multiplexer daemon entry", function () {
         ]),
       /expected object/
     );
+  });
+
+  it("rejects malformed connection trace options", function () {
     for (const invalidOption of [
-      { connectionTrace: null },
-      { connectionTrace: { enabled: "true" } },
-      { connectionTrace: { output: { stream: true } } },
-      { connectionTrace: { bufferSize: -1 } },
-      { traceRecorder: {} },
-      { reportService: {} },
+      null,
+      { enabled: "true" },
+      { output: { stream: true } },
+      { bufferSize: -1 },
     ]) {
       assert.throws(
         () =>
@@ -311,10 +314,10 @@ describe("multiplexer daemon entry", function () {
             "/tmp/daemon.json",
             "--daemon-lock-path",
             "/tmp/daemon.lock",
-            "--physical-connector-option",
+            "--connection-trace",
             JSON.stringify(invalidOption),
           ]),
-        /Invalid multiplexer daemon option physicalConnectorOption/
+        /Invalid multiplexer daemon option connectionTrace/
       );
     }
   });
@@ -452,6 +455,11 @@ describe("multiplexer daemon entry", function () {
           debugInfo: {
             daemonVersion: "0.0.4",
           },
+          connectionTrace: {
+            enabled: true,
+            output: "/tmp/connection-trace.ndjson",
+            bufferSize: 100,
+          },
           legacyDriverDir: "/tmp/legacy-driver",
           physicalConnectorOption: {
             manualConnect: true,
@@ -476,6 +484,11 @@ describe("multiplexer daemon entry", function () {
           minSupportedProtocolVersion: 2,
           debugInfo: {
             daemonVersion: "0.0.4",
+          },
+          connectionTrace: {
+            enabled: true,
+            output: "/tmp/connection-trace.ndjson",
+            bufferSize: 100,
           },
           legacyDriverDir: "/tmp/legacy-driver",
           manualConnect: true,

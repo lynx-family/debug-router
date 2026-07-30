@@ -788,7 +788,6 @@ function createContext(name, idleTimeout = 30000) {
         multiplexerStaleTimeout: 1000,
         multiplexerRpcTimeout: 1200,
         multiplexerDaemonIdleTimeout: idleTimeout,
-        reportService: null,
       });
       connectors.push(connector);
       return connector;

@@ -5,9 +5,9 @@
 import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
-import type { DriverReportService } from "../report/interface/DriverReportService";
 import { DeviceManager } from "../device/DeviceManager";
 import type { PhysicalConnectorOption } from "../physical/PhysicalConnector";
+import type { ConnectionTraceOptions } from "../trace/ConnectionTraceRecorder";
 import { defaultLogger } from "../utils/logger";
 import { driver_dir } from "../utils/file_lock";
 import { DebugerRouterDriverEvents, DeviceOS } from "../utils/type";
@@ -63,13 +63,8 @@ type WebSocketServerCompat = {
  */
 
 export type DebugRouterConnectorOption = PhysicalConnectorOption & {
-  /**
-   * Retained for source compatibility with the legacy Connector, but ignored
-   * by the multiplexer Connector because service objects cannot cross the
-   * daemon process boundary. Configure the daemon-local implementation in
-   * DriverReportServiceImpl.ts instead.
-   */
-  reportService?: DriverReportService | null;
+  enableWebSocket?: boolean;
+  connectionTrace?: ConnectionTraceOptions;
   forceRespawnDaemon?: boolean;
   multiplexerDaemonIdleTimeout?: number;
   multiplexerStartupTimeout?: number;
@@ -92,7 +87,6 @@ export class DebugRouterConnector {
   readonly devices: Map<string, MultiplexerDevice> = new Map();
   readonly usbClients: Map<number, MultiplexerUsbClient> = new Map();
   readonly enableWebSocket;
-  reportService: DriverReportService | null = null;
   wssPort: number;
   wssHost: string | undefined;
   roomId: string | undefined;
@@ -157,7 +151,6 @@ export class DebugRouterConnector {
       enableDesktop: false,
       enableNetworkDevice: false,
       websocketOption: {},
-      reportService: null,
     },
   ) {
     const msg = "DebugRouterOption:" + JSON.stringify(option);
@@ -204,6 +197,7 @@ export class DebugRouterConnector {
       forceRespawnDaemon: this.forceRespawnDaemon,
       enableWebSocket: this.forceRespawnDaemon ? this.enableWebSocket : true,
       websocketOption: option.websocketOption,
+      connectionTrace: createDaemonConnectionTraceOption(option),
       physicalConnectorOption: createDaemonPhysicalConnectorOption(
         option,
         this.forceRespawnDaemon,
@@ -1194,6 +1188,33 @@ function createDaemonPhysicalConnectorOption(
   option: DebugRouterConnectorOption,
   useConnectorOptionFlags: boolean,
 ): PhysicalConnectorOption {
+  return {
+    manualConnect: useConnectorOptionFlags
+      ? option.manualConnect ?? false
+      : false,
+    enableAndroid: useConnectorOptionFlags
+      ? option.enableAndroid ?? true
+      : true,
+    enableIOS: useConnectorOptionFlags ? option.enableIOS ?? true : true,
+    enableHarmony: useConnectorOptionFlags
+      ? option.enableHarmony ?? true
+      : true,
+    enableDesktop: useConnectorOptionFlags
+      ? option.enableDesktop ?? false
+      : true,
+    enableNetworkDevice: useConnectorOptionFlags
+      ? option.enableNetworkDevice ?? false
+      : option.networkDeviceOpt !== undefined,
+    adbHostPort: option.adbHostPort,
+    hdcHostPort: option.hdcHostPort,
+    usbConnectOpt: option.usbConnectOpt,
+    networkDeviceOpt: option.networkDeviceOpt,
+  };
+}
+
+function createDaemonConnectionTraceOption(
+  option: DebugRouterConnectorOption,
+): ConnectionTraceOptions | undefined {
   const connectionTrace = option.connectionTrace
     ? {
         enabled: option.connectionTrace.enabled,
@@ -1214,30 +1235,5 @@ function createDaemonPhysicalConnectorOption(
     );
   }
 
-  return {
-    manualConnect: useConnectorOptionFlags
-      ? option.manualConnect ?? false
-      : false,
-    enableWebSocket: useConnectorOptionFlags
-      ? option.enableWebSocket ?? false
-      : true,
-    enableAndroid: useConnectorOptionFlags
-      ? option.enableAndroid ?? true
-      : true,
-    enableIOS: useConnectorOptionFlags ? option.enableIOS ?? true : true,
-    enableHarmony: useConnectorOptionFlags
-      ? option.enableHarmony ?? true
-      : true,
-    enableDesktop: useConnectorOptionFlags
-      ? option.enableDesktop ?? false
-      : true,
-    enableNetworkDevice: useConnectorOptionFlags
-      ? option.enableNetworkDevice ?? false
-      : option.networkDeviceOpt !== undefined,
-    adbHostPort: option.adbHostPort,
-    hdcHostPort: option.hdcHostPort,
-    usbConnectOpt: option.usbConnectOpt,
-    networkDeviceOpt: option.networkDeviceOpt,
-    connectionTrace,
-  };
+  return connectionTrace;
 }

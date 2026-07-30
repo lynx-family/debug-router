@@ -491,7 +491,6 @@ function createContext(platform, args, option = {}) {
         multiplexerRpcTimeout:
           Math.max(args.deviceTimeout, args.clientTimeout, 5000) + 10000,
         multiplexerDaemonIdleTimeout: args.multiplexerDaemonIdleTimeout,
-        reportService: null,
       });
       connectors.push(connector);
       return connector;

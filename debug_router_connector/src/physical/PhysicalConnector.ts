@@ -12,12 +12,8 @@ import NetworkDeviceManager from "../device/network/NetworkDeviceManager";
 import DesktopDeviceManager from "../device/desktop/DesktopDeviceManager";
 import iOSDeviceManager from "../device/ios/iOSDeviceManager";
 import HarmonyDeviceManager from "../device/Harmony/HarmonyDeviceManager";
-import { RequireMessageType, ResponseMessageType } from "../utils/type";
 import { defaultLogger } from "../utils/logger";
-import {
-  getDriverReportService,
-  DriverReportService,
-} from "../report/interface/DriverReportService";
+import { getDriverReportService } from "../report/interface/DriverReportService";
 import { PhysicalConnectorEvent } from "../utils/type";
 import {
   monitorUnregisterClient,
@@ -25,13 +21,9 @@ import {
   setClientTimeMap,
   setDeviceTimeMap,
 } from "./MonitorUtils";
-import type {
-  ConnectionTraceOptions,
-  ConnectionTraceRecorder,
-} from "../trace/ConnectionTraceRecorder";
+import type { ConnectionTraceRecorder } from "../trace/ConnectionTraceRecorder";
 
 export type PhysicalConnectorOption = {
-  enableWebSocket?: boolean;
   manualConnect?: boolean;
   enableAndroid?: boolean;
   enableIOS?: boolean;
@@ -54,26 +46,19 @@ export type PhysicalConnectorOption = {
     // a network device can have multi debugger clients
     port: number[];
   };
-  reportService?: DriverReportService | null;
-  connectionTrace?: ConnectionTraceOptions;
   traceRecorder?: ConnectionTraceRecorder | null;
 };
 
 export class PhysicalConnector {
   private readonly events = new EventEmitter();
-  reportService: DriverReportService | null = null;
   readonly devices = new Map<string, BaseDevice>();
   readonly usbClients = new Map<number, UsbClient>();
-  readonly enableWebSocket;
-  private readonly manualConnect;
-  selectedClient: UsbClient | undefined;
   private nextClientId: number = 0;
   private enableAndroid: boolean;
   private enableIOS: boolean;
   private enableHarmony: boolean;
   private enableDesktop: boolean;
   private readonly enableNetworkDevice: boolean;
-  private autoListenClients = true;
   public readonly traceRecorder: ConnectionTraceRecorder | null = null;
   private readonly networkDeviceOpt:
     | {
@@ -91,7 +76,6 @@ export class PhysicalConnector {
 
   constructor(
     option: PhysicalConnectorOption = {
-      enableWebSocket: false,
       manualConnect: false,
       enableAndroid: true,
       enableIOS: true,
@@ -116,8 +100,6 @@ export class PhysicalConnector {
         { option: msg },
       );
     }
-    this.manualConnect = option.manualConnect;
-    this.enableWebSocket = option.enableWebSocket;
     this.enableAndroid = option.enableAndroid ?? true;
     this.adbOption = option.adbHostPort;
     this.enableIOS =
@@ -166,6 +148,17 @@ export class PhysicalConnector {
     }
   }
   
+  disableAllClients() {
+    defaultLogger.info("disableAllClients");
+    // close usb autoConnect
+    this.devices.forEach((device) => {
+      device.stopWatchClient();
+    });
+    this.getAllUsbClients().forEach((client) => {
+      client.close();
+    });
+  }
+
   async startWatchClient(
     device: BaseDevice,
     shouldStart: () => boolean = () => true,
@@ -182,19 +175,6 @@ export class PhysicalConnector {
     device.startWatchClient();
   }
 
-  startWatchAllClients(force: boolean = true) {
-    defaultLogger.debug("PhysicalConnector startWatchAllClients");
-    this.devices.forEach((device) => {
-      if (device instanceof AndroidDevice) {
-        (device as AndroidDevice).forwards().then(() => {
-          device.startWatchClient();
-        });
-      } else {
-        device.startWatchClient();
-      }
-    });
-  }
-
   createClientId(): number {
     if (this.nextClientId > 4294967294) this.nextClientId = 0;
     return ++this.nextClientId;
@@ -203,67 +183,9 @@ export class PhysicalConnector {
   async connectDevices(
     timeout: number = -1,
     serial: string | null = null,
-    isAutoListenClients: boolean = true,
   ): Promise<BaseDevice[]> {
-    this.autoListenClients = isAutoListenClients;
     await this.startDeviceListeners();
     return this.getDevices(timeout, serial);
-  }
-
-  // clientName:
-  // for android: processName
-  // for ios: AppName
-  async connectUsbClients(
-    deviceId: string,
-    timeout: number = -1,
-    waitTimeout: boolean = true,
-    clientName: string | null = null,
-  ): Promise<UsbClient[]> {
-    defaultLogger.debug(
-      "connectUsbClients of :" +
-        deviceId +
-        " waitTimeout:" +
-        waitTimeout +
-        " timeout:" +
-        timeout,
-    );
-    return new Promise(async (resolve, reject) => {
-      const device = this.devices.get(deviceId);
-      if (device) {
-        device.startWatchClient();
-        let clients: UsbClient[];
-        if (waitTimeout) {
-          clients = await this.getDeviceUsbClients(
-            deviceId,
-            timeout,
-            clientName,
-          );
-        } else {
-          clients = await this.waitDeviceUsbClients(deviceId, timeout);
-        }
-        device.stopWatchClient();
-        const clients_infos = clients.map((client) => {
-          return client.info;
-        });
-        defaultLogger.debug(
-          "connectUsbClients: clients:" + JSON.stringify(clients_infos),
-        );
-        resolve(clients);
-      } else {
-        defaultLogger.debug("connectUsbClients: resolve device == null");
-        resolve([]);
-      }
-    });
-  }
-
-  selecteUsbClient(id: number) {
-    if (this.usbClients.has(id)) {
-      this.selectedClient = this.usbClients.get(id);
-    }
-  }
-
-  addDeviceManager(manager: DeviceManager) {
-    this.devicesManager.add(manager);
   }
 
   private async startDeviceListeners() {
@@ -311,7 +233,7 @@ export class PhysicalConnector {
     this.events.emit(event, payload);
   }
 
-  registerDevice(device: BaseDevice, shouldStartWatchClient?: boolean) {
+  registerDevice(device: BaseDevice) {
     const { serial } = device.info;
     const existing = this.devices.get(serial);
     if (existing) {
@@ -325,11 +247,6 @@ export class PhysicalConnector {
       os: device.info.os,
       title: device.info.title,
     });
-    const shouldWatchClient =
-      shouldStartWatchClient ?? this.autoListenClients;
-    if (!this.manualConnect && shouldWatchClient) {
-      device.startWatchClient();
-    }
     this.emit("device-connected", device);
     setDeviceTimeMap(device);
   }
@@ -362,15 +279,6 @@ export class PhysicalConnector {
       defaultLogger.debug("regiserUsbClient: has exist:" + client.clientId);
       return;
     }
-    const existingSameRuntime = this.findRegisteredUsbClientByIdentity(client);
-    if (existingSameRuntime) {
-      defaultLogger.debug(
-        "regiserUsbClient: has same runtime:" +
-          JSON.stringify(existingSameRuntime.info),
-      );
-      client.close();
-      return;
-    }
     // register new client
     this.usbClients.set(client.clientId(), client);
     this.emit("client-connected", client);
@@ -385,9 +293,6 @@ export class PhysicalConnector {
       return;
     }
     defaultLogger.debug("unregiserUsbClient:" + JSON.stringify(existing.info));
-    if (this.selectedClient && this.selectedClient.info.id === id) {
-      this.selectedClient = undefined;
-    }
     // unregiser client
     this.usbClients.delete(id);
     this.emit("client-disconnected", id);
@@ -565,71 +470,11 @@ export class PhysicalConnector {
       .filter((client) => client.deviceId() === deviceId);
   }
 
-  private findRegisteredUsbClientByIdentity(
-    client: UsbClient,
-  ): UsbClient | undefined {
-    return this.getAllUsbClients().find((existing) => {
-      return (
-        existing.deviceId() === client.deviceId() &&
-        existing.info?.port === client.info?.port &&
-        stringifyStableJson(existing.info?.query?.raw_info ?? null) ===
-          stringifyStableJson(client.info?.query?.raw_info ?? null)
-      );
-    });
-  }
-
-  handleUsbMessage(id: number, message: string) {
-    // ClientAdapter has already emitted usb-client-message before invoking
-    // this compatibility hook. PhysicalConnector does not own a WebSocket
-    // server, so emitting again would duplicate every USB notification.
-  }
-
-  // unused methods, for future use:DaemonHost
-
-  sendMessage(clientId: number, message: unknown): void {
-    const client = this.usbClients.get(clientId);
-    if (client) {
-      client.sendMessage(message);
-    }
-  }
-
-  sendRawMessage(
-    clientId: number,
-    message: RequireMessageType,
-  ): Promise<ResponseMessageType> {
-    const client = this.usbClients.get(clientId);
-    if (!client) {
-      return Promise.reject(new Error("client not found:" + clientId));
-    }
-    return client.sendRawMessage(message);
-  }
-
   closeClient(clientId: number): void {
     const client = this.usbClients.get(clientId);
     if (client) {
       client.close();
     }
-  }
-
-  // unused methods end
-
-  getAllAppClients() {
-    return this.getAllUsbClients();
-  }
-
-  getAllPhysicalClients(): UsbClient[] {
-    return this.getAllUsbClients();
-  }
-
-  disableAllClients() {
-    defaultLogger.info("disableAllClients");
-    // close usb autoConnect
-    this.devices.forEach((device) => {
-      device.stopWatchClient();
-    });
-    this.getAllAppClients().forEach((client) => {
-      client.close();
-    });
   }
 
   private setOptionByEnv() {
@@ -646,23 +491,4 @@ export class PhysicalConnector {
       defaultLogger.warn("set DriverEnableDesktop === false");
     }
   }
-}
-
-function stringifyStableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stringifyStableJson(item)).join(",")}]`;
-  }
-
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map(
-      (key) =>
-        `${JSON.stringify(key)}:${stringifyStableJson(record[key])}`,
-    )
-    .join(",")}}`;
 }

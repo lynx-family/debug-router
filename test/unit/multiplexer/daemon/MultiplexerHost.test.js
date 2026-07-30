@@ -265,7 +265,6 @@ class FakePhysicalConnector extends EventEmitter {
     this.option = option;
     this.devices = new Map();
     this.usbClients = new Map();
-    this.enableWebSocket = option.enableWebSocket;
     this.connectDevicesCalls = [];
     this.getDevicesCalls = [];
     this.getAllUsbClientsCalls = 0;
@@ -285,18 +284,13 @@ class FakePhysicalConnector extends EventEmitter {
     this.sendRawMessageResult = option.sendRawMessageResult;
   }
 
-  async connectDevices(
-    timeout = -1,
-    serial = null,
-    isAutoListenClients = true
-  ) {
+  async connectDevices(timeout = -1, serial = null) {
     this.connectDevicesCalls.push({
       timeout,
       serial,
-      isAutoListenClients,
     });
     if (this.connectDevicesImpl) {
-      return this.connectDevicesImpl(timeout, serial, isAutoListenClients);
+      return this.connectDevicesImpl(timeout, serial);
     }
     return this.getDevices(timeout, serial);
   }
@@ -1478,7 +1472,6 @@ describe("MultiplexerHost", function () {
       {
         timeout: -1,
         serial: null,
-        isAutoListenClients: false,
       },
     ]);
     assert.deepStrictEqual(physical.getDevicesCalls, [
@@ -1599,7 +1592,6 @@ describe("MultiplexerHost", function () {
       {
         timeout: -1,
         serial: null,
-        isAutoListenClients: false,
       },
     ]);
     assert.deepStrictEqual(physical.startWatchClientCalls, ["device-1"]);
@@ -1798,7 +1790,6 @@ describe("MultiplexerHost", function () {
       {
         timeout: -1,
         serial: null,
-        isAutoListenClients: false,
       },
     ]);
     assert.deepStrictEqual(physical.startWatchClientCalls, ["device-1"]);

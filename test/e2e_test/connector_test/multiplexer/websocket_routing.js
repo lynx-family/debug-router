@@ -104,7 +104,6 @@ function createContext(name, state = defaultState()) {
         multiplexerStaleTimeout: PACKAGE_ENTRY_STALE_TIMEOUT,
         multiplexerRpcTimeout: 1200,
         multiplexerDaemonIdleTimeout: 150,
-        reportService: null,
       });
       connectors.push(connector);
       return connector;

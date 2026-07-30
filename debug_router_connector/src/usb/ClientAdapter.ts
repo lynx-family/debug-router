@@ -183,9 +183,6 @@ export default class ClientAdapter {
       return;
     }
     this.driver.emit("usb-client-message", { id: this.id, message });
-    if (this.driver.enableWebSocket) {
-      this.driver.handleUsbMessage(this.id, message);
-    }
 
     const response: any = JSON.parse(message);
     const data = response.data;

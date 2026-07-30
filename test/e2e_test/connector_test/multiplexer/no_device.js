@@ -93,7 +93,6 @@ function createContext(name, state, option = {}) {
           extra.multiplexerDaemonIdleTimeout ??
           option.multiplexerDaemonIdleTimeout ??
           150,
-        reportService: null,
       });
       connectors.push(connector);
       return connector;

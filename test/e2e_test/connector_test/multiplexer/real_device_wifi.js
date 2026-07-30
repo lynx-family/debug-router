@@ -434,7 +434,6 @@ function createContext(name, args) {
         multiplexerStaleTimeout: 1000,
         multiplexerRpcTimeout: args.timeout,
         multiplexerDaemonIdleTimeout: args.multiplexerDaemonIdleTimeout,
-        reportService: null,
       });
       connectors.push(connector);
       return connector;

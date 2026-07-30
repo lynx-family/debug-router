@@ -17,6 +17,7 @@ import {
 } from "../protocol/discovery";
 import type { MultiplexerDebugInfo } from "../protocol/debuginfo";
 import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
+import type { ConnectionTraceOptions } from "../../trace/ConnectionTraceRecorder";
 import {
   isMultiplexerHealthResponse,
   parseJsonValue,
@@ -75,6 +76,7 @@ export type MultiplexerDaemonManagerOption = {
   multiplexerDaemonIdleTimeout?: number;
   forceRespawnDaemon?: boolean;
   enableWebSocket?: boolean;
+  connectionTrace?: ConnectionTraceOptions;
   websocketOption?: {
     port?: number;
     roomId?: string;
@@ -107,6 +109,7 @@ export class MultiplexerDaemonManager {
   readonly legacyDriverDir?: string;
   readonly multiplexerDaemonIdleTimeout?: number;
   readonly enableWebSocket?: boolean;
+  readonly connectionTrace?: ConnectionTraceOptions;
   readonly websocketOption?: {
     port?: number;
     roomId?: string;
@@ -147,6 +150,7 @@ export class MultiplexerDaemonManager {
     this.multiplexerDaemonIdleTimeout = option.multiplexerDaemonIdleTimeout;
     this.forceRespawnDaemonPending = option.forceRespawnDaemon ?? false;
     this.enableWebSocket = option.enableWebSocket;
+    this.connectionTrace = option.connectionTrace;
     this.websocketOption = option.websocketOption;
     this.physicalConnectorOption = option.physicalConnectorOption;
     this.readyPollInterval =
@@ -573,14 +577,14 @@ export class MultiplexerDaemonManager {
       args.push("--websocket-room-id", this.websocketOption.roomId);
     }
 
+    if (this.connectionTrace !== undefined) {
+      args.push("--connection-trace", JSON.stringify(this.connectionTrace));
+    }
+
     if (this.physicalConnectorOption !== undefined) {
-      const serializablePhysicalConnectorOption = {
-        ...this.physicalConnectorOption,
-      };
-      delete serializablePhysicalConnectorOption.traceRecorder;
       args.push(
         "--physical-connector-option",
-        JSON.stringify(serializablePhysicalConnectorOption),
+        JSON.stringify(this.physicalConnectorOption),
       );
     }
 

@@ -47,6 +47,7 @@ import {
 import { MemoizedNotificationQueryTable } from "./MemoizedNotificationQueryTable";
 import { PendingRoute, PendingRouteTable } from "./PendingRouteTable";
 import {
+  ConnectionTraceOptions,
   ConnectionTraceRecorder,
   createConnectionTraceRecorder,
 } from "../../trace/ConnectionTraceRecorder";
@@ -95,6 +96,8 @@ export type MultiplexerHostOption = Omit<
   PhysicalConnectorOption,
   "traceRecorder"
 > & {
+  enableWebSocket?: boolean;
+  connectionTrace?: ConnectionTraceOptions;
   controlPort?: number;
   protocolVersion?: number;
   minSupportedProtocolVersion?: number;
@@ -965,7 +968,7 @@ export class MultiplexerHost
     this.assertPhysicalDiscoveryCurrent(generation);
     if (!this.deviceDiscoveryStarted && !this.deviceDiscoveryStarting) {
       this.deviceDiscoveryStarting = this.physicalConnector
-        .connectDevices(-1, null, false)
+        .connectDevices(-1, null)
         .then(() => {
           if (this.isPhysicalDiscoveryCurrent(generation)) {
             this.deviceDiscoveryStarted = true;
@@ -1441,7 +1444,6 @@ export class MultiplexerHost
     );
     this.physicalConnector.disableAllClients();
     this.physicalConnector.usbClients.clear();
-    this.physicalConnector.selectedClient = undefined;
     this.webSocketController?.closeAllWebsocketAppClients?.();
     this.publishSnapshot();
     this.webSocketController?.sendDeviceList();

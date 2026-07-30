@@ -205,12 +205,8 @@ class FakePhysicalConnector {
     return ++this.nextClientId;
   }
 
-  async connectDevices(
-    _timeout = -1,
-    serial = null,
-    isAutoListenClients = true
-  ) {
-    this.record("connect-devices", { serial, isAutoListenClients });
+  async connectDevices(_timeout = -1, serial = null) {
+    this.record("connect-devices", { serial });
     return this.getDevices(-1, serial);
   }
 
@@ -497,6 +493,7 @@ async function main() {
     legacyDriverDir: entryOption.legacyDriverDir,
     multiplexerDaemonIdleTimeout: entryOption.multiplexerDaemonIdleTimeout,
     enableWebSocket: entryOption.enableWebSocket,
+    connectionTrace: entryOption.connectionTrace,
     websocketOption: entryOption.websocketOption,
     PhysicalConnectorCtor: FakePhysicalConnector,
     discoveryPathForFake: entryOption.discoveryPath,

@@ -272,23 +272,6 @@ describe("DebugRouterConnector multiplexer facade", function () {
   it("constructs discovery, manager, and daemon client with explicit multiplexer options", function () {
     const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
     try {
-      const reports = [];
-      const reportService = {
-        init(manualConnect) {
-          reports.push({
-            event: "init",
-            manualConnect,
-          });
-        },
-        report(eventName, metrics, categories) {
-          reports.push({
-            event: eventName,
-            metrics,
-            categories,
-          });
-        },
-      };
-
       const connector = new DebugRouterConnector({
         manualConnect: true,
         enableWebSocket: false,
@@ -320,7 +303,6 @@ describe("DebugRouterConnector multiplexer facade", function () {
           output: "relative-trace.ndjson",
           bufferSize: 200,
         },
-        reportService,
       });
 
       assert.strictEqual(connector.enableWebSocket, false);
@@ -359,8 +341,6 @@ describe("DebugRouterConnector multiplexer facade", function () {
         {
           manualConnect:
             state.managers[0].option.physicalConnectorOption.manualConnect,
-          enableWebSocket:
-            state.managers[0].option.physicalConnectorOption.enableWebSocket,
           enableAndroid:
             state.managers[0].option.physicalConnectorOption.enableAndroid,
           enableIOS: state.managers[0].option.physicalConnectorOption.enableIOS,
@@ -374,7 +354,6 @@ describe("DebugRouterConnector multiplexer facade", function () {
         },
         {
           manualConnect: true,
-          enableWebSocket: false,
           enableAndroid: false,
           enableIOS: false,
           enableHarmony: false,
@@ -390,7 +369,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
         }
       );
       assert.deepStrictEqual(
-        state.managers[0].option.physicalConnectorOption.connectionTrace,
+        state.managers[0].option.connectionTrace,
         {
           enabled: true,
           output: path.resolve("relative-trace.ndjson"),
@@ -398,7 +377,8 @@ describe("DebugRouterConnector multiplexer facade", function () {
         }
       );
       assert.strictEqual(
-        "reportService" in state.managers[0].option.physicalConnectorOption,
+        "connectionTrace" in
+          state.managers[0].option.physicalConnectorOption,
         false
       );
       assert.strictEqual(
@@ -407,7 +387,6 @@ describe("DebugRouterConnector multiplexer facade", function () {
       );
       assert.strictEqual(state.clients[0].option.rpcTimeout, 555);
       assert.deepStrictEqual(state.clients[0].calls, []);
-      assert.deepStrictEqual(reports, []);
     } finally {
       restore();
     }
@@ -436,8 +415,6 @@ describe("DebugRouterConnector multiplexer facade", function () {
         {
           manualConnect:
             state.managers[0].option.physicalConnectorOption.manualConnect,
-          enableWebSocket:
-            state.managers[0].option.physicalConnectorOption.enableWebSocket,
           enableAndroid:
             state.managers[0].option.physicalConnectorOption.enableAndroid,
           enableIOS: state.managers[0].option.physicalConnectorOption.enableIOS,
@@ -451,7 +428,6 @@ describe("DebugRouterConnector multiplexer facade", function () {
         },
         {
           manualConnect: false,
-          enableWebSocket: true,
           enableAndroid: true,
           enableIOS: true,
           enableHarmony: true,
@@ -997,7 +973,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.strictEqual(connector.getConnectionTrace, undefined);
       assert.strictEqual(connector.onConnectionTrace, undefined);
       assert.deepStrictEqual(
-        state.managers[0].option.physicalConnectorOption.connectionTrace,
+        state.managers[0].option.connectionTrace,
         { enabled: true, bufferSize: 100, output: undefined }
       );
       assert.strictEqual(

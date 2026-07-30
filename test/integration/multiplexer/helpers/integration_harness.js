@@ -204,7 +204,6 @@ function createIntegrationContext(name, option = {}) {
           option.multiplexerDaemonIdleTimeout ??
           DEFAULT_TEST_DAEMON_IDLE_TIMEOUT,
         connectionTrace: extra.connectionTrace,
-        reportService: null,
       });
       connectors.push(connector);
       return connector;
