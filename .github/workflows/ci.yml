@@ -23,15 +23,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: ${{ github.workspace }}
       - name: Install Common Dependencies
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |-
-            set -e
-            python3 -m pip install PyYAML -i https://pypi.org/simple
-            python3 -m pip install requests
-            tools/hab sync .
+        uses: ./.github/actions/common-deps
       - name: Run file type check
         run: |
           source tools/envsetup.sh
@@ -67,13 +59,7 @@ jobs:
       - name: Download Source
         uses: actions/checkout@v4.2.2
       - name: Install Common Dependencies
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |-
-            python3 -m pip install PyYAML -i https://pypi.org/simple
-            tools/hab sync .
+        uses: ./.github/actions/common-deps
       - name: Run Unittests
         run: |
           set -e
@@ -122,11 +108,10 @@ jobs:
           version: 7.33.6
       - name: Grant execute permission for gradlew
         run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
+      - name: Install Common Dependencies
+        uses: ./.github/actions/common-deps
       - name: Run the android websocket connection check
         run: |-
-          python3 -m pip install PyYAML
-          python3 -m pip install requests
-          tools/hab sync . -f
           source tools/envsetup.sh
           python3 test/connect_test/check_android_connection_ci.py -t websocket
 
@@ -147,11 +132,10 @@ jobs:
           version: 7.33.6
       - name: Grant execute permission for gradlew
         run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
+      - name: Install Common Dependencies
+        uses: ./.github/actions/common-deps
       - name: Run the android usb connection check
         run: |-
-          python3 -m pip install PyYAML
-          python3 -m pip install requests
-          tools/hab sync . -f
           source tools/envsetup.sh
           python3 test/connect_test/check_android_connection_ci.py -t usb
 
@@ -172,11 +156,10 @@ jobs:
           version: 7.33.6
       - name: Grant execute permission for gradlew
         run: cd $GITHUB_WORKSPACE/test/e2e_test/android_example &&  chmod +x ./gradlew
+      - name: Install Common Dependencies
+        uses: ./.github/actions/common-deps
       - name: Run the android unittests check
         run: |-
-          python3 -m pip install PyYAML
-          python3 -m pip install requests
-          tools/hab sync . -f
           source tools/envsetup.sh
           python3 test/unit_test/check_android_unittest.py
 
@@ -217,9 +200,10 @@ jobs:
       - uses: pnpm/action-setup@v4.0.0
         with:
           version: 7.33.6
+      - name: Install Common Dependencies
+        uses: ./.github/actions/common-deps
       - name: Run the ios unittests check
         run: |-
-          tools/hab sync . -f
           source tools/envsetup.sh
           set -e
           git config --global url."https://github.com/".insteadOf "git@github.com:"
