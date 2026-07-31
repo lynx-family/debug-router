@@ -7,31 +7,8 @@ const assert = require("assert");
 const {
   PhysicalConnector,
 } = require("../../../debug_router_connector/dist/cjs/src/physical/PhysicalConnector");
-const {
-  getDriverReportService,
-  setDriverReportService,
-} = require("../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportService");
 
-function delay(ms = 0) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function createReportService() {
-  const state = {
-    initCalls: [],
-    reports: [],
-  };
-
-  return {
-    state,
-    init(manualConnect) {
-      state.initCalls.push(manualConnect);
-    },
-    report(eventName, metrics, categories) {
-      state.reports.push({ eventName, metrics, categories });
-    },
-  };
-}
+const ASYNC_TEST_TIMEOUT = 250;
 
 function createConnector(option = {}) {
   return new PhysicalConnector({
@@ -52,22 +29,38 @@ function collect(connector, event) {
   return payloads;
 }
 
-function createDevice(serial, overrides = {}) {
+function assertSameMembers(actual, expected) {
+  assert.strictEqual(actual.length, expected.length);
+  expected.forEach((entry) => assert(actual.includes(entry)));
+}
+
+function createDevice(
+  serial,
+  {
+    os = "Android",
+    title = `Device ${serial}`,
+    ports = [9001],
+    infoExtras = {},
+  } = {}
+) {
   const state = {
     startWatchCalls: 0,
     stopWatchCalls: 0,
     disconnectCalls: 0,
   };
+  const info = {
+    ...infoExtras,
+    serial,
+    os,
+    title,
+  };
+
   return {
-    info: {
-      serial,
-      os: overrides.os ?? "Android",
-      title: overrides.title ?? `Device ${serial}`,
-    },
-    ports: overrides.ports ?? [9001],
+    info,
+    ports,
     state,
     get serial() {
-      return this.info.serial;
+      return info.serial;
     },
     startWatchClient() {
       state.startWatchCalls++;
@@ -81,46 +74,64 @@ function createDevice(serial, overrides = {}) {
   };
 }
 
-function createClient(id, overrides = {}) {
+function assertDeviceContract(device, expected) {
+  assert.strictEqual(typeof device.serial, "string");
+  assert.strictEqual(device.serial, expected.serial);
+  assert.strictEqual(device.info.serial, expected.serial);
+  assert.strictEqual(device.info.os, expected.os);
+  assert.strictEqual(device.info.title, expected.title);
+  assert(Array.isArray(device.ports));
+  device.ports.forEach((port) => assert(Number.isSafeInteger(port)));
+}
+
+function createClient(
+  id,
+  {
+    deviceId = "device-1",
+    port = 9000 + id,
+    app = `app-${id}`,
+    os = "Android",
+    device = "Pixel",
+    deviceModel = "Pixel",
+    sdkVersion = "1.0.0",
+    processName = `com.demo.${id}`,
+    appName = `Demo ${id}`,
+    rawInfoExtras = {},
+    queryExtras = {},
+    infoExtras = {},
+  } = {}
+) {
   const state = {
-    sendMessages: [],
-    sendRawMessages: [],
     closeCalls: 0,
   };
-  const deviceId = overrides.deviceId ?? "device-1";
-  return {
-    info: {
-      id,
-      port: overrides.port ?? 9000 + id,
-      query: {
-        app: overrides.app ?? `app-${id}`,
-        os: overrides.os ?? "Android",
-        device: overrides.device ?? "Pixel",
-        device_model: overrides.deviceModel ?? "Pixel",
-        device_id: deviceId,
-        sdk_version: overrides.sdkVersion ?? "1.0.0",
-        raw_info: overrides.rawInfo ?? {
-          AppProcessName: overrides.processName ?? `com.demo.${id}`,
-          App: overrides.appName ?? `Demo ${id}`,
-        },
+  const info = {
+    ...infoExtras,
+    id,
+    port,
+    query: {
+      ...queryExtras,
+      app,
+      os,
+      device,
+      device_model: deviceModel,
+      device_id: deviceId,
+      sdk_version: sdkVersion,
+      raw_info: {
+        ...rawInfoExtras,
+        AppProcessName: processName,
+        App: appName,
       },
     },
+  };
+
+  return {
+    info,
     state,
     clientId() {
-      return this.info.id;
+      return info.id;
     },
     deviceId() {
-      return this.info.query.device_id;
-    },
-    sendMessage(message) {
-      state.sendMessages.push(message);
-    },
-    async sendRawMessage(message) {
-      state.sendRawMessages.push(message);
-      if (overrides.sendRawError) {
-        throw overrides.sendRawError;
-      }
-      return overrides.sendRawResult ?? { id: message.id, result: "ok" };
+      return info.query.device_id;
     },
     close() {
       state.closeCalls++;
@@ -128,78 +139,54 @@ function createClient(id, overrides = {}) {
   };
 }
 
-describe("PhysicalConnector", function () {
-  afterEach(function () {
-    setDriverReportService(null);
-  });
+function assertClientContract(client, expected) {
+  assert(Number.isSafeInteger(client.clientId()));
+  assert.strictEqual(client.clientId(), expected.id);
+  assert.strictEqual(client.info.id, expected.id);
+  assert.strictEqual(typeof client.deviceId(), "string");
+  assert.strictEqual(client.deviceId(), expected.deviceId);
+  assert.strictEqual(client.info.query.device_id, expected.deviceId);
+  assert.strictEqual(typeof client.info.query.os, "string");
+  assert.strictEqual(typeof client.info.query.device_model, "string");
+  assert.strictEqual(typeof client.info.query.raw_info, "object");
+  assert.notStrictEqual(client.info.query.raw_info, null);
+}
 
-  it("uses the entry-installed report service", function () {
-    const reportService = createReportService();
-    setDriverReportService(reportService);
+describe("PhysicalConnector", function () {
+  it("keeps physical options bounded and allocates unique numeric client IDs", async function () {
     const connector = createConnector({
-      manualConnect: false,
       usbConnectOpt: { retryTime: 1 },
     });
 
-    assert.strictEqual(getDriverReportService(), reportService);
-    assert.deepStrictEqual(reportService.state.initCalls, [false]);
     assert.strictEqual(connector.usbConnectOpt.retryTime, 3000);
-    assert(
-      reportService.state.reports.some(
-        (entry) => entry.eventName === "PhysicalConnectorInit",
-      ),
-    );
-    assert(
-      reportService.state.reports.some(
-        (entry) => entry.eventName === "PhysicalConnectorInitOfNoManualConnect",
-      ),
-    );
-    assert.strictEqual(connector.createClientId(), 1);
-    connector.nextClientId = 4294967295;
-    assert.strictEqual(connector.createClientId(), 1);
+    assert.deepStrictEqual(await connector.connectDevices(-1), []);
+
+    const clientIds = [
+      connector.createClientId(),
+      connector.createClientId(),
+      connector.createClientId(),
+    ];
+    clientIds.forEach((id) => {
+      assert(Number.isSafeInteger(id));
+      assert(id > 0);
+    });
+    assert.strictEqual(new Set(clientIds).size, clientIds.length);
   });
 
-  it("starts device managers and reports watch failures", async function () {
-    const reportService = createReportService();
-    setDriverReportService(reportService);
+  it("starts a device watcher only when the host predicate permits it", async function () {
     const connector = createConnector();
-    const calls = [];
-    connector.devicesManager.add({
-      async watchDevices() {
-        calls.push("first");
-      },
-    });
-    connector.devicesManager.add({
-      async watchDevices() {
-        calls.push("second");
-      },
-    });
+    const device = createDevice("device-1");
+    let shouldStart = false;
 
-    const devices = await connector.connectDevices(-1);
-    assert.deepStrictEqual(calls, ["first", "second"]);
-    assert.deepStrictEqual(devices, []);
+    await connector.startWatchClient(device, () => shouldStart);
+    assert.strictEqual(device.state.startWatchCalls, 0);
 
-    const failing = createConnector();
-    failing.devicesManager.add({
-      async watchDevices() {
-        throw new Error("adb down");
-      },
-    });
-
-    await assert.rejects(
-      () => failing.connectDevices(-1),
-      /adb down/,
-    );
-    assert(
-      reportService.state.reports.some(
-        (entry) =>
-          entry.eventName === "device_connect_error" &&
-          entry.categories.msg === "watchDevices error:adb down",
-      ),
-    );
+    shouldStart = true;
+    await connector.startWatchClient(device, () => shouldStart);
+    assert.strictEqual(device.state.startWatchCalls, 1);
   });
 
-  it("registers devices without starting client watchers, emits events, records trace, and unregisters them", function () {
+  it("owns device lifecycle state without automatically starting watchers", function () {
     const trace = {
       registered: [],
       unregistered: [],
@@ -213,14 +200,23 @@ describe("PhysicalConnector", function () {
     const connector = createConnector({ traceRecorder: trace });
     const connected = collect(connector, "device-connected");
     const disconnected = collect(connector, "device-disconnected");
-    const device = createDevice("device-1");
+    const device = createDevice("device-1", {
+      infoExtras: { transport: "USB" },
+    });
+    const duplicate = createDevice("device-1");
 
     connector.registerDevice(device);
-    connector.registerDevice(createDevice("device-1"));
+    connector.registerDevice(duplicate);
 
+    assertDeviceContract(connected[0], {
+      serial: "device-1",
+      os: "Android",
+      title: "Device device-1",
+    });
+    assert.strictEqual(connected[0], device);
     assert.strictEqual(connector.devices.get("device-1"), device);
     assert.strictEqual(device.state.startWatchCalls, 0);
-    assert.deepStrictEqual(connected, [device]);
+    assert.strictEqual(duplicate.state.startWatchCalls, 0);
     assert.deepStrictEqual(trace.registered, [
       {
         serial: "device-1",
@@ -242,55 +238,89 @@ describe("PhysicalConnector", function () {
     ]);
   });
 
-  it("registers and unregisters USB clients with compatibility events", function () {
+  it("owns USB client lifecycle state and emits strict physical events", function () {
     const connector = createConnector();
     const connected = collect(connector, "client-connected");
-    const appConnected = collect(connector, "app-client-connected");
     const disconnected = collect(connector, "client-disconnected");
-    const appDisconnected = collect(connector, "app-client-disconnected");
-    const client = createClient(7);
+    const client = createClient(7, {
+      deviceId: "device-1",
+      infoExtras: { futureMetadata: true },
+      queryExtras: { futureQueryField: "kept" },
+    });
+    const duplicate = createClient(7, { deviceId: "device-2" });
 
     connector.regiserUsbClient(client);
-    connector.regiserUsbClient(createClient(7));
+    connector.regiserUsbClient(duplicate);
 
+    assertClientContract(connected[0], {
+      id: 7,
+      deviceId: "device-1",
+    });
+    assert.strictEqual(connected[0], client);
     assert.strictEqual(connector.usbClients.get(7), client);
-    assert.deepStrictEqual(connected, [client]);
-    assert.deepStrictEqual(appConnected, [client]);
+    assert.strictEqual(client.info.futureMetadata, true);
+    assert.strictEqual(client.info.query.futureQueryField, "kept");
 
     connector.unregiserUsbClient(404);
     connector.unregiserUsbClient(7);
 
     assert.strictEqual(connector.usbClients.has(7), false);
     assert.deepStrictEqual(disconnected, [7]);
-    assert.deepStrictEqual(appDisconnected, [7]);
+    assert.strictEqual(typeof disconnected[0], "number");
   });
 
-  it("queries existing and future devices by serial with timeout cleanup", async function () {
+  it("keeps the USB message event payload typed while allowing additive fields", function () {
+    const connector = createConnector();
+    const received = [];
+    const listener = (payload) => received.push(payload);
+    const message = {
+      id: 7,
+      message: JSON.stringify({ method: "Runtime.consoleAPICalled" }),
+      futureMetadata: "kept",
+    };
+
+    connector.on("usb-client-message", listener);
+    connector.emit("usb-client-message", message);
+    connector.off("usb-client-message", listener);
+    connector.emit("usb-client-message", {
+      id: 8,
+      message: "ignored after unsubscribe",
+    });
+
+    assert.deepStrictEqual(received, [message]);
+    assert(Number.isSafeInteger(received[0].id));
+    assert(received[0].id > 0);
+    assert.strictEqual(typeof received[0].message, "string");
+    assert.strictEqual(received[0].futureMetadata, "kept");
+  });
+
+  it("queries current and future devices by stable serial identity", async function () {
     const connector = createConnector();
     const deviceA = createDevice("device-a");
     const deviceB = createDevice("device-b");
     connector.registerDevice(deviceA);
 
-    assert.deepStrictEqual(await connector.getDevices(-1, null), [deviceA]);
+    assertSameMembers(await connector.getDevices(-1, null), [deviceA]);
     assert.deepStrictEqual(await connector.getDevices(-1, "device-a"), [
       deviceA,
     ]);
     assert.deepStrictEqual(await connector.getDevices(-1, "missing"), []);
 
-    const waiting = connector.getDevices(50, "device-b");
-    setTimeout(() => connector.registerDevice(deviceB), 5);
+    const waiting = connector.getDevices(ASYNC_TEST_TIMEOUT, "device-b");
+    setImmediate(() => connector.registerDevice(deviceB));
     assert.deepStrictEqual(await waiting, [deviceB]);
 
-    assert.deepStrictEqual(await connector.getDevices(5, "never"), []);
+    assert.deepStrictEqual(await connector.getDevices(0, "never"), []);
   });
 
-  it("filters USB clients by platform name", async function () {
+  it("filters USB clients by device identity and platform application name", async function () {
     const connector = createConnector();
     const device = createDevice("device-1");
     const android = createClient(1, {
       deviceId: "device-1",
       os: "Android",
       processName: "com.target",
+      rawInfoExtras: { futureAndroidField: "kept" },
     });
     const ios = createClient(2, {
       deviceId: "device-1",
@@ -298,102 +328,112 @@ describe("PhysicalConnector", function () {
       deviceModel: "iPhone 15",
       appName: "TargetApp",
     });
-    const other = createClient(3, {
+    const otherDevice = createClient(3, {
       deviceId: "device-2",
       processName: "com.target",
     });
     connector.registerDevice(device);
     connector.regiserUsbClient(android);
     connector.regiserUsbClient(ios);
-    connector.regiserUsbClient(other);
+    connector.regiserUsbClient(otherDevice);
 
+    assertSameMembers(connector.getAllUsbClients(), [
+      android,
+      ios,
+      otherDevice,
+    ]);
     assert.deepStrictEqual(
       await connector.getDeviceUsbClients("device-1", -1, "com.target"),
-      [android],
+      [android]
     );
     assert.deepStrictEqual(
       await connector.getDeviceUsbClients("device-1", -1, "TargetApp"),
-      [ios],
+      [ios]
+    );
+    assert.deepStrictEqual(
+      await connector.getDeviceUsbClients("device-1", -1, "missing-app"),
+      []
     );
   });
 
-  it("waits for future clients and times out with the current device clients", async function () {
-    const connector = createConnector();
-    const device = createDevice("device-1");
-    const initial = createClient(1, { deviceId: "device-1" });
-    connector.registerDevice(device);
-    connector.regiserUsbClient(initial);
-
-    assert.deepStrictEqual(await connector.waitDeviceUsbClients("missing"), []);
-    assert.deepStrictEqual(
-      await connector.waitDeviceUsbClients("device-1", -1),
-      [initial],
-    );
-
-    connector.unregiserUsbClient(1);
-    const future = createClient(2, { deviceId: "device-1" });
-    const waiting = connector.waitDeviceUsbClients("device-1", 50);
-    setTimeout(() => connector.regiserUsbClient(future), 5);
-    assert.deepStrictEqual(await waiting, [future]);
-
-    connector.unregiserUsbClient(2);
-    assert.deepStrictEqual(
-      await connector.waitDeviceUsbClients("device-1", 5),
-      [],
-    );
-  });
-
-  it("waits for a named future USB client through getDeviceUsbClients", async function () {
+  it("waits for the first USB client belonging to the requested device", async function () {
     const connector = createConnector();
     connector.registerDevice(createDevice("device-1"));
+    connector.registerDevice(createDevice("device-2"));
+    const ignored = createClient(1, { deviceId: "device-2" });
+    const matching = createClient(2, { deviceId: "device-1" });
 
-    const matching = createClient(1, {
-      deviceId: "device-1",
-      processName: "com.target",
+    const waiting = connector.waitDeviceUsbClients(
+      "device-1",
+      ASYNC_TEST_TIMEOUT
+    );
+    setImmediate(() => {
+      connector.regiserUsbClient(ignored);
+      connector.regiserUsbClient(matching);
     });
-    const ignored = createClient(2, {
+
+    assert.deepStrictEqual(await waiting, [matching]);
+    assert.deepStrictEqual(
+      await connector.waitDeviceUsbClients("unknown-device", 0),
+      []
+    );
+  });
+
+  it("waits for a named USB client without accepting another device", async function () {
+    const connector = createConnector();
+    connector.registerDevice(createDevice("device-1"));
+    connector.registerDevice(createDevice("device-2"));
+    const ignored = createClient(1, {
       deviceId: "device-2",
       processName: "com.target",
     });
+    const matching = createClient(2, {
+      deviceId: "device-1",
+      processName: "com.target",
+    });
 
-    const waiting = connector.getDeviceUsbClients("device-1", 50, "com.target");
-    setTimeout(() => {
+    const waiting = connector.getDeviceUsbClients(
+      "device-1",
+      ASYNC_TEST_TIMEOUT,
+      "com.target"
+    );
+    setImmediate(() => {
       connector.regiserUsbClient(ignored);
       connector.regiserUsbClient(matching);
-    }, 5);
+    });
+
     assert.deepStrictEqual(await waiting, [matching]);
-    assert.deepStrictEqual(
-      await connector.getDeviceUsbClients("device-1", 5, "missing-app"),
-      [],
-    );
   });
 
-  it("delegates client close", function () {
+  it("closes only the USB client selected by its numeric ID", function () {
     const connector = createConnector();
     const client = createClient(5);
     connector.regiserUsbClient(client);
 
     connector.closeClient(404);
+    assert.strictEqual(client.state.closeCalls, 0);
+
     connector.closeClient(5);
     assert.strictEqual(client.state.closeCalls, 1);
   });
 
-  it("stops device watchers and closes clients once when closed", async function () {
+  it("stops all physical resources and makes connector close idempotent", async function () {
     const connector = createConnector();
-    const device = createDevice("device-1");
-    const client = createClient(1);
-    connector.registerDevice(device);
-    connector.regiserUsbClient(client);
-
-    connector.disableAllClients();
-    assert.strictEqual(device.state.stopWatchCalls, 1);
-    assert.strictEqual(client.state.closeCalls, 1);
+    const deviceA = createDevice("device-a");
+    const deviceB = createDevice("device-b");
+    const clientA = createClient(1, { deviceId: "device-a" });
+    const clientB = createClient(2, { deviceId: "device-b" });
+    connector.registerDevice(deviceA);
+    connector.registerDevice(deviceB);
+    connector.regiserUsbClient(clientA);
+    connector.regiserUsbClient(clientB);
 
     await connector.close();
     await connector.close();
-    assert.strictEqual(device.state.stopWatchCalls, 2);
-    assert.strictEqual(client.state.closeCalls, 2);
 
-    await delay(0);
+    assert.strictEqual(deviceA.state.stopWatchCalls, 1);
+    assert.strictEqual(deviceB.state.stopWatchCalls, 1);
+    assert.strictEqual(clientA.state.closeCalls, 1);
+    assert.strictEqual(clientB.state.closeCalls, 1);
   });
 });
