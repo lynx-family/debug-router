@@ -76,6 +76,7 @@ export type devOption = {
   };
   reportService?: DriverReportService | null;
   connectionTrace?: ConnectionTraceOptions;
+  allowOwnershipTakeover?: boolean;
 };
 
 const DEFAULT_DEV_SERVE_PORT = 19783;
@@ -111,6 +112,7 @@ export class DebugRouterConnector {
   private monitoring: boolean = false;
   private multiOpenMonitorTimer?: NodeJS.Timeout;
   private closed: boolean = false;
+  private closePromise?: Promise<void>;
   wssPort: number = DEFAULT_DEV_SERVE_PORT;
   wssHost: string | undefined;
   roomId: string | undefined;
@@ -147,6 +149,7 @@ export class DebugRouterConnector {
       );
     }
     this.prepareDriverDataDir();
+    fslock.claimConnectorOwnership(option.allowOwnershipTakeover ?? true);
     this.startMonitorMultiOpen();
     this.manualConnect = option.manualConnect;
     this.enableWebSocket = option.enableWebSocket;
@@ -266,9 +269,12 @@ export class DebugRouterConnector {
           defaultLogger.debug("LastDriverProcessID:" + data);
           if (data !== `${process.pid}`) {
             if (this.currentStatus === MultiOpenStatus.attached) {
-              this.disableAllClients();
+              const clientCloseErrors = this.disableAllClients();
               this.currentStatus = MultiOpenStatus.unattached;
               this.multiOpenCallback.statusChanged(MultiOpenStatus.unattached);
+              if (clientCloseErrors.length > 0) {
+                throw clientCloseErrors[0];
+              }
             } else {
               // TODO when unattached don't need monitor until activation again
               defaultLogger.debug("current connector has unattached");
@@ -329,15 +335,24 @@ export class DebugRouterConnector {
     }
   }
 
-  disableAllClients() {
+  disableAllClients(): Error[] {
     defaultLogger.info("disableAllClients");
-    // close usb autoConnect
+    const errors: Error[] = [];
     this.devices.forEach((device) => {
-      device.stopWatchClient();
+      try {
+        device.stopWatchClient();
+      } catch (error: any) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
     });
     this.getAllAppClients().forEach((client) => {
-      client.close();
+      try {
+        client.close();
+      } catch (error: any) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
     });
+    return errors;
   }
 
   startWatchAllClients(force: boolean = true) {
@@ -471,22 +486,63 @@ export class DebugRouterConnector {
     return this.traceRecorder.addListener(listener);
   }
 
-  async close(): Promise<void> {
-    if (this.closed) {
-      return;
+  close(): Promise<void> {
+    if (this.closePromise) {
+      return this.closePromise;
     }
     this.closed = true;
+    this.closePromise = this.performClose();
+    return this.closePromise;
+  }
+
+  private async performClose(): Promise<void> {
+    const errors: unknown[] = [];
     if (this.multiOpenMonitorTimer) {
       clearInterval(this.multiOpenMonitorTimer);
       this.multiOpenMonitorTimer = undefined;
     }
-    this.disableAllClients();
+    const managerResults = await Promise.allSettled(
+      Array.from(this.devicesManager).map((manager) =>
+        Promise.resolve().then(() => manager.close()),
+      ),
+    );
+    managerResults.forEach((result) => {
+      if (result.status === "rejected") {
+        errors.push(result.reason);
+      }
+    });
+    this.devices.forEach((device) => {
+      try {
+        device.disConnect();
+      } catch (error) {
+        errors.push(error);
+      }
+    });
+    this.devices.clear();
+    errors.push(...this.disableAllClients());
+    this.usbClients.clear();
     if (this.wss) {
-      this.wss.close();
+      try {
+        this.wss.close();
+      } catch (error) {
+        errors.push(error);
+      }
       this.wss = null;
     }
     await new Promise((resolve) => setImmediate(resolve));
-    await this.traceRecorder?.close();
+    try {
+      await this.traceRecorder?.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      fslock.releaseConnectorOwnership();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   emit<Event extends keyof DebugerRouterDriverEvents>(
@@ -625,7 +681,7 @@ export class DebugRouterConnector {
         setTimeout(() => {
           this.off("device-connected", deviceCallback);
           resolve(this.findDevice(serial));
-        }, timeout);
+        }, timeout).unref();
       }
     });
   }
@@ -693,7 +749,7 @@ export class DebugRouterConnector {
             return client.deviceId() === deviceId;
           });
           resolve(this.findUsbClient(clientName, clients));
-        }, timeout);
+        }, timeout).unref();
       }
     });
   }
@@ -758,7 +814,7 @@ export class DebugRouterConnector {
           });
           this.off("client-connected", handle);
           resolve(Array.from(clients.values()));
-        }, timeout);
+        }, timeout).unref();
       }
     });
   }

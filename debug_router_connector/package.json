@@ -3,6 +3,16 @@
   "version": "0.0.1",
   "description": "debuger router connector",
   "main": "dist/cjs/src/index.js",
+  "bin": {
+    "debug-router": "dist/cjs/src/cli/bin.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md",
+    "LICENSE",
+    "Notice.txt"
+  ],
    "repository": {
     "type": "git",
     "url": "git+https://github.com/lynx-family/debug-router.git",
@@ -10,9 +20,15 @@
   },
   "scripts": {
     "start": "node bin/driver.js start",
-    "build": "rm -rf dist && bash ./scripts/build.sh",
+    "build": "node ./scripts/build.cjs",
+    "install:agents": "node ./scripts/install-agents.cjs",
+    "prepack": "npm run build",
     "types": "rm -rf lib && rm -rf typings && tsc -p tsconfig.prod.json",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test": "npm run build && mocha 'test/**/*.test.js'"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "keywords": [
     "debug-router",

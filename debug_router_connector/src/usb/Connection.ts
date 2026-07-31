@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 import EventEmitter from "events";
+import { PendingRequestRegistry } from "../protocol/PendingRequestRegistry";
 import {
   CDPEventHandler,
   EventHandler,
@@ -17,11 +18,13 @@ export interface PendingRequestResolvers {
 
 export abstract class Connection {
   private readonly events = new EventEmitter();
-  protected pendingRequests: Map<string, PendingRequestResolvers> = new Map();
+  protected readonly pendingRequests =
+    new PendingRequestRegistry<ResponseMessageType>();
   abstract close(): void;
   abstract send(data: any): void;
   abstract sendExpectResponse(
     data: RequireMessageType,
+    timeoutMs?: number,
   ): Promise<ResponseMessageType>;
 
   handleClientEvent(event: string, params: any, session_id: any) {
@@ -53,16 +56,11 @@ export abstract class Connection {
     this.events.once(event, callback);
   }
 
-  matchPendingRequest(id: string): PendingRequestResolvers {
-    const callbacks = this.pendingRequests.get(id);
+  resolvePendingRequest(id: string, response: ResponseMessageType): boolean {
+    return this.pendingRequests.resolve(id, response);
+  }
 
-    if (!callbacks) {
-      // @ts-ignore
-      return;
-    }
-
-    this.pendingRequests.delete(id);
-    // @ts-ignore
-    return callbacks;
+  protected rejectAllPendingRequests(error: Error): void {
+    this.pendingRequests.rejectAll(error);
   }
 }

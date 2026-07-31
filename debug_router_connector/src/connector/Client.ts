@@ -11,5 +11,6 @@ export abstract class Client {
     params: Object,
     sessionId: number,
     type: string,
+    timeoutMs?: number,
   ): Promise<string>;
 }

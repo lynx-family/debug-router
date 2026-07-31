@@ -67,6 +67,21 @@ Compile debug_router_connector
 ``` bash
 cd debug_router_connector && npm install && npm run build
 ```
+
+Install the CLI and shared Agent Skill from the repository root:
+
+```bash
+npm --prefix debug_router_connector run install:agents
+```
+
+This installs the `debug-router` executable globally, installs the Skill into
+`~/.agents/skills/debug-router`, and verifies both installations. Pass another
+target when needed:
+
+```bash
+npm --prefix debug_router_connector run install:agents -- --target codex
+```
+
 Run debug_router_connector demo
 ``` bash
 cd test/e2e_test/connector_test && npm install && node index.js

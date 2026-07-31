@@ -19,6 +19,7 @@ type UsbConnectionTraceContext = {
 
 export class USBConnection extends Connection {
   private traceContext: UsbConnectionTraceContext;
+  private closed = false;
 
   constructor(
     protected socket: net.Socket,
@@ -26,6 +27,12 @@ export class USBConnection extends Connection {
   ) {
     super();
     this.traceContext = traceContext;
+    this.socket.on("error", (error) => {
+      this.rejectAllPendingRequests(error);
+    });
+    this.socket.on("close", () => {
+      this.rejectAllPendingRequests(new Error("USB connection closed"));
+    });
   }
 
   setTraceClientId(clientId: number) {
@@ -33,7 +40,12 @@ export class USBConnection extends Connection {
   }
 
   close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
     defaultLogger.debug("USBConnection: close");
+    this.rejectAllPendingRequests(new Error("USB connection closed"));
     this.traceContext.recorder?.recordUsbConnectionClosed({
       deviceId: this.traceContext.deviceId,
       port: this.traceContext.port,
@@ -53,22 +65,40 @@ export class USBConnection extends Connection {
   }
   sendExpectResponse(
     require: RequireMessageType,
+    timeoutMs?: number,
   ): Promise<ResponseMessageType> {
-    return new Promise((resolve, reject) => {
-      if (require.event === "Initialize") {
-        this.pendingRequests.set(require.event, { reject, resolve });
-      } else if (require.event === "Customized") {
-        const data = require.data;
-        if (data.type === "CDP" || data.type === "App") {
-          this.pendingRequests.set(data.data.message.id.toString(), {
-            reject,
-            resolve,
-          });
-        } else {
-          this.pendingRequests.set(data.type, { reject, resolve });
-        }
-      }
+    if (!this.socket.writable) {
+      return Promise.reject(new Error("USB socket is not writable"));
+    }
+
+    let key: string | undefined;
+    if (require.event === "Initialize") {
+      key = require.event;
+    } else if (require.event === "Customized") {
+      const data = require.data;
+      key =
+        data.type === "CDP" || data.type === "App"
+          ? data.data.message.id.toString()
+          : data.type;
+    }
+    if (!key) {
+      return Promise.reject(
+        new Error(`Unsupported response event: ${require.event}`),
+      );
+    }
+
+    if (this.pendingRequests.has(key)) {
+      return Promise.reject(new Error(`Request ${key} is already pending`));
+    }
+    const pending = this.pendingRequests.register(key, timeoutMs);
+    try {
       this.send(require);
-    });
+    } catch (error: any) {
+      this.pendingRequests.reject(
+        key,
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+    return pending;
   }
 }

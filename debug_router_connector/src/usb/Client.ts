@@ -44,6 +44,10 @@ export class UsbClient extends Client {
     this.connection.onAllEvents(callback);
   }
 
+  offAllEvents(callback: CDPEventHandler) {
+    this.connection.offAllEvents(callback);
+  }
+
   off(event: string, callback: EventHandler) {
     this.connection.off(event, callback);
   }
@@ -52,11 +56,11 @@ export class UsbClient extends Client {
     this.connection.once(event, callback);
   }
 
-  protected rawSend(message: RequireMessageType): Promise<ResponseMessageType> {
-    return new Promise(async (resolve, reject) => {
-      const response = await this.connection.sendExpectResponse(message);
-      resolve(response);
-    });
+  protected rawSend(
+    message: RequireMessageType,
+    timeoutMs?: number,
+  ): Promise<ResponseMessageType> {
+    return this.connection.sendExpectResponse(message, timeoutMs);
   }
 
   // send sendCustomizedMessage and wait result
@@ -65,6 +69,7 @@ export class UsbClient extends Client {
     params: Object = "",
     sessionId: number = -1,
     type: string = "CDP",
+    timeoutMs?: number,
   ): Promise<string> {
     const id = Client.messageIdCounter++;
     const msg: RequireMessageType = {
@@ -83,17 +88,14 @@ export class UsbClient extends Client {
         sender: 0,
       },
     };
-    return new Promise(async (resolve, reject) => {
-      const response: ResponseMessageType = (await this.rawSend(
-        msg,
-      )) as CustomizeResponseType;
+    return this.rawSend(msg, timeoutMs).then((response) => {
       if (
         isCustomizedEventType(response, CustomizedEventType.CDP) ||
         isCustomizedEventType(response, CustomizedEventType.App)
       ) {
-        // @ts-ignore
-        resolve(response.data.data.message);
+        return (response as any).data.data.message;
       }
+      throw new Error(`Unexpected Customized response type`);
     });
   }
 

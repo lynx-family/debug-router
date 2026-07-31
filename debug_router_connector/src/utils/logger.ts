@@ -134,7 +134,7 @@ export function createLogger(options: LoggerOptions) {
 const defaultLogger = new Logger({ level: "info" });
 
 if (process.env.DriverEnv === "dev") {
-  console.log("use local develop env");
+  defaultLogger.info("use local develop env");
   defaultLogger.setLevel("debug");
 }
 

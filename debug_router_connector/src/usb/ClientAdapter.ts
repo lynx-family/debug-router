@@ -46,6 +46,7 @@ export default class ClientAdapter {
   protected from?: number;
   protected id: number = 0;
   private connectionAttemptId?: string;
+  private destroyed = false;
   constructor(
     protected driver: DebugRouterConnector,
     protected listener: ClientEventsListener | null,
@@ -189,7 +190,7 @@ export default class ClientAdapter {
 
     const response: any = JSON.parse(message);
     const data = response.data;
-    let callback = null;
+    let pendingKey: string | undefined;
     if (isTypedSocketMessage(response, SocketEvent.Customized)) {
       if (
         !isCustomizedEventType(response, CustomizedEventType.CDP) &&
@@ -200,21 +201,19 @@ export default class ClientAdapter {
           return;
         }
         if (this.connection) {
-          callback = this.connection.matchPendingRequest(data.type);
+          pendingKey = data.type;
         }
       } else {
         const cdpMessage: any = JSON.parse(data.data.message);
-        if (cdpMessage?.id && this.connection) {
-          callback = this.connection.matchPendingRequest(
-            cdpMessage.id.toString(),
-          );
+        if (cdpMessage?.id !== undefined && this.connection) {
+          pendingKey = cdpMessage.id.toString();
         } else if (cdpMessage?.method) {
           this.handleClientEvent(data.data.message, data.data?.session_id);
         }
       }
     }
-    if (callback) {
-      callback.resolve(response);
+    if (pendingKey && this.connection) {
+      this.connection.resolvePendingRequest(pendingKey, response);
     }
   }
 
@@ -281,9 +280,11 @@ export default class ClientAdapter {
   ): void {
     const response: CDPEventMessage = JSON.parse(message);
     if (response.method && this.connection) {
-      this.connection.handleClientEvent(response.method, response.params, {
-        session_id: session_id !== undefined ? session_id : -1,
-      });
+      this.connection.handleClientEvent(
+        response.method,
+        response.params,
+        session_id !== undefined ? session_id : -1,
+      );
     }
   }
 
@@ -299,6 +300,10 @@ export default class ClientAdapter {
     if (platform === "iOS") {
       getTunnel(this.port, { udid: this.device_id })
         .then((tunnel: net.Socket) => {
+          if (this.destroyed) {
+            tunnel.destroy();
+            return;
+          }
           this.tcpClient = tunnel;
           this.tcpClient.on("data", (data: Buffer) => {
             this.handleData(this.tcpClient, data);
@@ -372,6 +377,10 @@ export default class ClientAdapter {
   }
 
   public destroy() {
+    if (this.destroyed) {
+      return;
+    }
+    this.destroyed = true;
     defaultLogger.debug("ClientAdapter destroy");
     this.listener = null;
     this.tcpClient.destroy();

@@ -308,6 +308,9 @@ jobs:
           pushd debug_router_connector/
           npm install
           npm run build
+          npm test
+          PACK_JSON=$(npm pack --dry-run --json)
+          node -e 'const files=JSON.parse(process.argv[1])[0].files.map(f=>f.path); for (const required of ["dist/cjs/src/cli/bin.js", "skills/debug-router/SKILL.md"]) { if (!files.includes(required)) throw new Error(`Missing ${required}`); }' "$PACK_JSON"
           ls -al
           popd
 

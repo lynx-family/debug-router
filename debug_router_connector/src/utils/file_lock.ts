@@ -23,6 +23,8 @@ try {
 
 export const driver_dir = os.homedir() + "/.DebugRouterConnector";
 export const lockDir = driver_dir + "/lockfile";
+export const latestProcessPath = driver_dir + "/LatestDriverProcess";
+const ownershipClaimPath = driver_dir + "/ownership-claim";
 
 let hasLock = false;
 
@@ -99,6 +101,54 @@ export function clearLockFile() {
       getDriverReportService()?.report("fs_file_lock_error", null, {
         error: error_msg,
       });
+    }
+  }
+}
+
+export function claimConnectorOwnership(allowTakeover: boolean): void {
+  fs.mkdirSync(driver_dir, { recursive: true });
+  try {
+    fs.mkdirSync(ownershipClaimPath);
+  } catch (error: any) {
+    throw new Error(`CONNECTOR_BUSY_TIMEOUT: ownership claim is active`);
+  }
+  try {
+    if (fs.existsSync(latestProcessPath)) {
+      const owner = Number(fs.readFileSync(latestProcessPath, "utf8").trim());
+      if (
+        Number.isInteger(owner) &&
+        owner > 0 &&
+        owner !== process.pid &&
+        isProcessAlive(owner) &&
+        !allowTakeover
+      ) {
+        throw new Error(`CONNECTOR_BUSY_TIMEOUT: owner ${owner} is active`);
+      }
+    }
+    fs.writeFileSync(latestProcessPath, `${process.pid}`, "utf8");
+  } finally {
+    fs.rmSync(ownershipClaimPath, { recursive: true, force: true });
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    return error?.code !== "ESRCH";
+  }
+}
+
+export function releaseConnectorOwnership(): void {
+  try {
+    const owner = Number(fs.readFileSync(latestProcessPath, "utf8").trim());
+    if (owner === process.pid) {
+      fs.rmSync(latestProcessPath, { force: true });
+    }
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") {
+      throw error;
     }
   }
 }

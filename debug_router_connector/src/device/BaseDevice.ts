@@ -55,7 +55,7 @@ export abstract class BaseDevice {
       os: this.info.os,
       title: this.info.title,
     });
-    this.clientController?.stopWatchClient();
+    this.clientController?.close();
     this.clientController = new ClientController(this.driver, this);
     this.clientController.startWatchClient();
   }

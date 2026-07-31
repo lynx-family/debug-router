@@ -13,6 +13,9 @@ export default class HarmonyDeviceManager extends DeviceManager {
   private retryCount: number = 0;
   private readonly hdcOptions: any;
   private hdcClient: Client | null = null;
+  private retryTimer?: NodeJS.Timeout;
+  private tracker: any = null;
+  private closed = false;
 
   constructor(driver: DebugRouterConnector, options: any) {
     super(driver);
@@ -57,10 +60,17 @@ export default class HarmonyDeviceManager extends DeviceManager {
       });
       return;
     }
+    if (this.closed) {
+      harmonyDevice.disConnect();
+      return;
+    }
     this.driver.registerDevice(harmonyDevice);
   }
 
   async watchDevices(killHdc: boolean = false) {
+    if (this.closed) {
+      return;
+    }
     if (!this.hdcClient) {
       this.hdcClient = await getHdcInstance(this.hdcOptions);
       if (!this.hdcClient) {
@@ -95,6 +105,11 @@ export default class HarmonyDeviceManager extends DeviceManager {
       this.hdcClient
         .trackTargets()
         .then((tracker) => {
+          if (this.closed) {
+            (tracker as any).end?.();
+            return;
+          }
+          this.tracker = tracker;
           tracker.on("error", async (err: Error) => {
             this.currentWatchStatus = WatchStatus.StopWatching;
             const msg = "tracker error:" + err?.message;
@@ -192,10 +207,29 @@ export default class HarmonyDeviceManager extends DeviceManager {
   }
 
   private reWatchHarmonyDevices() {
+    if (this.closed) {
+      return;
+    }
     this.retryCount++;
-    setTimeout(() => {
-      this.watchDevices(true);
+    this.retryTimer = setTimeout(() => {
+      if (!this.closed) {
+        this.watchDevices(true);
+      }
     }, 300);
+  }
+
+  close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+    }
+    this.tracker?.end?.();
+    this.tracker = null;
+    this.currentWatchStatus = WatchStatus.StopWatching;
   }
 
   private unregisterAllHarmonyTarget() {

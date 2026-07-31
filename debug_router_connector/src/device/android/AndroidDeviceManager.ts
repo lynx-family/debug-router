@@ -17,6 +17,9 @@ export class AndroidDeviceManager extends DeviceManager {
   private retryCount: number = 0;
   private readonly adbOptions: any;
   private adbClient: ADBClient | null = null;
+  private retryTimer?: NodeJS.Timeout;
+  private tracker: any = null;
+  private closed = false;
   constructor(driver: DebugRouterConnector, options: any) {
     super(driver);
     this.adbOptions = options;
@@ -58,9 +61,14 @@ export class AndroidDeviceManager extends DeviceManager {
   }
 
   private reWatchAndroidDevices() {
+    if (this.closed) {
+      return;
+    }
     this.retryCount++;
-    setTimeout(() => {
-      this.watchDevices(true);
+    this.retryTimer = setTimeout(() => {
+      if (!this.closed) {
+        this.watchDevices(true);
+      }
     }, 300);
   }
 
@@ -74,6 +82,9 @@ export class AndroidDeviceManager extends DeviceManager {
   }
 
   async watchDevices(killAdb: boolean = false) {
+    if (this.closed) {
+      return;
+    }
     if (!this.adbClient) {
       this.adbClient = await getAdbInstance(this.adbOptions);
       if (!this.adbClient) {
@@ -109,6 +120,11 @@ export class AndroidDeviceManager extends DeviceManager {
 
         // @ts-ignore
         .then((tracker) => {
+          if (this.closed) {
+            tracker.end?.();
+            return;
+          }
+          this.tracker = tracker;
           tracker.on("error", async (err: Error) => {
             this.currentWatchStatus = WatchStatus.StopWatching;
             const msg = "tracker error:" + err?.message;
@@ -216,6 +232,20 @@ export class AndroidDeviceManager extends DeviceManager {
     }
   }
 
+  close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+    }
+    this.tracker?.end?.();
+    this.tracker = null;
+    this.currentWatchStatus = WatchStatus.StopWatching;
+  }
+
   private async registerDevice(adbClient: ADBClient, deviceData: Device) {
     defaultLogger.debug(
       "start to create android device:" + JSON.stringify(deviceData),
@@ -226,6 +256,10 @@ export class AndroidDeviceManager extends DeviceManager {
       getDriverReportService()?.report("android_register_device_error", null, {
         msg: "androidDevice does not exist",
       });
+      return;
+    }
+    if (this.closed) {
+      androidDevice.disConnect();
       return;
     }
     this.driver.registerDevice(androidDevice);

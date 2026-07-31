@@ -21,6 +21,9 @@ export default class IOSDeviceManager extends DeviceManager {
   // lockdown port
   private readonly LOCKDOWN_PORT: number = 62078;
   private listener: DeviceWatchStatusSocket | null = null;
+  private retryTimer?: NodeJS.Timeout;
+  private readonly tunnels = new Set<Socket>();
+  private closed = false;
   constructor(driver: DebugRouterConnector) {
     super(driver);
   }
@@ -46,8 +49,13 @@ export default class IOSDeviceManager extends DeviceManager {
   }
 
   private async reWatchIOSDevices() {
-    setTimeout(() => {
-      this.watchDevices();
+    if (this.closed) {
+      return;
+    }
+    this.retryTimer = setTimeout(() => {
+      if (!this.closed) {
+        this.watchDevices();
+      }
     }, 300);
   }
 
@@ -68,6 +76,9 @@ export default class IOSDeviceManager extends DeviceManager {
   }
 
   public async watchDevices() {
+    if (this.closed) {
+      return;
+    }
     if (
       this.listener !== null &&
       this.listener?.currentWatchStatus !== WatchStatus.StopWatching
@@ -144,6 +155,11 @@ export default class IOSDeviceManager extends DeviceManager {
   ) {
     getTunnel(this.LOCKDOWN_PORT, { udid: udid })
       .then((tunnel: any) => {
+        if (this.closed) {
+          tunnel.destroy();
+          return;
+        }
+        this.tunnels.add(tunnel);
         const parse = this.makeParse((result: any) => {
           const deviceName: string | undefined = result?.Value?.DeviceName;
           if (deviceName) {
@@ -170,6 +186,7 @@ export default class IOSDeviceManager extends DeviceManager {
             udid: udid,
           });
           tunnel.destroy();
+          this.tunnels.delete(tunnel);
           statusSocket.currentWatchStatus = WatchStatus.StopWatching;
           this.reWatchIOSDevices();
         });
@@ -185,6 +202,7 @@ export default class IOSDeviceManager extends DeviceManager {
             udid: udid,
           });
           tunnel.destroy();
+          this.tunnels.delete(tunnel);
           statusSocket.currentWatchStatus = WatchStatus.StopWatching;
           this.reWatchIOSDevices();
         });
@@ -212,6 +230,21 @@ export default class IOSDeviceManager extends DeviceManager {
         statusSocket.currentWatchStatus = WatchStatus.StopWatching;
         this.reWatchIOSDevices();
       });
+  }
+
+  close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+    }
+    this.listener?.getRawSocket().destroy();
+    this.listener = null;
+    this.tunnels.forEach((tunnel) => tunnel.destroy());
+    this.tunnels.clear();
   }
 
   private makeParse(onComplete: (result: any) => void = () => {}) {

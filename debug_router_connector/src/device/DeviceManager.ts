@@ -12,4 +12,6 @@ export abstract class DeviceManager {
   }
 
   abstract watchDevices(): Promise<void>;
+
+  close(): void | Promise<void> {}
 }

@@ -90,6 +90,58 @@ client.on(event, (args...) => {});
 
 ```
 
+## Debug Router CLI
+
+The package installs a `debug-router` executable for machine-readable access to Android, iOS, Harmony, and Desktop targets. The CLI intentionally does not expose Network devices.
+
+From a source checkout, install the CLI and shared Agent Skill with one command
+from the repository root:
+
+```bash
+npm --prefix debug_router_connector run install:agents
+```
+
+The bootstrap installs dependencies, builds the package, installs the CLI
+globally, installs the Skill, and verifies that the executable is available on
+`PATH`. It never invokes `sudo`.
+
+For a published package, keep CLI and Skill installation explicit:
+
+```bash
+npm install -g @lynx-js/debug-router-connector
+debug-router install-skill
+```
+
+The package intentionally has no `postinstall` hook that writes to the user's
+home directory.
+
+```bash
+debug-router list --platform android
+debug-router send --client-id 'emulator-5554:8901' --type cdp --method Runtime.enable --params '{}'
+debug-router listen --client-id 'emulator-5554:8901' --timeout 10000
+debug-router install-skill
+```
+
+`list` and `send` write one JSON object to stdout. `listen` writes one JSON object per line. Logs and terminal errors are written to stderr. A stable CLI client ID combines the encoded device ID and Debug Router port; run `list` and copy exact IDs rather than using the Connector's process-local numeric ID.
+
+CLI invocations serialize through a local lease and wait up to 60 seconds by default. Configure the bound with `--wait-timeout`. A listener without `--timeout` keeps the lease until interrupted. If another DebugRouterConnector takes ownership, the command fails with `CONNECTOR_PREEMPTED`. After explicit user approval, re-run the original command once with `--takeover`; this disrupts the other Connector and is never automatic.
+
+`send --timeout` defaults to 5000 milliseconds. `send --session-id` is valid only for CDP and defaults to `-1`. App requests always use session ID `-1`.
+
+`debug-router install-skill` installs Skill files but does not install the CLI
+itself. It defaults to the shared Agents directory and supports these targets:
+
+| Target | Destination |
+| --- | --- |
+| `agents` | `~/.agents/skills/debug-router` |
+| `codex` | `${CODEX_HOME:-~/.codex}/skills/debug-router` |
+| `claude` | `~/.claude/skills/debug-router` |
+| `all` | All three destinations |
+
+Use `--force` only to replace modified or unmanaged Skill files. A legacy
+Claude Skill is preserved and reported when the default shared target is
+installed; use `--target all` to update every destination explicitly.
+
 ## Security
 
 If you discover a potential security issue in this project, or believe you have found one, we kindly ask that you notify TikTok Security through our [security center](https://hackerone.com/tiktok) or via email at [vulnerability reporting email](security@tiktok.com). Your contributiong in ensuring the security of this project is greatly appreciated.

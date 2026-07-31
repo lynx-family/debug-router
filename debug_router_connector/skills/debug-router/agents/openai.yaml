@@ -1,0 +1,4 @@
+interface:
+  display_name: "Debug Router"
+  short_description: "Discover devices and use Debug Router protocols"
+  default_prompt: "Use $debug-router to list available Debug Router devices and clients."
