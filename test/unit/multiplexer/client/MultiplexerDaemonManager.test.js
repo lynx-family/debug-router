@@ -24,6 +24,14 @@ class HealthReadyManager extends MultiplexerDaemonManager {
   }
 }
 
+class CleanupReasonRecordingManager extends HealthReadyManager {
+  async cleanupDaemonBeforeSpawn(reason) {
+    this.cleanupReasons = this.cleanupReasons ?? [];
+    this.cleanupReasons.push(reason);
+    return super.cleanupDaemonBeforeSpawn(reason);
+  }
+}
+
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-manager-"));
 }
@@ -131,7 +139,6 @@ function createSpawnRecorder() {
       };
       calls.push(call);
       return {
-        pid: 300,
         unref() {
           call.unrefCalled = true;
         },
@@ -1150,7 +1157,6 @@ describe("MultiplexerDaemonManager", function () {
             })
           );
           return {
-            pid: readyInfo.pid,
             unref() {},
           };
         },
@@ -1168,7 +1174,7 @@ describe("MultiplexerDaemonManager", function () {
   });
 
   it("does not reuse a fresh discovery when its daemon health check fails", async function () {
-    class FailingThenReadyHealthManager extends MultiplexerDaemonManager {
+    class FailingThenReadyHealthManager extends CleanupReasonRecordingManager {
       async checkDaemonHealth(info) {
         if (info.pid === 301) {
           return { ok: true };
@@ -1233,7 +1239,6 @@ describe("MultiplexerDaemonManager", function () {
             })
           );
           return {
-            pid: readyInfo.pid,
             unref() {},
           };
         },
@@ -1247,6 +1252,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(spawnCalls[0].now, 1000);
     assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
     assert.strictEqual(spawnCalls[0].oldDaemonLockExists, false);
+    assert.deepStrictEqual(manager.cleanupReasons, ["unhealthy-daemon"]);
   });
 
   it("reuses a healthy daemon that recovers before spawn cleanup", async function () {
@@ -1366,7 +1372,6 @@ describe("MultiplexerDaemonManager", function () {
             })
           );
           return {
-            pid: readyInfo.pid,
             unref() {},
           };
         },
@@ -1407,6 +1412,7 @@ describe("MultiplexerDaemonManager", function () {
       now: () => now,
     });
     const { manager } = createManager(tempDir, {
+      ManagerClass: CleanupReasonRecordingManager,
       discovery,
       daemonLockPath,
       startupTimeout: 30,
@@ -1436,7 +1442,6 @@ describe("MultiplexerDaemonManager", function () {
             })
           );
           return {
-            pid: readyInfo.pid,
             unref() {},
           };
         },
@@ -1450,6 +1455,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(spawnCalls[0].now, 5000);
     assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
     assert.strictEqual(spawnCalls[0].oldDaemonLockExists, false);
+    assert.deepStrictEqual(manager.cleanupReasons, ["stale-daemon"]);
   });
 
   it("removes invalid discovery without daemon lock before spawning", async function () {
@@ -1469,6 +1475,7 @@ describe("MultiplexerDaemonManager", function () {
       now: () => now,
     });
     const { manager } = createManager(tempDir, {
+      ManagerClass: CleanupReasonRecordingManager,
       discovery,
       startupTimeout: 30,
       now: () => now,
@@ -1494,7 +1501,6 @@ describe("MultiplexerDaemonManager", function () {
             })
           );
           return {
-            pid: readyInfo.pid,
             unref() {},
           };
         },
@@ -1507,6 +1513,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(spawnCalls.length, 1);
     assert.strictEqual(spawnCalls[0].now, 5000);
     assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
+    assert.deepStrictEqual(manager.cleanupReasons, ["invalid-discovery"]);
   });
 
   it("ignores ESRCH when force stopping an already exited daemon", async function () {

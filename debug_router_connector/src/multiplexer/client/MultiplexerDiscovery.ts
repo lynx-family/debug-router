@@ -94,7 +94,7 @@ export class MultiplexerDiscovery {
     this.discoveryPath = option.discoveryPath;
     this.localProtocolVersion =
       option.localProtocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION;
-    this.staleTimeout = option.staleTimeout ?? 5000;
+    this.staleTimeout = option.staleTimeout;
     this.now = option.now ?? Date.now;
   }
 

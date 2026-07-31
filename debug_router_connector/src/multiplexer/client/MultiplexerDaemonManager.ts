@@ -45,7 +45,6 @@ export type MultiplexerDaemonReplaceReason =
   | "force-stop";
 
 export type SpawnedDaemonProcess = {
-  pid?: number;
   unref(): void;
 };
 
@@ -206,6 +205,10 @@ export class MultiplexerDaemonManager {
       if (recoveredInfo) {
         return recoveredInfo;
       }
+
+      return this.ensureDaemonWithSpawnLock(async () => {
+        await this.cleanupDaemonBeforeSpawn("unhealthy-daemon");
+      });
     }
 
     if (validation.status === "replace-required") {
@@ -221,8 +224,10 @@ export class MultiplexerDaemonManager {
       throw createConnectorUpgradeError(validation);
     }
 
+    const reason =
+      validation.reason === "stale" ? "stale-daemon" : "invalid-discovery";
     return this.ensureDaemonWithSpawnLock(async () => {
-      await this.cleanupDaemonBeforeSpawn();
+      await this.cleanupDaemonBeforeSpawn(reason);
     });
   }
 
