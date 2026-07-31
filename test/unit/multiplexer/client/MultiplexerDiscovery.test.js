@@ -36,6 +36,11 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, JSON.stringify(value));
 }
 
+function getReusableDiscovery(discovery) {
+  const validation = discovery.validateDiscovery();
+  return validation.status === "usable" ? validation.info : null;
+}
+
 describe("MultiplexerDiscovery", function () {
   let tempDir;
   let discoveryPath;
@@ -63,9 +68,7 @@ describe("MultiplexerDiscovery", function () {
       status: "unusable",
       reason: "missing",
     });
-    assert.strictEqual(discovery.readDiscovery(), null);
-    assert.strictEqual(discovery.getFreshDiscovery(), null);
-    assert.strictEqual(discovery.getReusableDiscovery(), null);
+    assert.strictEqual(getReusableDiscovery(discovery), null);
   });
 
   it("returns invalid-json for malformed discovery", function () {
@@ -75,7 +78,6 @@ describe("MultiplexerDiscovery", function () {
       status: "unusable",
       reason: "invalid-json",
     });
-    assert.strictEqual(discovery.readDiscovery(), null);
   });
 
   it("returns invalid-shape for non-object and incomplete object values", function () {
@@ -136,9 +138,7 @@ describe("MultiplexerDiscovery", function () {
         connectorProtocolVersion: 1,
       },
     });
-    assert.deepStrictEqual(discovery.readDiscovery(), info);
-    assert.deepStrictEqual(discovery.getFreshDiscovery(), info);
-    assert.deepStrictEqual(discovery.getReusableDiscovery(), info);
+    assert.deepStrictEqual(getReusableDiscovery(discovery), info);
   });
 
   it("accepts a newer daemon protocol as compatible", function () {
@@ -179,8 +179,7 @@ describe("MultiplexerDiscovery", function () {
         connectorProtocolVersion: 1,
       },
     });
-    assert.strictEqual(discovery.getFreshDiscovery(), null);
-    assert.strictEqual(discovery.getReusableDiscovery(), null);
+    assert.strictEqual(getReusableDiscovery(discovery), null);
   });
 
   it("requires replacement for an older daemon protocol", function () {
@@ -197,17 +196,6 @@ describe("MultiplexerDiscovery", function () {
         connectorProtocolVersion: 1,
       },
     });
-    assert.strictEqual(discovery.getFreshDiscovery(), null);
-    assert.strictEqual(discovery.getReusableDiscovery(), null);
-  });
-
-  it("validates explicitly provided info without reading the file", function () {
-    const info = createInfo();
-
-    assert.deepStrictEqual(discovery.validateDiscovery(info).status, "usable");
-    assert.deepStrictEqual(discovery.validateDiscovery(null), {
-      status: "unusable",
-      reason: "missing",
-    });
+    assert.strictEqual(getReusableDiscovery(discovery), null);
   });
 });

@@ -8,6 +8,7 @@ const fs = require("fs");
 const {
   createIntegrationContext,
   delay,
+  getUsableDiscovery,
   platformTimeout,
   waitFor,
 } = require("./helpers/integration_harness");
@@ -34,7 +35,7 @@ describe("multiplexer integration daemon idle", function () {
     const client = context.createClient();
     await client.connect();
     const info = await waitFor(
-      () => context.discovery.getReusableDiscovery(),
+      () => getUsableDiscovery(context.discovery),
       3000,
     );
     assert(info, "daemon discovery should be usable after control connect");
@@ -74,7 +75,7 @@ describe("multiplexer integration daemon idle", function () {
     const first = context.createClient();
     await first.connect();
     const firstInfo = await waitFor(
-      () => context.discovery.getReusableDiscovery(),
+      () => getUsableDiscovery(context.discovery),
       3000,
     );
     assert(firstInfo, "first control connection should start a daemon");
@@ -84,7 +85,7 @@ describe("multiplexer integration daemon idle", function () {
     const second = context.createClient();
     await second.connect();
     const secondInfo = await waitFor(
-      () => context.discovery.getReusableDiscovery(),
+      () => getUsableDiscovery(context.discovery),
       3000,
     );
     assert.strictEqual(
@@ -104,7 +105,7 @@ describe("multiplexer integration daemon idle", function () {
     const third = context.createClient();
     await third.connect();
     const thirdInfo = await waitFor(
-      () => context.discovery.getReusableDiscovery(),
+      () => getUsableDiscovery(context.discovery),
       3000,
     );
     assert.strictEqual(

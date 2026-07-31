@@ -9,6 +9,7 @@ const {
   connectDriverWebSocket,
   connectRuntimeWebSocket,
   createIntegrationContext,
+  getUsableDiscovery,
   platformTimeout,
   processExists,
   waitFor,
@@ -90,7 +91,7 @@ describe("multiplexer integration legacy preemption", function () {
     );
 
     const daemonInfo = await waitFor(
-      () => context.discovery.getReusableDiscovery(),
+      () => getUsableDiscovery(context.discovery),
       3000
     );
     assert(processExists(daemonInfo.pid), "daemon should be alive");

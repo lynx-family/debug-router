@@ -7,6 +7,7 @@ const fs = require("fs");
 
 const {
   createIntegrationContext,
+  getUsableDiscovery,
   platformTimeout,
   processExists,
   waitFor,
@@ -66,7 +67,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
     );
 
     const initialInfo = await waitFor(
-      () => context.discovery.getReusableDiscovery(),
+      () => getUsableDiscovery(context.discovery),
       3000,
     );
     const pending = client.call("sendMessageWithReply", {
@@ -129,7 +130,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
 
     await client.reconnect();
     const nextInfo = await waitFor(
-      () => context.discovery.getReusableDiscovery(),
+      () => getUsableDiscovery(context.discovery),
       3000,
     );
     assert.notStrictEqual(nextInfo.pid, initialInfo.pid);
@@ -236,7 +237,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
     await connector.startWSServer();
 
     const initialInfo = await waitFor(
-      () => context.discovery.getReusableDiscovery(),
+      () => getUsableDiscovery(context.discovery),
       3000,
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
@@ -262,7 +263,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
     await waitFor(() => !processExists(initialInfo.pid), 3000);
 
     await waitFor(() => {
-      const nextInfo = context.discovery.getReusableDiscovery();
+      const nextInfo = getUsableDiscovery(context.discovery);
       return (
         nextInfo?.pid !== initialInfo.pid &&
         processExists(nextInfo.pid) &&
@@ -274,7 +275,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
     }, 5000);
 
     const nextInfo = await waitFor(() => {
-      const info = context.discovery.getReusableDiscovery();
+      const info = getUsableDiscovery(context.discovery);
       if (info?.pid && info.pid !== initialInfo.pid) {
         return info;
       }

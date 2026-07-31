@@ -9,6 +9,7 @@ const path = require("path");
 const {
   createIntegrationContext,
   delay,
+  getUsableDiscovery,
   platformTimeout,
   processExists,
   waitFor,
@@ -38,7 +39,7 @@ describe("multiplexer integration control WebSocket reliability", function () {
       3
     );
     const { connectors, observations, tracePath } = setup;
-    const initialInfo = await context.discovery.getReusableDiscovery();
+    const initialInfo = getUsableDiscovery(context.discovery);
     const stateOffsets = observations.map(({ states }) => states.length);
     const traceOffset = readTrace(tracePath).length;
     const daemonLogOffset = context.readLog().length;
@@ -127,7 +128,7 @@ describe("multiplexer integration control WebSocket reliability", function () {
       );
     }
     assert.strictEqual(
-      (await context.discovery.getReusableDiscovery()).pid,
+      getUsableDiscovery(context.discovery).pid,
       initialInfo.pid,
       "one Connector reconnect should not replace the shared Daemon"
     );
@@ -186,7 +187,7 @@ describe("multiplexer integration control WebSocket reliability", function () {
       3
     );
     const { connectors, observations, tracePath } = setup;
-    const initialInfo = await context.discovery.getReusableDiscovery();
+    const initialInfo = getUsableDiscovery(context.discovery);
     const roundMetrics = [];
 
     for (let targetIndex = 0; targetIndex < connectors.length; targetIndex++) {
@@ -333,7 +334,7 @@ describe("multiplexer integration control WebSocket reliability", function () {
     }
 
     assert.strictEqual(
-      (await context.discovery.getReusableDiscovery()).pid,
+      getUsableDiscovery(context.discovery).pid,
       initialInfo.pid,
       "round-robin Connector reconnects should reuse one Daemon"
     );
@@ -364,7 +365,7 @@ describe("multiplexer integration control WebSocket reliability", function () {
       true
     );
     const { connectors, observations, tracePath } = setup;
-    const initialInfo = await context.discovery.getReusableDiscovery();
+    const initialInfo = getUsableDiscovery(context.discovery);
     const stateOffsets = observations.map(({ states }) => states.length);
     const deviceDisconnected = connectors.map(() => []);
     const clientDisconnected = connectors.map(() => []);
@@ -407,7 +408,7 @@ describe("multiplexer integration control WebSocket reliability", function () {
       8000
     );
     const nextInfo = await waitFor(() => {
-      const info = context.discovery.getReusableDiscovery();
+      const info = getUsableDiscovery(context.discovery);
       return info?.pid !== initialInfo.pid ? info : null;
     }, 5000);
 

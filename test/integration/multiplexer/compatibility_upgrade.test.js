@@ -8,6 +8,7 @@ const {
   connectDriverWebSocket,
   createCustomizedEnvelope,
   createIntegrationContext,
+  getDiscoveryInfo,
   parseCustomizedEnvelope,
   platformTimeout,
   processExists,
@@ -215,7 +216,7 @@ describe("multiplexer integration compatibility upgrade", function () {
 
   async function currentDiscovery(expectedProtocolVersion) {
     return waitFor(() => {
-      const info = context.discovery.readDiscovery();
+      const info = getDiscoveryInfo(context.discovery);
       if (info?.protocolVersion === expectedProtocolVersion) {
         return info;
       }

@@ -98,31 +98,8 @@ export class MultiplexerDiscovery {
     this.now = option.now ?? Date.now;
   }
 
-  readDiscovery(): MultiplexerDiscoveryInfo | null {
-    const readResult = this.readDiscoveryFile();
-
-    if (
-      readResult.status === "loaded" &&
-      isMultiplexerDiscoveryInfo(readResult.value)
-    ) {
-      return readResult.value;
-    }
-
-    return null;
-  }
-
-  validateDiscovery(
-    info?: MultiplexerDiscoveryInfo | null,
-  ): MultiplexerDiscoveryValidation {
-    if (arguments.length === 0) {
-      return this.validateReadResult(this.readDiscoveryFile());
-    }
-
-    if (info === null || info === undefined) {
-      return { status: "unusable", reason: "missing" };
-    }
-
-    return this.validateValue(info);
+  validateDiscovery(): MultiplexerDiscoveryValidation {
+    return this.validateReadResult(this.readDiscoveryFile());
   }
 
   compareProtocolVersion(
@@ -164,16 +141,6 @@ export class MultiplexerDiscovery {
 
   isFresh(info: MultiplexerDiscoveryInfo): boolean {
     return this.now() - info.heartbeat <= this.staleTimeout;
-  }
-
-  getFreshDiscovery(): MultiplexerDiscoveryInfo | null {
-    const validation = this.validateDiscovery();
-    return validation.status === "usable" ? validation.info : null;
-  }
-
-  getReusableDiscovery(): MultiplexerDiscoveryInfo | null {
-    const validation = this.validateDiscovery();
-    return validation.status === "usable" ? validation.info : null;
   }
 
   private validateReadResult(

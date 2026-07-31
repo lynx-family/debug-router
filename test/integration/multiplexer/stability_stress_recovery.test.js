@@ -10,6 +10,7 @@ const {
   connectDriverWebSocket,
   createCustomizedEnvelope,
   createIntegrationContext,
+  getUsableDiscovery,
   parseCustomizedEnvelope,
   processExists,
   waitFor,
@@ -404,7 +405,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
       null,
     );
     const initialInfo = await waitFor(
-      () => context.discovery.getReusableDiscovery(),
+      () => getUsableDiscovery(context.discovery),
       3000,
     );
 
@@ -451,7 +452,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
       ["device-1"],
     );
     const replacementInfo = await waitFor(() => {
-      const info = context.discovery.getReusableDiscovery();
+      const info = getUsableDiscovery(context.discovery);
       if (
         info?.pid &&
         info.pid !== initialInfo.pid &&

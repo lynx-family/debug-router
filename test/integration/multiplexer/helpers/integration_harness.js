@@ -652,6 +652,15 @@ function assertSamePid(infos) {
   return pid;
 }
 
+function getDiscoveryInfo(discovery) {
+  return discovery.validateDiscovery().info ?? null;
+}
+
+function getUsableDiscovery(discovery) {
+  const validation = discovery.validateDiscovery();
+  return validation.status === "usable" ? validation.info : null;
+}
+
 module.exports = {
   DEFAULT_STATE,
   assertSamePid,
@@ -662,7 +671,9 @@ module.exports = {
   createCustomizedResponseEnvelope,
   createIntegrationContext,
   delay,
+  getDiscoveryInfo,
   getHealth,
+  getUsableDiscovery,
   parseCustomizedEnvelope,
   platformTimeout,
   processExists,
