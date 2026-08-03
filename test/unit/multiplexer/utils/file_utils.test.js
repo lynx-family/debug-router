@@ -27,7 +27,6 @@ const writeFileAtomicModulePath = require.resolve("write-file-atomic", {
 });
 const atomicFileModule = rewire(atomicFileModulePath);
 const {
-  readJsonFile,
   removeFileIfExists,
   writeFileAtomic,
   writeJsonAtomic,
@@ -80,17 +79,15 @@ describe("multiplexer atomic file utilities", function () {
     cleanupTempDir(tempDir);
   });
 
-  it("writes and reads JSON atomically", function () {
+  it("writes JSON atomically", function () {
     const filePath = path.join(tempDir, "nested", "daemon.json");
-
-    assert.strictEqual(readJsonFile(filePath), null);
 
     writeJsonAtomic(filePath, {
       pid: 1,
       protocolVersion: 1,
     });
 
-    assert.deepStrictEqual(readJsonFile(filePath), {
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(filePath, "utf8")), {
       pid: 1,
       protocolVersion: 1,
     });
@@ -465,7 +462,7 @@ describe("multiplexer FileLock", function () {
     assert.strictEqual(fs.existsSync(lockPath), false);
   });
 
-  it("clears local locked state when cleaning a stale lock it owns", function () {
+  it("keeps local state until release after cleaning a stale lock", function () {
     const now = Date.now();
     const lockPath = path.join(tempDir, "owned-stale.lock");
     const lock = new FileLock(lockPath);
@@ -478,11 +475,13 @@ describe("multiplexer FileLock", function () {
     });
 
     assert.strictEqual(lock.cleanupStale(1000, now), true);
-    assert.strictEqual(lock.isLocked(), false);
+    assert.strictEqual(lock.isLocked(), true);
     assert.strictEqual(fs.existsSync(lockPath), false);
+    lock.release();
+    assert.strictEqual(lock.isLocked(), false);
   });
 
-  it("try removes locks and clears local state as best effort", function () {
+  it("try removes locks without changing local ownership state", function () {
     const liveLockPath = path.join(tempDir, "try-live.lock");
     const localLockPath = path.join(tempDir, "try-local.lock");
 
@@ -490,20 +489,24 @@ describe("multiplexer FileLock", function () {
     assert.strictEqual(liveLock.acquire(), true);
     const liveOwner = liveLock.readOwner();
     assert.strictEqual(liveLock.tryRemove(liveOwner), true);
-    assert.strictEqual(liveLock.isLocked(), false);
+    assert.strictEqual(liveLock.isLocked(), true);
     assert.strictEqual(fs.existsSync(liveLockPath), false);
     assert.strictEqual(liveOwner.pid, process.pid);
     assert.strictEqual(typeof liveOwner.token, "string");
+    liveLock.release();
+    assert.strictEqual(liveLock.isLocked(), false);
 
     const localLock = new FileLock(localLockPath);
     assert.strictEqual(localLock.acquire(), true);
     assert.strictEqual(localLock.tryRemove(localLock.readOwner()), true);
-    assert.strictEqual(localLock.isLocked(), false);
+    assert.strictEqual(localLock.isLocked(), true);
     assert.strictEqual(fs.existsSync(localLockPath), false);
+    localLock.release();
+    assert.strictEqual(localLock.isLocked(), false);
 
     assert.strictEqual(
       new FileLock(path.join(tempDir, "try-missing.lock")).tryRemove(null),
-      false
+      true
     );
   });
 

@@ -94,7 +94,7 @@ function createDaemonManager(info = {}) {
           ...info,
         };
       },
-      async forceStopDaemon() {
+      async stopDaemonOnConnectorRequest() {
         state.forceStopCalls++;
       },
     },

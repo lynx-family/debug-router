@@ -228,7 +228,7 @@ export class MultiplexerDaemonClient {
   }
 
   async forceStopDaemon(): Promise<void> {
-    await this.daemonManager.forceStopDaemon();
+    await this.daemonManager.stopDaemonOnConnectorRequest();
   }
 
   async close(): Promise<void> {

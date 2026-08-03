@@ -102,45 +102,19 @@ export class MultiplexerDiscovery {
     return this.validateReadResult(this.readDiscoveryFile());
   }
 
-  compareProtocolVersion(
-    info: MultiplexerDiscoveryInfo,
-  ): MultiplexerProtocolCompatibility {
-    const daemonMinSupportedProtocolVersion =
-      info.minSupportedProtocolVersion ??
-      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
-
-    if (this.localProtocolVersion < daemonMinSupportedProtocolVersion) {
-      return {
-        status: "incompatible",
-        reason: "connector-older-than-daemon-min-supported",
-        daemonProtocolVersion: info.protocolVersion,
-        daemonMinSupportedProtocolVersion,
-        connectorProtocolVersion: this.localProtocolVersion,
-      };
+  private readDiscoveryFile(): DiscoveryReadResult {
+    if (!fs.existsSync(this.discoveryPath)) {
+      return { status: "missing" };
     }
 
-    if (info.protocolVersion < this.localProtocolVersion) {
+    try {
       return {
-        status: "replace-required",
-        reason: "daemon-older-than-connector",
-        daemonProtocolVersion: info.protocolVersion,
-        connectorProtocolVersion: this.localProtocolVersion,
+        status: "loaded",
+        value: JSON.parse(fs.readFileSync(this.discoveryPath, "utf8")),
       };
+    } catch (_error) {
+      return { status: "invalid-json" };
     }
-
-    return {
-      status: "compatible",
-      reason:
-        info.protocolVersion === this.localProtocolVersion
-          ? "same-version"
-          : "daemon-newer-compatible",
-      daemonProtocolVersion: info.protocolVersion,
-      connectorProtocolVersion: this.localProtocolVersion,
-    };
-  }
-
-  isFresh(info: MultiplexerDiscoveryInfo): boolean {
-    return this.now() - info.heartbeat <= this.staleTimeout;
   }
 
   private validateReadResult(
@@ -198,18 +172,44 @@ export class MultiplexerDiscovery {
     };
   }
 
-  private readDiscoveryFile(): DiscoveryReadResult {
-    if (!fs.existsSync(this.discoveryPath)) {
-      return { status: "missing" };
+  compareProtocolVersion(
+    info: MultiplexerDiscoveryInfo,
+  ): MultiplexerProtocolCompatibility {
+    const daemonMinSupportedProtocolVersion =
+      info.minSupportedProtocolVersion ??
+      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
+
+    if (this.localProtocolVersion < daemonMinSupportedProtocolVersion) {
+      return {
+        status: "incompatible",
+        reason: "connector-older-than-daemon-min-supported",
+        daemonProtocolVersion: info.protocolVersion,
+        daemonMinSupportedProtocolVersion,
+        connectorProtocolVersion: this.localProtocolVersion,
+      };
     }
 
-    try {
+    if (info.protocolVersion < this.localProtocolVersion) {
       return {
-        status: "loaded",
-        value: JSON.parse(fs.readFileSync(this.discoveryPath, "utf8")),
+        status: "replace-required",
+        reason: "daemon-older-than-connector",
+        daemonProtocolVersion: info.protocolVersion,
+        connectorProtocolVersion: this.localProtocolVersion,
       };
-    } catch (_error) {
-      return { status: "invalid-json" };
     }
+
+    return {
+      status: "compatible",
+      reason:
+        info.protocolVersion === this.localProtocolVersion
+          ? "same-version"
+          : "daemon-newer-compatible",
+      daemonProtocolVersion: info.protocolVersion,
+      connectorProtocolVersion: this.localProtocolVersion,
+    };
+  }
+
+  isFresh(info: MultiplexerDiscoveryInfo): boolean {
+    return this.now() - info.heartbeat <= this.staleTimeout;
   }
 }

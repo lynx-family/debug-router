@@ -68,7 +68,7 @@ export class FileLock {
     const removed = this.tryRemove(owner);
 
     // If the lock now belongs to another owner, this instance no longer owns it locally either.
-    if (!removed && !isSameOwner(this.readOwner(), owner)) {
+    if (removed || !isSameOwner(this.readOwner(), owner)) {
       this.clearLocalState();
     }
   }
@@ -106,7 +106,8 @@ export class FileLock {
   }
 
   isLockOwnerAlive(): boolean {
-    return isOwnerAlive(this.readOwner());
+    const owner = this.readOwner();
+    return owner ? isProcessAlive(owner.pid) : false;
   }
 
   private isLockStateStale(
@@ -119,7 +120,7 @@ export class FileLock {
     }
 
     if (owner) {
-      if (!isOwnerAlive(owner)) {
+      if (!isProcessAlive(owner.pid)) {
         return true;
       }
       return now - owner.createdAt > timeout;
@@ -146,8 +147,7 @@ export class FileLock {
   tryRemove(expectedOwner: FileLockOwner | null): boolean {
     try {
       if (!fs.existsSync(this.lockPath)) {
-        this.clearLocalState();
-        return false;
+        return true;
       }
 
       const owner = this.readOwner();
@@ -159,7 +159,6 @@ export class FileLock {
       // Best-effort removal: compare owners first to reduce the risk of
       // accidentally deleting a lock held by someone else.
       fs.rmSync(this.lockPath, { recursive: true, force: true });
-      this.clearLocalState();
       return true;
     } catch (_error) {
       return false;
@@ -225,10 +224,6 @@ function isSameOwner(
     left.createdAt === right.createdAt &&
     left.token === right.token
   );
-}
-
-function isOwnerAlive(owner: FileLockOwner | null): boolean {
-  return owner ? isProcessAlive(owner.pid) : false;
 }
 
 function isProcessAlive(pid: number): boolean {

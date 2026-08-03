@@ -196,7 +196,7 @@ describe("multiplexer integration daemon lifecycle", function () {
 
 async function stopDaemonForPlatform(context, info) {
   if (process.platform === "win32") {
-    await context.manager.stopDaemonForReplacement(info, "stale-daemon");
+    await context.manager.tryGracefullyStopDaemon(info, "stale-daemon");
     return;
   }
 

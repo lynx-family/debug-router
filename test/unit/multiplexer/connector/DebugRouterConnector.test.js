@@ -152,7 +152,7 @@ function loadConnectorWithFakes(config = {}) {
       state.managers.push(this);
     }
 
-    async forceStopDaemon() {
+    async stopDaemonOnConnectorRequest() {
       state.forceStopCalls++;
     }
   }
@@ -193,7 +193,7 @@ function loadConnectorWithFakes(config = {}) {
     }
 
     async forceStopDaemon() {
-      await this.option.daemonManager.forceStopDaemon();
+      await this.option.daemonManager.stopDaemonOnConnectorRequest();
     }
 
     subscribe(listener) {

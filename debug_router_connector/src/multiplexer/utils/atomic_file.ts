@@ -21,7 +21,7 @@ export type AtomicWriteJsonOptions = {
   space?: number;
 };
 
-// Using `write-file-atomic` write file on Windows can sometimes fail because 
+// Using `write-file-atomic` write file on Windows can sometimes fail because
 // the file is in use or cannot be replaced. Adding a limited retry for those
 // specific errors here should address these intermittent failures.
 
@@ -56,14 +56,6 @@ export function writeJsonAtomic(
   options: AtomicWriteJsonOptions = {},
 ): void {
   writeFileAtomic(filePath, JSON.stringify(value, null, options.space ?? 2));
-}
-
-export function readJsonFile<T = unknown>(filePath: string): T | null {
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
-
-  return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
 }
 
 export function removeFileIfExists(filePath: string): boolean {

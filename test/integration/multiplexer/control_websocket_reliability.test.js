@@ -817,7 +817,7 @@ describe("multiplexer integration control WebSocket reliability", function () {
 
   function stopDaemonFromDaemonSide(info) {
     if (process.platform === "win32") {
-      return context.manager.stopDaemonForReplacement(info, "stale-daemon");
+      return context.manager.tryGracefullyStopDaemon(info, "stale-daemon");
     }
     process.kill(info.pid, "SIGTERM");
     return Promise.resolve();

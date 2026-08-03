@@ -24,11 +24,10 @@ class HealthReadyManager extends MultiplexerDaemonManager {
   }
 }
 
-class CleanupReasonRecordingManager extends HealthReadyManager {
-  async cleanupDaemonBeforeSpawn(reason) {
-    this.cleanupReasons = this.cleanupReasons ?? [];
-    this.cleanupReasons.push(reason);
-    return super.cleanupDaemonBeforeSpawn(reason);
+class ForceStopRecordingManager extends HealthReadyManager {
+  async forceStopDaemon() {
+    this.forceStopCalls = (this.forceStopCalls ?? 0) + 1;
+    return super.forceStopDaemon();
   }
 }
 
@@ -284,7 +283,6 @@ describe("MultiplexerDaemonManager", function () {
         unusable("missing"),
         unusable("missing"),
         unusable("missing"),
-        unusable("missing"),
         usable(readyInfo),
       ]
     );
@@ -351,7 +349,6 @@ describe("MultiplexerDaemonManager", function () {
         unusable("missing"),
         unusable("missing"),
         unusable("missing"),
-        unusable("missing"),
         usable(readyInfo),
       ]
     );
@@ -411,11 +408,22 @@ describe("MultiplexerDaemonManager", function () {
         retryTime: 5000,
       },
     });
+    for (const omittedArgument of [
+      "--heartbeat-interval",
+      "--debug-info",
+      "--legacy-driver-dir",
+      "--multiplexer-daemon-idle-timeout",
+      "--enable-websocket",
+      "--websocket-port",
+      "--websocket-room-id",
+    ]) {
+      assert.strictEqual(args.includes(omittedArgument), false);
+    }
   });
 
   it("force-respawns a healthy daemon once with the local daemon entry and options", async function () {
     class ForceRespawnManager extends HealthReadyManager {
-      async requestDaemonYield(info, reason) {
+      async requestDaemonStop(info, reason) {
         this.yieldCalls = this.yieldCalls ?? [];
         this.yieldCalls.push({ info, reason });
         return true;
@@ -453,9 +461,9 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(manager.yieldCalls.length, 1);
   });
 
-  it("force-stops the daemon and removes discovery and daemon lock artifacts", async function () {
-    class ForceStopManager extends HealthReadyManager {
-      async requestDaemonYield(info, reason) {
+  it("stops the daemon on Connector request and removes daemon artifacts", async function () {
+    class ConnectorStopManager extends HealthReadyManager {
+      async requestDaemonStop(info, reason) {
         this.yieldCalls = this.yieldCalls ?? [];
         this.yieldCalls.push({ info, reason });
         return true;
@@ -469,13 +477,13 @@ describe("MultiplexerDaemonManager", function () {
     fs.mkdirSync(daemonLockPath);
     const discovery = createSequenceDiscovery(discoveryPath, [usable(oldInfo)]);
     const { manager, spawnRecorder } = createManager(tempDir, {
-      ManagerClass: ForceStopManager,
+      ManagerClass: ConnectorStopManager,
       discovery,
       daemonLockPath,
       isProcessAlive: (pid) => pid === oldInfo.pid,
     });
 
-    await manager.forceStopDaemon();
+    await manager.stopDaemonOnConnectorRequest();
 
     assert.deepStrictEqual(manager.yieldCalls, [
       {
@@ -562,7 +570,7 @@ describe("MultiplexerDaemonManager", function () {
 
   it("replaces an older daemon by forcing stop when yield is unavailable", async function () {
     class YieldUnavailableManager extends HealthReadyManager {
-      async requestDaemonYield() {
+      async requestDaemonStop() {
         return false;
       }
     }
@@ -605,9 +613,9 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(spawnRecorder.calls.length, 1);
   });
 
-  it("does not force kill when requestDaemonYield succeeds", async function () {
+  it("does not force kill when requestDaemonStop succeeds", async function () {
     class YieldingManager extends HealthReadyManager {
-      async requestDaemonYield() {
+      async requestDaemonStop() {
         return true;
       }
     }
@@ -635,7 +643,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(spawnRecorder.calls.length, 1);
   });
 
-  it("requestDaemonYield sends shutdown RPC through daemon client and waits for process exit only", async function () {
+  it("requestDaemonStop sends shutdown RPC through daemon client and waits for process exit only", async function () {
     const oldInfo = createInfo({ pid: 312, controlPort: 9012 });
     const discoveryPath = path.join(tempDir, "daemon.json");
     const daemonLockPath = path.join(tempDir, "daemon.lock");
@@ -665,7 +673,7 @@ describe("MultiplexerDaemonManager", function () {
     manager.setDaemonClient(daemonClient);
 
     assert.strictEqual(
-      await manager.requestDaemonYield(oldInfo, "stale-daemon"),
+      await manager.requestDaemonStop(oldInfo, "stale-daemon"),
       true
     );
     assert.deepStrictEqual(daemonClientCalls, [
@@ -679,9 +687,9 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(fs.existsSync(daemonLockPath), true);
   });
 
-  it("stopDaemonForReplacement cleans artifacts after graceful shutdown", async function () {
+  it("tryGracefullyStopDaemon cleans artifacts after graceful shutdown", async function () {
     class YieldingManager extends HealthReadyManager {
-      async requestDaemonYield() {
+      async requestDaemonStop() {
         return true;
       }
     }
@@ -1174,7 +1182,7 @@ describe("MultiplexerDaemonManager", function () {
   });
 
   it("does not reuse a fresh discovery when its daemon health check fails", async function () {
-    class FailingThenReadyHealthManager extends CleanupReasonRecordingManager {
+    class FailingThenReadyHealthManager extends ForceStopRecordingManager {
       async checkDaemonHealth(info) {
         if (info.pid === 301) {
           return { ok: true };
@@ -1252,19 +1260,117 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(spawnCalls[0].now, 1000);
     assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
     assert.strictEqual(spawnCalls[0].oldDaemonLockExists, false);
-    assert.deepStrictEqual(manager.cleanupReasons, ["unhealthy-daemon"]);
+    assert.strictEqual(manager.forceStopCalls, 1);
   });
 
-  it("reuses a healthy daemon that recovers before spawn cleanup", async function () {
+  it("reuses the same daemon when its health check recovers", async function () {
     class RecoveringHealthManager extends MultiplexerDaemonManager {
       async checkDaemonHealth(info) {
-        if (info.pid === 301) {
+        checkedPids.push(info.pid);
+        if (checkedPids.length > 1) {
           return { ok: true };
         }
         return { ok: false, reason: "connect ECONNREFUSED" };
       }
     }
 
+    const checkedPids = [];
+    const discoveryPath = path.join(tempDir, "daemon.json");
+    const oldInfo = createInfo({
+      pid: 200,
+      heartbeat: 1000,
+      startedAt: 1000,
+    });
+    const replacementInfo = createInfo({
+      pid: 301,
+      heartbeat: 1010,
+      startedAt: 1010,
+    });
+    const discovery = createSequenceDiscovery(discoveryPath, [
+      usable(oldInfo),
+      usable(replacementInfo),
+    ]);
+    const { manager, sleepCalls, spawnRecorder } = createManager(tempDir, {
+      ManagerClass: RecoveringHealthManager,
+      discovery,
+      startupTimeout: 30,
+      readyPollInterval: 10,
+      isProcessAlive: (pid) => pid === oldInfo.pid,
+    });
+
+    const info = await manager.ensureDaemon();
+
+    assert.strictEqual(info, oldInfo);
+    assert.deepStrictEqual(checkedPids, [oldInfo.pid, oldInfo.pid]);
+    assert.deepStrictEqual(sleepCalls, [10]);
+    assert.strictEqual(discovery.calls(), 1);
+    assert.deepStrictEqual(spawnRecorder.calls, []);
+  });
+
+  it("does not retry health recovery when the endpoint belongs to another pid", async function () {
+    const info = createInfo({ pid: 302 });
+    const healthServer = await startHealthServer((request, response) => {
+      writeHealthResponse(
+        response,
+        createHealthResponse(info, { pid: info.pid + 1 })
+      );
+    });
+    info.controlPort = healthServer.port;
+    const { manager, sleepCalls } = createManager(tempDir, {
+      ManagerClass: MultiplexerDaemonManager,
+      isProcessAlive: () => true,
+    });
+
+    try {
+      assert.strictEqual(await manager.waitForDaemonHealth(info), null);
+      assert.strictEqual(healthServer.requests.length, 1);
+      assert.deepStrictEqual(sleepCalls, []);
+    } finally {
+      await closeHealthServer(healthServer.server);
+    }
+  });
+
+  it("stops health recovery after the retry observes an exited daemon", async function () {
+    class FailingHealthManager extends MultiplexerDaemonManager {
+      async checkDaemonHealth() {
+        healthCheckCalls++;
+        return { ok: false, reason: "connect ECONNREFUSED" };
+      }
+    }
+
+    let healthCheckCalls = 0;
+    let processAlive = true;
+    const info = createInfo({ pid: 303 });
+    const { manager, sleepCalls } = createManager(tempDir, {
+      ManagerClass: FailingHealthManager,
+      isProcessAlive: () => processAlive,
+      sleep: async (duration) => {
+        sleepCalls.push(duration);
+        processAlive = false;
+      },
+    });
+
+    assert.strictEqual(await manager.waitForDaemonHealth(info), null);
+    assert.strictEqual(healthCheckCalls, 2);
+    assert.deepStrictEqual(sleepCalls, [10]);
+  });
+
+  it("retries replacement discovery health after retrying the original daemon", async function () {
+    class ReplacedHealthManager extends MultiplexerDaemonManager {
+      async checkDaemonHealth(info) {
+        checkedPids.push(info.pid);
+        if (info.pid === replacementInfo.pid) {
+          replacementHealthChecks++;
+          if (replacementHealthChecks > 1) {
+            return { ok: true };
+          }
+        }
+        return { ok: false, reason: "connect ECONNREFUSED" };
+      }
+    }
+
+    const checkedPids = [];
+    let replacementHealthChecks = 0;
     let now = 1000;
     const discoveryPath = path.join(tempDir, "daemon.json");
     const oldInfo = createInfo({
@@ -1272,23 +1378,23 @@ describe("MultiplexerDaemonManager", function () {
       heartbeat: now,
       startedAt: now,
     });
-    const readyInfo = createInfo({
+    const replacementInfo = createInfo({
       pid: 301,
       heartbeat: 1010,
       startedAt: 1010,
     });
     const discovery = createSequenceDiscovery(discoveryPath, [
       usable(oldInfo),
-      usable(oldInfo),
-      usable(readyInfo),
-      usable(readyInfo),
+      usable(replacementInfo),
     ]);
     const { manager, spawnRecorder } = createManager(tempDir, {
-      ManagerClass: RecoveringHealthManager,
+      ManagerClass: ReplacedHealthManager,
       discovery,
       startupTimeout: 30,
       readyPollInterval: 10,
       now: () => now,
+      isProcessAlive: (pid) =>
+        pid === oldInfo.pid || pid === replacementInfo.pid,
       sleep: async (duration) => {
         now += duration;
       },
@@ -1296,7 +1402,17 @@ describe("MultiplexerDaemonManager", function () {
 
     const info = await manager.ensureDaemon();
 
-    assert.strictEqual(info.pid, readyInfo.pid);
+    assert.strictEqual(info, replacementInfo);
+    assert.deepStrictEqual(checkedPids, [
+      oldInfo.pid,
+      oldInfo.pid,
+      oldInfo.pid,
+      oldInfo.pid,
+      replacementInfo.pid,
+      replacementInfo.pid,
+    ]);
+    assert.strictEqual(now, 1040);
+    assert.strictEqual(discovery.calls(), 2);
     assert.deepStrictEqual(spawnRecorder.calls, []);
   });
 
@@ -1383,7 +1499,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(info.pid, readyInfo.pid);
     assert.deepStrictEqual(killCalls, [[oldInfo.pid, "SIGTERM"]]);
     assert.strictEqual(spawnCalls.length, 1);
-    assert.strictEqual(spawnCalls[0].now, 1030);
+    assert.strictEqual(spawnCalls[0].now, 1060);
     assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
     assert.strictEqual(spawnCalls[0].oldDaemonLockExists, false);
   });
@@ -1412,7 +1528,7 @@ describe("MultiplexerDaemonManager", function () {
       now: () => now,
     });
     const { manager } = createManager(tempDir, {
-      ManagerClass: CleanupReasonRecordingManager,
+      ManagerClass: ForceStopRecordingManager,
       discovery,
       daemonLockPath,
       startupTimeout: 30,
@@ -1455,7 +1571,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(spawnCalls[0].now, 5000);
     assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
     assert.strictEqual(spawnCalls[0].oldDaemonLockExists, false);
-    assert.deepStrictEqual(manager.cleanupReasons, ["stale-daemon"]);
+    assert.strictEqual(manager.forceStopCalls, 1);
   });
 
   it("removes invalid discovery without daemon lock before spawning", async function () {
@@ -1475,7 +1591,7 @@ describe("MultiplexerDaemonManager", function () {
       now: () => now,
     });
     const { manager } = createManager(tempDir, {
-      ManagerClass: CleanupReasonRecordingManager,
+      ManagerClass: ForceStopRecordingManager,
       discovery,
       startupTimeout: 30,
       now: () => now,
@@ -1513,7 +1629,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(spawnCalls.length, 1);
     assert.strictEqual(spawnCalls[0].now, 5000);
     assert.strictEqual(spawnCalls[0].oldDiscoveryExists, false);
-    assert.deepStrictEqual(manager.cleanupReasons, ["invalid-discovery"]);
+    assert.strictEqual(manager.forceStopCalls, 1);
   });
 
   it("ignores ESRCH when force stopping an already exited daemon", async function () {
@@ -1538,7 +1654,7 @@ describe("MultiplexerDaemonManager", function () {
       },
     });
 
-    await manager.stopDaemonForReplacement(
+    await manager.tryGracefullyStopDaemon(
       createInfo({ pid: 404 }),
       "stale-daemon"
     );
@@ -1569,7 +1685,7 @@ describe("MultiplexerDaemonManager", function () {
       },
     });
 
-    await manager.stopDaemonForReplacement(
+    await manager.tryGracefullyStopDaemon(
       createInfo({ pid: 406 }),
       "stale-daemon"
     );
@@ -1599,7 +1715,7 @@ describe("MultiplexerDaemonManager", function () {
 
     await assert.rejects(
       () =>
-        manager.stopDaemonForReplacement(
+        manager.tryGracefullyStopDaemon(
           createInfo({ pid: 405 }),
           "stale-daemon"
         ),
