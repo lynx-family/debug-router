@@ -11,7 +11,6 @@ import {
   ControlRpcRequest,
   MULTIPLEXER_CONTROL_PATH,
   MULTIPLEXER_HEALTH_PATH,
-  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
   MultiplexerDebugInfo,
   MultiplexerHealthResponse,
@@ -37,7 +36,6 @@ export type MultiplexerControlServerOption = {
   healthPath?: string;
   controlPath?: string;
   protocolVersion?: number;
-  minSupportedProtocolVersion?: number;
   debugInfo?: MultiplexerDebugInfo;
 
   // only used for testing or embedding
@@ -145,10 +143,6 @@ export class MultiplexerControlServer {
       pid: process.pid,
       protocolVersion:
         this.option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
-      minSupportedProtocolVersion:
-        this.option.minSupportedProtocolVersion ??
-        MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
-      heartbeat: timestamp,
       ...(debugInfo ? { debugInfo } : {}),
     };
 

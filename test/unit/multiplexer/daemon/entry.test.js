@@ -537,7 +537,6 @@ describe("multiplexer daemon entry", function () {
         minSupportedProtocolVersion: 1,
         controlPort: 9123,
         heartbeat: readJson(discoveryPath).heartbeat,
-        startedAt: readJson(discoveryPath).startedAt,
         debugInfo: {
           protocolVersion: 1,
           daemonVersion: "0.0.5",

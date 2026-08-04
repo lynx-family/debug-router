@@ -89,14 +89,13 @@ function withoutDebugInfo(message) {
 }
 
 describe("MultiplexerControlServer", function () {
-  it("includes minSupportedProtocolVersion in health response", function () {
+  it("returns daemon identity in the health response", function () {
     const response = createResponseRecorder();
     const server = new MultiplexerControlServer({
       host: {
         handleControlRpc() {},
       },
       protocolVersion: 3,
-      minSupportedProtocolVersion: 2,
       debugInfo: {
         daemonVersion: "0.0.3",
       },
@@ -114,8 +113,6 @@ describe("MultiplexerControlServer", function () {
       ok: true,
       pid: process.pid,
       protocolVersion: 3,
-      minSupportedProtocolVersion: 2,
-      heartbeat: 1000,
       debugInfo: {
         protocolVersion: 3,
         daemonVersion: "0.0.3",
@@ -140,8 +137,6 @@ describe("MultiplexerControlServer", function () {
       ok: true,
       pid: process.pid,
       protocolVersion: 1,
-      minSupportedProtocolVersion: 1,
-      heartbeat: 2000,
     });
   });
 

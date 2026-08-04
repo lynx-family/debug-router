@@ -173,10 +173,9 @@ export function isMultiplexerDiscoveryInfo(
     isRecord(value) &&
     isNumber(value.pid) &&
     isNumber(value.protocolVersion) &&
-    isOptional(value.minSupportedProtocolVersion, isNumber) &&
+    isNumber(value.minSupportedProtocolVersion) &&
     isNumber(value.controlPort) &&
     isNumber(value.heartbeat) &&
-    isOptional(value.startedAt, isNumber) &&
     isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
 }
@@ -189,8 +188,6 @@ export function isMultiplexerHealthResponse(
     value.ok === true &&
     isNumber(value.pid) &&
     isNumber(value.protocolVersion) &&
-    isOptional(value.minSupportedProtocolVersion, isNumber) &&
-    isNumber(value.heartbeat) &&
     isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
 }

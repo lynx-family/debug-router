@@ -46,7 +46,6 @@ export class MultiplexerDaemon {
   private option: MultiplexerDaemonOption;
   private started = false;
   private hostStarted = false;
-  private startedAt: number | null = null;
   private readonly defaultNow = Date.now;
 
   constructor(option: MultiplexerDaemonOption) {
@@ -64,7 +63,6 @@ export class MultiplexerDaemon {
 
     try {
       await this.startHost();
-      this.startedAt = this.now();
       this.discoveryInfo = this.createDiscoveryInfo();
       this.writeDiscovery();
       this.startHeartbeatTimer();
@@ -89,7 +87,6 @@ export class MultiplexerDaemon {
     this.removeDiscovery();
     this.releaseDaemonLock();
     this.discoveryInfo = null;
-    this.startedAt = null;
     this.started = false;
 
     if (hostStopError) {
@@ -130,7 +127,6 @@ export class MultiplexerDaemon {
 
   createDiscoveryInfo(): MultiplexerDiscoveryInfo {
     const controlPort = this.resolveControlPort();
-    const startedAt = this.startedAt ?? this.now();
     const heartbeat = this.now();
     const debugInfo = this.createDebugInfo(heartbeat);
 
@@ -143,7 +139,6 @@ export class MultiplexerDaemon {
         MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
       controlPort,
       heartbeat,
-      startedAt,
       ...(debugInfo ? { debugInfo } : {}),
     };
   }

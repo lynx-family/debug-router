@@ -49,9 +49,9 @@ function createInfo(overrides = {}) {
   return {
     pid: 200,
     protocolVersion: 1,
+    minSupportedProtocolVersion: 1,
     controlPort: 9000,
     heartbeat: 1000,
-    startedAt: 900,
     ...overrides,
   };
 }
@@ -1115,7 +1115,6 @@ describe("MultiplexerDaemonManager", function () {
     const readyInfo = createInfo({
       pid: 302,
       heartbeat: now,
-      startedAt: now,
     });
     fs.writeFileSync(
       discoveryPath,
@@ -1161,7 +1160,6 @@ describe("MultiplexerDaemonManager", function () {
             JSON.stringify({
               ...readyInfo,
               heartbeat: now,
-              startedAt: now,
             })
           );
           return {
@@ -1197,12 +1195,10 @@ describe("MultiplexerDaemonManager", function () {
     const oldInfo = createInfo({
       pid: 200,
       heartbeat: now,
-      startedAt: now,
     });
     const readyInfo = createInfo({
       pid: 301,
       heartbeat: 1060,
-      startedAt: 1060,
     });
     const spawnCalls = [];
     fs.writeFileSync(discoveryPath, JSON.stringify(oldInfo));
@@ -1243,7 +1239,6 @@ describe("MultiplexerDaemonManager", function () {
             JSON.stringify({
               ...readyInfo,
               heartbeat: now,
-              startedAt: now,
             })
           );
           return {
@@ -1279,12 +1274,10 @@ describe("MultiplexerDaemonManager", function () {
     const oldInfo = createInfo({
       pid: 200,
       heartbeat: 1000,
-      startedAt: 1000,
     });
     const replacementInfo = createInfo({
       pid: 301,
       heartbeat: 1010,
-      startedAt: 1010,
     });
     const discovery = createSequenceDiscovery(discoveryPath, [
       usable(oldInfo),
@@ -1376,12 +1369,10 @@ describe("MultiplexerDaemonManager", function () {
     const oldInfo = createInfo({
       pid: 200,
       heartbeat: now,
-      startedAt: now,
     });
     const replacementInfo = createInfo({
       pid: 301,
       heartbeat: 1010,
-      startedAt: 1010,
     });
     const discovery = createSequenceDiscovery(discoveryPath, [
       usable(oldInfo),
@@ -1434,12 +1425,10 @@ describe("MultiplexerDaemonManager", function () {
     const oldInfo = createInfo({
       pid: 200,
       heartbeat: now,
-      startedAt: now,
     });
     const readyInfo = createInfo({
       pid: 301,
       heartbeat: 1010,
-      startedAt: 1010,
     });
     fs.writeFileSync(discoveryPath, JSON.stringify(oldInfo));
     fs.mkdirSync(daemonLockPath);
@@ -1484,7 +1473,6 @@ describe("MultiplexerDaemonManager", function () {
             JSON.stringify({
               ...readyInfo,
               heartbeat: now,
-              startedAt: now,
             })
           );
           return {
@@ -1511,7 +1499,6 @@ describe("MultiplexerDaemonManager", function () {
     const readyInfo = createInfo({
       pid: 301,
       heartbeat: now,
-      startedAt: now,
     });
     const spawnCalls = [];
     fs.writeFileSync(
@@ -1554,7 +1541,6 @@ describe("MultiplexerDaemonManager", function () {
             JSON.stringify({
               ...readyInfo,
               heartbeat: now,
-              startedAt: now,
             })
           );
           return {
@@ -1580,7 +1566,6 @@ describe("MultiplexerDaemonManager", function () {
     const readyInfo = createInfo({
       pid: 302,
       heartbeat: now,
-      startedAt: now,
     });
     const spawnCalls = [];
     fs.writeFileSync(discoveryPath, "{bad");
@@ -1613,7 +1598,6 @@ describe("MultiplexerDaemonManager", function () {
             JSON.stringify({
               ...readyInfo,
               heartbeat: now,
-              startedAt: now,
             })
           );
           return {

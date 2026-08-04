@@ -113,7 +113,6 @@ describe("MultiplexerDaemon", function () {
       minSupportedProtocolVersion: 1,
       controlPort: 9100,
       heartbeat: 1000,
-      startedAt: 1000,
       debugInfo: {
         protocolVersion: 1,
         daemonVersion: "0.0.1",
@@ -148,7 +147,6 @@ describe("MultiplexerDaemon", function () {
       minSupportedProtocolVersion: 1,
       controlPort: 9100,
       heartbeat: 1500,
-      startedAt: 1000,
       debugInfo: {
         protocolVersion: 1,
         daemonVersion: "0.0.1",
@@ -169,7 +167,6 @@ describe("MultiplexerDaemon", function () {
       minSupportedProtocolVersion: 1,
       controlPort: 9100,
       heartbeat: 1000,
-      startedAt: 1000,
     });
 
     now = 1500;
@@ -180,7 +177,6 @@ describe("MultiplexerDaemon", function () {
       minSupportedProtocolVersion: 1,
       controlPort: 9100,
       heartbeat: 1500,
-      startedAt: 1000,
     });
   });
 

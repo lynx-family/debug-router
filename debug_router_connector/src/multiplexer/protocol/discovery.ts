@@ -14,10 +14,9 @@ export const MULTIPLEXER_CONTROL_PATH = "/debug-router-multiplexer/control";
 export type MultiplexerDiscoveryInfo = {
   pid: number;
   protocolVersion: number;
-  minSupportedProtocolVersion?: number;
+  minSupportedProtocolVersion: number;
   controlPort: number;
   heartbeat: number;
-  startedAt?: number;
   debugInfo?: MultiplexerDebugInfo;
 };
 
@@ -25,7 +24,5 @@ export type MultiplexerHealthResponse = {
   ok: true;
   pid: number;
   protocolVersion: number;
-  minSupportedProtocolVersion?: number;
-  heartbeat: number;
   debugInfo?: MultiplexerDebugInfo;
 };

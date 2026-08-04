@@ -178,10 +178,9 @@ type MultiplexerDebugInfo = {
 type MultiplexerDiscoveryInfo = {
   pid: number;
   protocolVersion: number;
-  minSupportedProtocolVersion?: number;
+  minSupportedProtocolVersion: number;
   controlPort: number;
   heartbeat: number;
-  startedAt?: number;
   debugInfo?: MultiplexerDebugInfo;
 };
 ```
@@ -457,7 +456,7 @@ type MultiplexerDebugInfo = {
 
 Every field is optional and diagnostic only. `processId` identifies the process that generated the context, and `timestamp` is its Unix timestamp in milliseconds. Ordinary `DebugRouterConnector` construction does not configure this context, so normal protocol messages omit `debugInfo`; internal embedding and tests can opt in, after which producers add current process and timestamp information. Consumers must not use `debugInfo` for feature detection or compatibility decisions.
 
-The former `capabilities` field is removed. Actual compatibility arbitration uses the required top-level `protocolVersion` and optional `minSupportedProtocolVersion` in discovery and health. Version strings used only for troubleshooting remain inside `MultiplexerDebugInfo` rather than appearing as standalone protocol fields.
+The former `capabilities` field is removed. Actual compatibility arbitration uses the required top-level `protocolVersion` and `minSupportedProtocolVersion` in discovery. Health only confirms the daemon pid and protocol version published by discovery. Version strings used only for troubleshooting remain inside `MultiplexerDebugInfo` rather than appearing as standalone protocol fields.
 
 ### 8.5 Connection Trace Is Not a Control Protocol
 

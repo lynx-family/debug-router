@@ -298,7 +298,6 @@ export class MultiplexerHost
       host: this,
       controlPort: this.option.controlPort,
       protocolVersion: this.protocolVersion,
-      minSupportedProtocolVersion: this.minSupportedProtocolVersion,
       ...(this.option.debugInfo ? { debugInfo: this.option.debugInfo } : {}),
       now: this.now,
     });

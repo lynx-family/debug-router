@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 import AndroidDevice from "../device/android/AndroidDevice";
+import HarmonyDevice from "../device/Harmony/HarmonyDevice";
 import { BaseDevice } from "../device/BaseDevice";
 import LinuxDevice from "../device/desktop/LinuxDevice";
 import MacDevice from "../device/desktop/MacDevice";
@@ -44,6 +45,9 @@ function getDeviceType(device: BaseDevice): string {
   if (device instanceof iOSDevice) {
     return "iOS";
   }
+  if (device instanceof HarmonyDevice) {
+    return "Harmony";
+  }
   if (device instanceof MacDevice) {
     return "Mac";
   }
@@ -69,12 +73,12 @@ export function setClientTimeMap(client: UsbClient) {
 export function monitorUnregisterClient(client: UsbClient, retryTime: number) {
   const currentTime = new Date().getTime();
   const clientTime = clientTimeMap.get(client.clientId());
+  clientTimeMap.delete(client.clientId());
   if (clientTime && currentTime - clientTime < retryTime) {
     getDriverReportService()?.report("quick_lose_client", null, {
       curTime: currentTime,
       dur: currentTime - clientTime,
       client: JSON.stringify(client.info.query?.raw_info) ?? "unknown",
     });
-    clientTimeMap.delete(client.clientId());
   }
 }

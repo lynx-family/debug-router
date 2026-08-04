@@ -103,7 +103,9 @@ export class PhysicalConnector {
     this.enableAndroid = option.enableAndroid ?? true;
     this.adbOption = option.adbHostPort;
     this.enableIOS =
-      process.platform !== "darwin" ? false : option.enableIOS ?? true;
+      process.platform === "darwin" || process.platform === "win32"
+        ? option.enableIOS ?? true
+        : false;
     this.enableHarmony = option.enableHarmony ?? true;
     this.hdcOption = option.hdcHostPort;
     this.enableDesktop = option.enableDesktop ?? false;
@@ -147,7 +149,7 @@ export class PhysicalConnector {
       }
     }
   }
-  
+
   disableAllClients() {
     defaultLogger.info("disableAllClients");
     // close usb autoConnect
@@ -176,7 +178,10 @@ export class PhysicalConnector {
   }
 
   createClientId(): number {
-    if (this.nextClientId > 4294967294) this.nextClientId = 0;
+    if (this.nextClientId > 4294967294) {
+      defaultLogger.error("createClientId: clientId overflow...but how?"); // This should never happen in normal usage. There must be a bug.
+      return -1;
+    }
     return ++this.nextClientId;
   }
 
@@ -276,7 +281,7 @@ export class PhysicalConnector {
     );
     const existing = this.usbClients.get(client.clientId());
     if (existing) {
-      defaultLogger.debug("regiserUsbClient: has exist:" + client.clientId);
+      defaultLogger.debug("regiserUsbClient: has exist:" + client.clientId());
       return;
     }
     // register new client
@@ -437,12 +442,12 @@ export class PhysicalConnector {
     return new Promise((resolve) => {
       if (!this.devices.has(deviceId)) {
         resolve([]);
-        return; 
+        return;
       }
       const currentClients = this.findUsbClientsByDeviceId(deviceId);
       if (timeout < 0 || currentClients.length > 0) {
         resolve(currentClients);
-        return; 
+        return;
       }
 
       const handle = (client: UsbClient) => {
@@ -466,8 +471,9 @@ export class PhysicalConnector {
   }
 
   private findUsbClientsByDeviceId(deviceId: string): UsbClient[] {
-    return this.getAllUsbClients()
-      .filter((client) => client.deviceId() === deviceId);
+    return this.getAllUsbClients().filter(
+      (client) => client.deviceId() === deviceId,
+    );
   }
 
   closeClient(clientId: number): void {

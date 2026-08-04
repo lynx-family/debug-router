@@ -4,7 +4,6 @@
 
 import fs from "fs";
 import {
-  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
   MultiplexerDiscoveryInfo,
 } from "../protocol/discovery";
@@ -175,9 +174,7 @@ export class MultiplexerDiscovery {
   compareProtocolVersion(
     info: MultiplexerDiscoveryInfo,
   ): MultiplexerProtocolCompatibility {
-    const daemonMinSupportedProtocolVersion =
-      info.minSupportedProtocolVersion ??
-      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
+    const daemonMinSupportedProtocolVersion = info.minSupportedProtocolVersion;
 
     if (this.localProtocolVersion < daemonMinSupportedProtocolVersion) {
       return {

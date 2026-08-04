@@ -51,10 +51,6 @@ describe("multiplexer integration daemon lifecycle", function () {
     assert.strictEqual(health.body.pid, info.pid);
     assert.strictEqual(health.body.protocolVersion, info.protocolVersion);
     assert.strictEqual(
-      health.body.minSupportedProtocolVersion,
-      info.minSupportedProtocolVersion
-    );
-    assert.strictEqual(
       health.body.debugInfo.daemonVersion,
       "integration-test-daemon"
     );

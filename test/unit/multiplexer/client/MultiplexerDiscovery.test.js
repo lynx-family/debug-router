@@ -19,9 +19,9 @@ function createInfo(overrides = {}) {
   return {
     pid: 100,
     protocolVersion: 1,
+    minSupportedProtocolVersion: 1,
     controlPort: 9000,
     heartbeat: 1000,
-    startedAt: 900,
     debugInfo: {
       daemonVersion: "0.0.1",
       processId: 100,
@@ -108,6 +108,17 @@ describe("MultiplexerDiscovery", function () {
     assert.deepStrictEqual(discovery.validateDiscovery(), {
       status: "unusable",
       reason: "missing-protocol-version",
+    });
+  });
+
+  it("returns invalid-shape when minSupportedProtocolVersion is missing", function () {
+    const info = createInfo();
+    delete info.minSupportedProtocolVersion;
+    writeJson(discoveryPath, info);
+
+    assert.deepStrictEqual(discovery.validateDiscovery(), {
+      status: "unusable",
+      reason: "invalid-shape",
     });
   });
 
