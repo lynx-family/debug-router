@@ -1,4 +1,4 @@
-// Copyright 2024 The Lynx Authors. All rights reserved.
+// Copyright 2026 The Lynx Authors. All rights reserved.
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
@@ -102,6 +102,7 @@ export class PhysicalConnector {
     }
     this.enableAndroid = option.enableAndroid ?? true;
     this.adbOption = option.adbHostPort;
+    // add win32 support
     this.enableIOS =
       process.platform === "darwin" || process.platform === "win32"
         ? option.enableIOS ?? true
@@ -134,7 +135,7 @@ export class PhysicalConnector {
     if (this.enableDesktop) {
       this.devicesManager.add(new DesktopDeviceManager(this));
     }
-    if (this.enableNetworkDevice && this.networkDeviceOpt) {
+    if (this.enableNetworkDevice) {
       if (this.networkDeviceOpt) {
         // NetWorkDevices use ip as their serial.
         this.devicesManager.add(
@@ -150,6 +151,8 @@ export class PhysicalConnector {
     }
   }
 
+  // functions Migrated from DebugRouterConnector， not modified
+
   disableAllClients() {
     defaultLogger.info("disableAllClients");
     // close usb autoConnect
@@ -159,30 +162,6 @@ export class PhysicalConnector {
     this.getAllUsbClients().forEach((client) => {
       client.close();
     });
-  }
-
-  async startWatchClient(
-    device: BaseDevice,
-    shouldStart: () => boolean = () => true,
-  ): Promise<void> {
-    if (!shouldStart()) {
-      return;
-    }
-    if (device instanceof AndroidDevice) {
-      await (device as AndroidDevice).forwards();
-      if (!shouldStart()) {
-        return;
-      }
-    }
-    device.startWatchClient();
-  }
-
-  createClientId(): number {
-    if (this.nextClientId > 4294967294) {
-      defaultLogger.error("createClientId: clientId overflow...but how?"); // This should never happen in normal usage. There must be a bug.
-      return -1;
-    }
-    return ++this.nextClientId;
   }
 
   async connectDevices(
@@ -223,39 +202,6 @@ export class PhysicalConnector {
     this.events.off(event, callback);
   }
 
-  async close(): Promise<void> {
-    if (this.closed) {
-      return;
-    }
-    this.closed = true;
-    this.disableAllClients();
-  }
-
-  emit<Event extends keyof PhysicalConnectorEvent>(
-    event: Event,
-    payload: PhysicalConnectorEvent[Event],
-  ): void {
-    this.events.emit(event, payload);
-  }
-
-  registerDevice(device: BaseDevice) {
-    const { serial } = device.info;
-    const existing = this.devices.get(serial);
-    if (existing) {
-      defaultLogger.debug("registerDevice: has exists:" + device.serial);
-      return;
-    }
-    defaultLogger.debug("register new device:" + device.serial);
-    // register new device
-    this.devices.set(device.info.serial, device);
-    this.traceRecorder?.recordDeviceRegistered(device.info.serial, {
-      os: device.info.os,
-      title: device.info.title,
-    });
-    this.emit("device-connected", device);
-    setDeviceTimeMap(device);
-  }
-
   unregisterDevice(serial: string) {
     const device = this.devices.get(serial);
     if (!device) {
@@ -273,36 +219,6 @@ export class PhysicalConnector {
     device.disConnect(); // we'll only destroy upon replacement
     this.emit("device-disconnected", device);
     monitorUnregisterDevice(device, this.usbConnectOpt.retryTime);
-  }
-
-  regiserUsbClient(client: UsbClient) {
-    defaultLogger.debug(
-      "regiserUsbClient:" + " info:" + JSON.stringify(client.info),
-    );
-    const existing = this.usbClients.get(client.clientId());
-    if (existing) {
-      defaultLogger.debug("regiserUsbClient: has exist:" + client.clientId());
-      return;
-    }
-    // register new client
-    this.usbClients.set(client.clientId(), client);
-    this.emit("client-connected", client);
-    this.emit("app-client-connected", client);
-    setClientTimeMap(client);
-  }
-
-  unregiserUsbClient(id: number) {
-    const existing = this.usbClients.get(id);
-    if (!existing) {
-      defaultLogger.debug("unregiserUsbClient unknown id:" + id);
-      return;
-    }
-    defaultLogger.debug("unregiserUsbClient:" + JSON.stringify(existing.info));
-    // unregiser client
-    this.usbClients.delete(id);
-    this.emit("client-disconnected", id);
-    this.emit("app-client-disconnected", id);
-    monitorUnregisterClient(existing, this.usbConnectOpt.retryTime);
   }
 
   getDevices(
@@ -435,6 +351,104 @@ export class PhysicalConnector {
     return false;
   }
 
+  private setOptionByEnv() {
+    if (process.env.DriverEnableAndroid === "false") {
+      this.enableAndroid = false;
+      defaultLogger.warn("set DriverEnableAndroid === false");
+    }
+    if (process.env.DriverEnableIOS === "false") {
+      this.enableIOS = false;
+      defaultLogger.warn("set DriverEnableIOS === false");
+    }
+    if (process.env.DriverEnableDesktop === "false") {
+      this.enableDesktop = false;
+      defaultLogger.warn("set DriverEnableDesktop === false");
+    }
+  }
+
+  // ======================================
+
+  // functions change a little bit
+
+  createClientId(): number {
+    if (this.nextClientId > 4294967294) {
+      defaultLogger.error("createClientId: clientId overflow...but how?"); // This should never happen in normal usage. There must be a bug.
+      return -1;
+    }
+    return ++this.nextClientId;
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    // remove multiOpenMonitor part & wss part
+    this.disableAllClients();
+  }
+
+  regiserUsbClient(client: UsbClient) {
+    defaultLogger.debug(
+      "regiserUsbClient:" + " info:" + JSON.stringify(client.info),
+    );
+    const existing = this.usbClients.get(client.clientId());
+    if (existing) {
+      defaultLogger.debug("regiserUsbClient: has exist:" + client.clientId());
+      return;
+    }
+    // register new client
+    this.usbClients.set(client.clientId(), client);
+    this.emit("client-connected", client);
+    this.emit("app-client-connected", client);
+    // remove wss.sendClientList
+    setClientTimeMap(client);
+  }
+
+  unregiserUsbClient(id: number) {
+    // change a little bit
+    const existing = this.usbClients.get(id);
+    if (!existing) {
+      defaultLogger.debug("unregiserUsbClient unknown id:" + id);
+      return;
+    }
+    defaultLogger.debug("unregiserUsbClient:" + JSON.stringify(existing.info));
+    // remove selectedClient part, connector facade will handle it
+    // unregiser client
+    this.usbClients.delete(id);
+    this.emit("client-disconnected", id);
+    this.emit("app-client-disconnected", id);
+    // remove wss.sendClientList
+    monitorUnregisterClient(existing, this.usbConnectOpt.retryTime);
+  }
+
+  emit<Event extends keyof PhysicalConnectorEvent>(
+    event: Event,
+    payload: PhysicalConnectorEvent[Event],
+  ): void {
+    this.events.emit(event, payload);
+    // remove traceRecorder part, host will handle it
+  }
+
+  registerDevice(device: BaseDevice) {
+    const { serial } = device.info;
+    const existing = this.devices.get(serial);
+    if (existing) {
+      defaultLogger.debug("registerDevice: has exists:" + device.serial);
+      return;
+    }
+    defaultLogger.debug("register new device:" + device.serial);
+    // register new device
+    this.devices.set(device.info.serial, device);
+    this.traceRecorder?.recordDeviceRegistered(device.info.serial, {
+      os: device.info.os,
+      title: device.info.title,
+    });
+    // remove auto startWatchClient, host will handle it
+    this.emit("device-connected", device);
+    setDeviceTimeMap(device);
+  }
+
+  // clean up the execution order of this function
   waitDeviceUsbClients(
     deviceId: string,
     timeout: number = -1,
@@ -470,31 +484,37 @@ export class PhysicalConnector {
     });
   }
 
+  // this is a helper function, only used in waitDeviceUsbClients
   private findUsbClientsByDeviceId(deviceId: string): UsbClient[] {
     return this.getAllUsbClients().filter(
       (client) => client.deviceId() === deviceId,
     );
   }
 
+  // ======================================
+
+  // new helper function
+
+  async startWatchClient(
+    device: BaseDevice,
+    shouldStart: () => boolean = () => true,
+  ): Promise<void> {
+    if (!shouldStart()) {
+      return;
+    }
+    if (device instanceof AndroidDevice) {
+      await (device as AndroidDevice).forwards();
+      if (!shouldStart()) {
+        return;
+      }
+    }
+    device.startWatchClient();
+  }
+
   closeClient(clientId: number): void {
     const client = this.usbClients.get(clientId);
     if (client) {
       client.close();
-    }
-  }
-
-  private setOptionByEnv() {
-    if (process.env.DriverEnableAndroid === "false") {
-      this.enableAndroid = false;
-      defaultLogger.warn("set DriverEnableAndroid === false");
-    }
-    if (process.env.DriverEnableIOS === "false") {
-      this.enableIOS = false;
-      defaultLogger.warn("set DriverEnableIOS === false");
-    }
-    if (process.env.DriverEnableDesktop === "false") {
-      this.enableDesktop = false;
-      defaultLogger.warn("set DriverEnableDesktop === false");
     }
   }
 }
