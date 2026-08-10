@@ -2,24 +2,22 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { createServer, IncomingMessage, Server, ServerResponse } from "http";
-import { AddressInfo } from "net";
-import { Duplex } from "stream";
-import { WebSocket, WebSocketServer } from "ws";
+import fs from "fs";
+import path from "path";
+import { createServer, Server, Socket } from "net";
 import {
   ControlRpcError,
   ControlRpcRequest,
-  MULTIPLEXER_CONTROL_PATH,
-  MULTIPLEXER_HEALTH_PATH,
-  MULTIPLEXER_PROTOCOL_VERSION,
+  MultiplexerHandshakeErrorResponse,
   MultiplexerDebugInfo,
   MultiplexerHealthResponse,
+  MultiplexerRegisterResponse,
+  isMultiplexerHealthRequest,
+  isMultiplexerRegisterRequest,
 } from "../protocol";
 import { ControlEvent } from "../protocol/event";
+import { MultiplexerControlTransport } from "../transport/MultiplexerControlTransport";
 import { MultiplexerControlConnection } from "./MultiplexerControlConnection";
-
-export const DEFAULT_MULTIPLEXER_HEALTH_PATH = MULTIPLEXER_HEALTH_PATH;
-export const DEFAULT_MULTIPLEXER_CONTROL_PATH = MULTIPLEXER_CONTROL_PATH;
 
 export type MultiplexerControlHost = {
   handleControlRpc: (
@@ -32,10 +30,9 @@ export type MultiplexerControlHost = {
 
 export type MultiplexerControlServerOption = {
   host: MultiplexerControlHost;
-  controlPort?: number;
-  healthPath?: string;
-  controlPath?: string;
-  protocolVersion?: number;
+  controlEndpoint: string;
+  protocolVersion: number;
+  minSupportedProtocolVersion: number;
   debugInfo?: MultiplexerDebugInfo;
 
   // only used for testing or embedding
@@ -43,66 +40,43 @@ export type MultiplexerControlServerOption = {
 };
 
 export class MultiplexerControlServer {
-  readonly healthPath: string;
-  readonly controlPath: string;
+  readonly controlEndpoint: string;
   readonly connections: Map<number, MultiplexerControlConnection> = new Map();
 
   private readonly host: MultiplexerControlHost;
   private readonly option: MultiplexerControlServerOption;
   private readonly now: () => number;
+  private readonly provisionalTransports = new Set<MultiplexerControlTransport>();
   private server: Server | null = null;
-  private websocketServer: WebSocketServer | null = null;
-  private controlPortValue = 0;
   private nextControlId = 1;
 
   constructor(option: MultiplexerControlServerOption) {
     this.option = option;
     this.host = option.host;
-    this.healthPath = option.healthPath ?? DEFAULT_MULTIPLEXER_HEALTH_PATH;
-    this.controlPath = option.controlPath ?? DEFAULT_MULTIPLEXER_CONTROL_PATH;
-    this.controlPortValue = option.controlPort ?? 0;
+    this.controlEndpoint = option.controlEndpoint;
     this.now = option.now ?? Date.now;
   }
 
-  get controlPort(): number {
-    return this.controlPortValue;
-  }
-
-  async start(port: number = this.controlPortValue): Promise<void> {
+  async start(): Promise<void> {
     if (this.server) {
       return;
     }
 
-    const websocketServer = new WebSocketServer({ noServer: true });
-    const server = createServer((request, response) => {
-      if (this.matchesPath(request, this.healthPath)) {
-        this.handleHealth(request, response);
-        return;
-      }
+    if (process.platform !== "win32") {
+      fs.mkdirSync(path.dirname(this.controlEndpoint), { recursive: true });
+    }
 
-      this.writeJson(response, 404, {
-        ok: false,
-        error: "not-found",
-      });
-    });
-
-    server.on("upgrade", (request, socket, head) => {
-      this.handleUpgrade(request, socket, head);
-    });
-
+    const server = createServer((socket) => this.handleSocket(socket));
     this.server = server;
-    this.websocketServer = websocketServer;
 
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => {
         cleanup();
         this.server = null;
-        this.websocketServer = null;
         reject(error);
       };
       const onListening = () => {
         cleanup();
-        this.controlPortValue = this.resolveListeningPort(server);
         resolve();
       };
       const cleanup = () => {
@@ -112,63 +86,38 @@ export class MultiplexerControlServer {
 
       server.once("error", onError);
       server.once("listening", onListening);
-      server.listen(port, "127.0.0.1");
+      server.listen(this.controlEndpoint);
     });
   }
 
   async stop(): Promise<void> {
     const server = this.server;
-    const websocketServer = this.websocketServer;
-
     this.server = null;
-    this.websocketServer = null;
-    this.controlPortValue = this.option.controlPort ?? 0;
 
+    const closePromises: Promise<void>[] = [];
+    for (const transport of Array.from(this.provisionalTransports)) {
+      closePromises.push(transport.end());
+    }
+    this.provisionalTransports.clear();
     for (const connection of Array.from(this.connections.values())) {
-      connection.close();
+      closePromises.push(connection.close());
     }
     this.connections.clear();
 
-    await Promise.all([
-      closeWebSocketServer(websocketServer),
-      closeHttpServer(server),
-    ]);
-  }
-
-  handleHealth(_request: IncomingMessage, response: ServerResponse): void {
-    const timestamp = this.now();
-    const debugInfo = this.createDebugInfo(timestamp);
-    const payload: MultiplexerHealthResponse = {
-      ok: true,
-      pid: process.pid,
-      protocolVersion:
-        this.option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
-      ...(debugInfo ? { debugInfo } : {}),
-    };
-
-    this.writeJson(response, 200, payload);
-  }
-
-  handleUpgrade(
-    request: IncomingMessage,
-    socket: Duplex,
-    head: Buffer = Buffer.alloc(0),
-  ): void {
-    if (!this.websocketServer || !this.matchesPath(request, this.controlPath)) {
-      rejectUpgrade(socket, 404, "Not Found");
-      return;
+    await Promise.all([...closePromises, closeNetServer(server)]);
+    if (process.platform !== "win32") {
+      removeSocketFile(this.controlEndpoint);
     }
-
-    this.websocketServer.handleUpgrade(request, socket, head, (websocket) => {
-      this.registerConnection(websocket);
-    });
   }
 
-  registerConnection(socket: WebSocket): MultiplexerControlConnection {
+  registerConnection(
+    transport: MultiplexerControlTransport,
+  ): MultiplexerControlConnection {
+    this.provisionalTransports.delete(transport);
     const controlId = this.nextControlId++;
     const connection = new MultiplexerControlConnection({
       controlId,
-      socket,
+      transport,
       onMessage: (id, message) => this.dispatchRpc(id, message),
       onClose: (id) => this.unregisterConnection(id),
       ...(this.option.debugInfo
@@ -177,7 +126,6 @@ export class MultiplexerControlServer {
     });
 
     this.connections.set(controlId, connection);
-    void this.host.handleControlConnected?.(controlId);
     return connection;
   }
 
@@ -213,6 +161,70 @@ export class MultiplexerControlServer {
     this.connections.get(controlId)?.send(event);
   }
 
+  private handleSocket(socket: Socket): void {
+    const transport = new MultiplexerControlTransport(socket);
+    this.provisionalTransports.add(transport);
+    let receivedFirstMessage = false;
+
+    const unsubscribeMessage = transport.onMessage((message) => {
+      if (receivedFirstMessage) {
+        return;
+      }
+      receivedFirstMessage = true;
+      unsubscribeMessage();
+
+      if (isMultiplexerHealthRequest(message)) {
+        const debugInfo = this.createDebugInfo();
+        const response: MultiplexerHealthResponse = {
+          kind: "health-response",
+          ok: true,
+          protocolVersion: this.option.protocolVersion,
+          minSupportedProtocolVersion: this.option.minSupportedProtocolVersion,
+          ...(debugInfo ? { debugInfo } : {}),
+        };
+        transport.send(response);
+        void transport.end();
+        return;
+      }
+
+      if (isMultiplexerRegisterRequest(message)) {
+        const connection = this.registerConnection(transport);
+        const response: MultiplexerRegisterResponse = {
+          kind: "register-response",
+          ok: true,
+        };
+        try {
+          transport.send(response);
+        } catch (_error) {
+          void connection.close();
+          return;
+        }
+        void this.host.handleControlConnected?.(connection.controlId);
+        return;
+      }
+
+      const response: MultiplexerHandshakeErrorResponse = {
+        kind: "handshake-error-response",
+        error: {
+          code: "invalid-control-handshake",
+          message:
+            "First control message must be a valid health or register request",
+        },
+      };
+      if (transport.writable) {
+        transport.send(response);
+        void transport.end();
+      } else {
+        transport.destroy();
+      }
+    });
+
+    transport.onClose(() => {
+      unsubscribeMessage();
+      this.provisionalTransports.delete(transport);
+    });
+  }
+
   private createDebugInfo(
     timestamp: number = this.now(),
   ): MultiplexerDebugInfo | undefined {
@@ -222,43 +234,21 @@ export class MultiplexerControlServer {
 
     return {
       ...this.option.debugInfo,
-      protocolVersion:
-        this.option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
+      protocolVersion: this.option.protocolVersion,
       processId: process.pid,
       timestamp,
     };
-  }
-
-  private matchesPath(request: IncomingMessage, path: string): boolean {
-    const url = new URL(request.url ?? "/", "http://127.0.0.1");
-    return url.pathname === path;
-  }
-
-  private resolveListeningPort(server: Server): number {
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Failed to resolve multiplexer control server port");
-    }
-
-    return (address as AddressInfo).port;
-  }
-
-  private writeJson(
-    response: ServerResponse,
-    statusCode: number,
-    payload: unknown,
-  ): void {
-    response.statusCode = statusCode;
-    response.setHeader("content-type", "application/json; charset=utf-8");
-    response.end(JSON.stringify(payload));
   }
 }
 
 function createRpcError(error: unknown): ControlRpcError {
   if (isControlRpcError(error)) {
-    return error;
+    return {
+      code: error.code,
+      message: error.message,
+      ...(error.details !== undefined ? { details: error.details } : {}),
+    };
   }
-
   return {
     code: "control-rpc-failed",
     message:
@@ -275,49 +265,19 @@ function isControlRpcError(error: unknown): error is ControlRpcError {
   );
 }
 
-function rejectUpgrade(
-  socket: Duplex,
-  statusCode: number,
-  message: string,
-): void {
-  socket.write(
-    `HTTP/1.1 ${statusCode} ${message}\r\n` + "Connection: close\r\n" + "\r\n",
-  );
-  socket.destroy();
-}
-
-function closeHttpServer(server: Server | null): Promise<void> {
+function closeNetServer(server: Server | null): Promise<void> {
   if (!server || !server.listening) {
     return Promise.resolve();
   }
-
   return new Promise((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    });
+    server.close((error) => (error ? reject(error) : resolve()));
   });
 }
 
-function closeWebSocketServer(
-  websocketServer: WebSocketServer | null,
-): Promise<void> {
-  if (!websocketServer) {
-    return Promise.resolve();
+function removeSocketFile(endpoint: string): void {
+  try {
+    fs.rmSync(endpoint, { force: true });
+  } catch (_error) {
+    // Endpoint cleanup is best effort after the server has stopped.
   }
-
-  return new Promise((resolve, reject) => {
-    websocketServer.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    });
-  });
 }

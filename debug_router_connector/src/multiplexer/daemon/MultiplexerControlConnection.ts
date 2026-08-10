@@ -2,8 +2,6 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { WebSocket } from "ws";
-import type { RawData } from "ws";
 import {
   ControlRpcError,
   ControlRpcRequest,
@@ -15,14 +13,14 @@ import {
   isControlRpcRequest,
   isNumber,
   isRecord,
-  parseJsonValue,
 } from "../protocol/validation";
+import { MultiplexerControlTransport } from "../transport/MultiplexerControlTransport";
 
 const INVALID_MESSAGE_RPC_ID = -1;
 
 export type MultiplexerControlConnectionOption = {
   controlId: number;
-  socket: WebSocket;
+  transport: MultiplexerControlTransport;
   onMessage: (
     controlId: number,
     message: ControlRpcRequest,
@@ -33,7 +31,7 @@ export type MultiplexerControlConnectionOption = {
 
 export class MultiplexerControlConnection {
   readonly controlId: number;
-  readonly socket: WebSocket;
+  readonly transport: MultiplexerControlTransport;
   private readonly onMessage: (
     controlId: number,
     message: ControlRpcRequest,
@@ -42,17 +40,19 @@ export class MultiplexerControlConnection {
   private readonly createDebugInfo?: () => MultiplexerDebugInfo | undefined;
   private subscribedValue = true;
   private closedValue = false;
+  private unsubscribeMessage: (() => void) | undefined;
+  private unsubscribeClose: (() => void) | undefined;
 
   constructor(option: MultiplexerControlConnectionOption) {
     this.controlId = option.controlId;
-    this.socket = option.socket;
+    this.transport = option.transport;
     this.onMessage = option.onMessage;
     this.onClose = option.onClose;
     this.createDebugInfo = option.createDebugInfo;
-
-    this.socket.on("message", this.handleSocketMessage);
-    this.socket.on("close", this.handleClose);
-    this.socket.on("error", this.handleSocketError);
+    this.unsubscribeMessage = this.transport.onMessage(
+      this.handleTransportMessage,
+    );
+    this.unsubscribeClose = this.transport.onClose(this.handleClose);
   }
 
   get subscribed(): boolean {
@@ -64,18 +64,21 @@ export class MultiplexerControlConnection {
   }
 
   send(message: ControlEvent | ControlRpcResponse): void {
-    if (!this.canSend()) {
+    if (this.closed || !this.transport.writable) {
       return;
     }
-
     if (message.kind === "event" && !this.subscribed) {
       return;
     }
 
     const debugInfo = this.createDebugInfo?.();
-    this.socket.send(
-      JSON.stringify(debugInfo ? { ...message, debugInfo } : message),
-    );
+    try {
+      this.transport.send(debugInfo ? { ...message, debugInfo } : message);
+    } catch (error) {
+      this.transport.destroy(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
   }
 
   sendResponse(rpcId: number, result: unknown): void {
@@ -88,19 +91,13 @@ export class MultiplexerControlConnection {
   }
 
   sendError(rpcId: number, error: ControlRpcError): void {
-    this.send({
-      kind: "rpc-response",
-      id: rpcId,
-      ok: false,
-      error,
-    });
+    this.send({ kind: "rpc-response", id: rpcId, ok: false, error });
   }
 
   handleMessage(message: ControlRpcRequest): void {
     if (this.closed) {
       return;
     }
-
     try {
       const result = this.onMessage(this.controlId, message);
       if (result) {
@@ -121,77 +118,42 @@ export class MultiplexerControlConnection {
     this.subscribedValue = false;
   }
 
-  close(): void {
-    if (this.closed) {
-      return;
+  close(): Promise<void> {
+    if (!this.closedValue) {
+      this.handleClose();
     }
-
-    if (this.canCloseSocket()) {
-      this.socket.close();
-    }
-    this.handleClose();
+    return this.transport.end();
   }
 
   handleClose = (): void => {
     if (this.closedValue) {
       return;
     }
-
     this.closedValue = true;
-    this.socket.off("message", this.handleSocketMessage);
-    this.socket.off("close", this.handleClose);
-    this.socket.off("error", this.handleSocketError);
+    this.unsubscribeMessage?.();
+    this.unsubscribeClose?.();
+    this.unsubscribeMessage = undefined;
+    this.unsubscribeClose = undefined;
     this.onClose(this.controlId);
   };
 
-  private handleSocketError = (): void => {
-    this.close();
-  };
-
-  private handleSocketMessage = (data: RawData): void => {
+  private readonly handleTransportMessage = (value: unknown): void => {
     if (this.closed) {
       return;
     }
-
-    const messageText = rawDataToString(data);
-    const value = parseJsonValue(messageText);
-
     if (!isControlRpcRequest(value)) {
-      this.sendInvalidMessageError(value);
+      const rpcId =
+        isRecord(value) && isNumber(value.id)
+          ? value.id
+          : INVALID_MESSAGE_RPC_ID;
+      this.sendError(rpcId, {
+        code: "invalid-control-message",
+        message: "Invalid multiplexer control message",
+      });
       return;
     }
-
     this.handleMessage(value);
   };
-
-  private sendInvalidMessageError(value: unknown): void {
-    const rpcId =
-      isRecord(value) && isNumber(value.id)
-        ? value.id
-        : INVALID_MESSAGE_RPC_ID;
-
-    this.sendError(rpcId, {
-      code: "invalid-control-message",
-      message: "Invalid multiplexer control message",
-    });
-  }
-
-  private canSend(): boolean {
-    if (this.closed) {
-      return false;
-    }
-
-    const readyState = this.socket.readyState;
-    return readyState === WebSocket.OPEN;
-  }
-
-  private canCloseSocket(): boolean {
-    const readyState = this.socket.readyState;
-    return (
-      readyState === WebSocket.OPEN ||
-      readyState === WebSocket.CONNECTING
-    );
-  }
 }
 
 function createDispatchError(error: unknown): ControlRpcError {
@@ -202,20 +164,4 @@ function createDispatchError(error: unknown): ControlRpcError {
         ? error.message
         : "Failed to dispatch multiplexer control message",
   };
-}
-
-function rawDataToString(data: RawData): string {
-  if (typeof data === "string") {
-    return data;
-  }
-
-  if (Array.isArray(data)) {
-    return Buffer.concat(data).toString();
-  }
-
-  if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString();
-  }
-
-  return data.toString();
 }

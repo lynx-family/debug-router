@@ -58,19 +58,6 @@ export function writeJsonAtomic(
   writeFileAtomic(filePath, JSON.stringify(value, null, options.space ?? 2));
 }
 
-export function removeFileIfExists(filePath: string): boolean {
-  try {
-    fs.unlinkSync(filePath);
-    return true;
-  } catch (error: any) {
-    if (error?.code === "ENOENT") {
-      return false;
-    }
-
-    throw error;
-  }
-}
-
 function isRetriableAtomicWriteError(error: unknown): boolean {
   return (
     typeof error === "object" &&

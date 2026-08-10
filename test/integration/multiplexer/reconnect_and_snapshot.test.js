@@ -10,10 +10,9 @@ const {
   getUsableDiscovery,
   platformTimeout,
   processExists,
+  reconnectDaemonClient,
   waitFor,
 } = require("./helpers/integration_harness");
-
-const RECOVERY_STALE_TIMEOUT = 200;
 
 describe("multiplexer integration reconnect and snapshot", function () {
   this.timeout(platformTimeout(12000));
@@ -29,10 +28,8 @@ describe("multiplexer integration reconnect and snapshot", function () {
 
   it("rejects pending RPCs when the daemon dies and rebuilds snapshot after stale cleanup and respawn", async function () {
     context = createIntegrationContext("reconnect-snapshot", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
       replacementTimeout: 20,
-      staleTimeout: RECOVERY_STALE_TIMEOUT,
       state: {
         responseDelayMs: 1000,
         devices: [
@@ -58,17 +55,19 @@ describe("multiplexer integration reconnect and snapshot", function () {
     const client = context.createClient({ rpcTimeout: 2000 });
     await client.connect();
     assert.deepStrictEqual(
-      (await client.call("connectDevices", {
-        timeout: -1,
-        serial: null,
-        isAutoListenClients: true,
-      })).map((device) => device.serial),
-      ["device-old"],
+      (
+        await client.call("connectDevices", {
+          timeout: -1,
+          serial: null,
+          isAutoListenClients: true,
+        })
+      ).map((device) => device.serial),
+      ["device-old"]
     );
 
     const initialInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000,
+      3000
     );
     const pending = client.call("sendMessageWithReply", {
       clientId: 1,
@@ -91,14 +90,8 @@ describe("multiplexer integration reconnect and snapshot", function () {
     });
     process.kill(initialInfo.pid, "SIGKILL");
 
-    await assert.rejects(
-      pending,
-      /closed|socket|ECONNRESET|Multiplexer/i,
-    );
-    await waitFor(
-      () => !processExists(initialInfo.pid),
-      3000,
-    );
+    await assert.rejects(pending, /closed|socket|ECONNRESET|Multiplexer/i);
+    await waitFor(() => !processExists(initialInfo.pid), 3000);
 
     context.writeState({
       devices: [
@@ -128,26 +121,26 @@ describe("multiplexer integration reconnect and snapshot", function () {
       return !stat || Date.now() - stat.mtimeMs > 100;
     }, 3000);
 
-    await client.reconnect();
+    await reconnectDaemonClient(client);
     const nextInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000,
+      3000
     );
     assert.notStrictEqual(nextInfo.pid, initialInfo.pid);
     assert.strictEqual(
       processExists(initialInfo.pid),
       false,
-      "SIGKILLed daemon process should not remain alive after reconnect",
+      "SIGKILLed daemon process should not remain alive after reconnect"
     );
     assert.strictEqual(
       processExists(nextInfo.pid),
       true,
-      "new daemon process should be alive after reconnect",
+      "new daemon process should be alive after reconnect"
     );
     assert.strictEqual(
       fs.existsSync(context.paths.daemonLockPath),
       true,
-      "new daemon should recreate daemon.lock",
+      "new daemon should recreate daemon.lock"
     );
 
     const devices = await client.call("connectDevices", {
@@ -173,45 +166,38 @@ describe("multiplexer integration reconnect and snapshot", function () {
     ]);
     assert.deepStrictEqual(
       clients.map((runtime) => runtime.id),
-      [2],
+      [2]
     );
 
     const managers = Array.from({ length: 3 }, () =>
       context.createManager({
         readyPollInterval: 10,
-        staleTimeout: RECOVERY_STALE_TIMEOUT,
-      }),
+      })
     );
-    const infos = await Promise.all(
-      managers.map((manager) => manager.ensureDaemon()),
+    await Promise.all(managers.map((manager) => manager.ensureDaemon()));
+    assert.strictEqual(
+      getUsableDiscovery(context.discovery).pid,
+      nextInfo.pid,
+      "all recovery managers should reuse the single new daemon"
     );
-    for (const info of infos) {
-      assert.strictEqual(
-        info.pid,
-        nextInfo.pid,
-        "all recovery managers should reuse the single new daemon",
-      );
-    }
 
     const startedPids = new Set(
       context
         .readLog()
         .filter((entry) => entry.event === "daemon-started")
-        .map((entry) => entry.pid),
+        .map((entry) => entry.pid)
     );
     assert.deepStrictEqual(
       Array.from(startedPids).sort(),
       [initialInfo.pid, nextInfo.pid].sort(),
-      "only the killed daemon and one replacement daemon should have started",
+      "only the killed daemon and one replacement daemon should have started"
     );
   });
 
   it("clears connector websocket mirror on daemon loss and rebuilds it from desired state after respawn", async function () {
     context = createIntegrationContext("connector-wss-recovery", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
       replacementTimeout: 20,
-      staleTimeout: RECOVERY_STALE_TIMEOUT,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -226,7 +212,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
     const disconnectedDevices = [];
     const disconnectedClients = [];
     connector.on("device-disconnected", (device) =>
-      disconnectedDevices.push(device.serial),
+      disconnectedDevices.push(device.serial)
     );
     connector.on("client-disconnected", (id) => disconnectedClients.push(id));
 
@@ -238,7 +224,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
 
     const initialInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000,
+      3000
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
     assert.strictEqual(connector.webSocketServerStarted, true);
@@ -254,7 +240,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
         connector.webSocketServerStarted === false &&
         connector.devices.size === 0 &&
         connector.usbClients.size === 0,
-      3000,
+      3000
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
     assert.strictEqual(connector.desiredWatchAllClientsStarted, true);

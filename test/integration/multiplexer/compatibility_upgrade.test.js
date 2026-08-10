@@ -12,6 +12,7 @@ const {
   parseCustomizedEnvelope,
   platformTimeout,
   processExists,
+  reconnectDaemonClient,
   waitFor,
   waitForSocketMessage,
 } = require("./helpers/integration_harness");
@@ -30,10 +31,8 @@ describe("multiplexer integration compatibility upgrade", function () {
 
   it("replaces older daemons as newer connector protocol versions arrive and restores compatible frontends", async function () {
     context = createIntegrationContext("compat-staged-upgrade", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
       replacementTimeout: platformTimeout(50),
-      staleTimeout: platformTimeout(500),
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -57,7 +56,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     assert.strictEqual(daemonV2.debugInfo.daemonVersion, "connector-v2");
     await waitFor(() => !processExists(daemonV1.pid), 3000);
 
-    await v1.client.reconnect();
+    await reconnectDaemonClient(v1.client);
     assert.deepStrictEqual(await listDeviceSerials(v1.client), ["device-1"]);
     assert.deepStrictEqual(await listClientIds(v1.client), [1]);
     assert.deepStrictEqual(await listDeviceSerials(v2.client), ["device-1"]);
@@ -73,11 +72,11 @@ describe("multiplexer integration compatibility upgrade", function () {
     await waitFor(() => !processExists(daemonV2.pid), 3000);
 
     await assert.rejects(
-      () => v1.client.reconnect(),
-      /requires debug-router-connector protocol 2 or newer/i,
+      () => reconnectDaemonClient(v1.client),
+      /requires debug-router-connector protocol 2 or newer/i
     );
-    await v2.client.reconnect();
-    await v3.client.reconnect();
+    await reconnectDaemonClient(v2.client);
+    await reconnectDaemonClient(v3.client);
     assert.deepStrictEqual(await listDeviceSerials(v2.client), ["device-1"]);
     assert.deepStrictEqual(await listClientIds(v2.client), [1]);
     assert.deepStrictEqual(await listDeviceSerials(v3.client), ["device-1"]);
@@ -87,21 +86,19 @@ describe("multiplexer integration compatibility upgrade", function () {
     assert.deepStrictEqual(
       started,
       [daemonV1.pid, daemonV2.pid, daemonV3.pid],
-      "each protocol upgrade should start exactly one replacement daemon",
+      "each protocol upgrade should start exactly one replacement daemon"
     );
     assert.strictEqual(
       started.filter((pid) => processExists(pid)).length,
       1,
-      "only the newest daemon should remain alive",
+      "only the newest daemon should remain alive"
     );
   });
 
   it("recovers connector and WebSocket frontends after a daemon protocol upgrade", async function () {
     context = createIntegrationContext("compat-websocket-upgrade", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
       replacementTimeout: platformTimeout(50),
-      staleTimeout: platformTimeout(500),
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -131,7 +128,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     await oldWebSocketsClosed;
     await waitFor(() => !processExists(daemonV1.pid), 3000);
 
-    await v1.client.reconnect();
+    await reconnectDaemonClient(v1.client);
     assert.deepStrictEqual(await listDeviceSerials(v1.client), ["device-1"]);
     assert.deepStrictEqual(await listClientIds(v1.client), [1]);
 
@@ -145,10 +142,10 @@ describe("multiplexer integration compatibility upgrade", function () {
 
     const responses = [
       waitForSocketMessage(webC.socket, (value) =>
-        hasCustomizedMarker(value, "web-c-v2"),
+        hasCustomizedMarker(value, "web-c-v2")
       ),
       waitForSocketMessage(webD.socket, (value) =>
-        hasCustomizedMarker(value, "web-d-v2"),
+        hasCustomizedMarker(value, "web-d-v2")
       ),
     ];
     webC.socket.send(createCustomizedEnvelope(1, 7, "web-c-v2"));
@@ -156,11 +153,11 @@ describe("multiplexer integration compatibility upgrade", function () {
     const [responseC, responseD] = await Promise.all(responses);
     assert.deepStrictEqual(
       parseCustomizedEnvelope(responseC.text).cdp.result.params,
-      { marker: "web-c-v2" },
+      { marker: "web-c-v2" }
     );
     assert.deepStrictEqual(
       parseCustomizedEnvelope(responseD.text).cdp.result.params,
-      { marker: "web-d-v2" },
+      { marker: "web-d-v2" }
     );
   });
 
@@ -237,7 +234,9 @@ function webSocketUrl(port) {
 }
 
 function latestClientIds(messages) {
-  const clientLists = messages.filter((message) => message?.event === "ClientList");
+  const clientLists = messages.filter(
+    (message) => message?.event === "ClientList"
+  );
   if (clientLists.length === 0) {
     return [];
   }
@@ -251,9 +250,9 @@ async function waitForClientIds(frontends, expectedIds) {
   await waitFor(
     () =>
       frontends.every((frontend) =>
-        arraysEqual(latestClientIds(frontend.messages), expected),
+        arraysEqual(latestClientIds(frontend.messages), expected)
       ),
-    3000,
+    3000
   );
 }
 
@@ -269,8 +268,8 @@ function hasCustomizedMarker(value, marker) {
     return false;
   }
   return (
-    parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params?.marker ===
-    marker
+    parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
+      ?.marker === marker
   );
 }
 

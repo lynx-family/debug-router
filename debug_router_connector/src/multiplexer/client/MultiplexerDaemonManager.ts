@@ -3,34 +3,25 @@
 // LICENSE file in the root directory of this source tree.
 
 import { spawn as spawnChildProcess, SpawnOptions } from "child_process";
-import { get as httpGet } from "http";
+import fs from "fs";
 import { FileLock } from "../utils/FileLock";
-import { removeFileIfExists } from "../utils/atomic_file";
 import {
-  MULTIPLEXER_HEALTH_PATH,
   MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
-  MultiplexerDiscoveryInfo,
-} from "../protocol/discovery";
+} from "../protocol/control";
 import type { MultiplexerDebugInfo } from "../protocol/debuginfo";
 import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
 import type { ConnectionTraceOptions } from "../../trace/ConnectionTraceRecorder";
-import {
-  isMultiplexerHealthResponse,
-  parseJsonValue,
-} from "../protocol/validation";
 import {
   MultiplexerDiscovery,
   MultiplexerDiscoveryValidation,
 } from "./MultiplexerDiscovery";
 
 export const DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT = 5000;
-export const DEFAULT_MULTIPLEXER_READY_POLL_INTERVAL = 100;
+export const DEFAULT_MULTIPLEXER_READY_POLL_INTERVAL = 50;
 export const DEFAULT_MULTIPLEXER_REPLACEMENT_TIMEOUT = 1000;
-export const DEFAULT_MULTIPLEXER_HEALTH_CHECK_TIMEOUT = 500;
 const DEFAULT_MULTIPLEXER_SPAWN_LOCK_STALE_BUFFER = 1000;
-const MULTIPLEXER_HEALTH_RESPONSE_LIMIT = 4096;
-const MULTIPLEXER_HEALTH_RECOVERY_RETRY_COUNT = 3;
+const MULTIPLEXER_HEALTH_PROBE_RETRY_COUNT = 3;
 
 export type MultiplexerDaemonReplaceReason =
   | "daemon-protocol-older-than-connector"
@@ -48,8 +39,7 @@ export type MultiplexerDaemonSpawn = (
 ) => SpawnedDaemonProcess;
 
 type MultiplexerDaemonControlClient = {
-  callOnDiscovery(
-    info: MultiplexerDiscoveryInfo,
+  callOnDaemon(
     method: "shutdownDaemon",
     params: { reason?: string },
   ): Promise<unknown>;
@@ -58,24 +48,21 @@ type MultiplexerDaemonControlClient = {
 export type MultiplexerDaemonManagerOption = {
   // Required daemon lifecycle dependencies.
   discovery: MultiplexerDiscovery;
+  controlEndpoint: string;
   spawnLockPath: string;
   daemonLockPath: string;
   daemonEntry: string;
 
   // Optional manager tuning with constructor defaults.
   startupTimeout?: number;
-  staleTimeout?: number;
   localProtocolVersion?: number;
-  controlPort?: number;
   minSupportedProtocolVersion?: number;
   forceRespawnDaemon?: boolean;
   readyPollInterval?: number;
   replacementTimeout?: number;
-  healthCheckTimeout?: number;
 
   // Optional daemon startup arguments. Undefined omits the corresponding
   // argument so the daemon or Host can apply its own default behavior.
-  heartbeatInterval?: number;
   debugInfo?: MultiplexerDebugInfo;
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
@@ -97,14 +84,12 @@ export type MultiplexerDaemonManagerOption = {
 
 export class MultiplexerDaemonManager {
   readonly discovery: MultiplexerDiscovery;
+  readonly controlEndpoint: string;
   readonly spawnLock: FileLock;
   readonly daemonLock: FileLock;
   readonly daemonEntry: string;
   readonly startupTimeout: number;
-  readonly staleTimeout: number;
   readonly localProtocolVersion: number;
-  readonly controlPort: number;
-  readonly heartbeatInterval?: number;
   readonly minSupportedProtocolVersion: number;
   readonly debugInfo?: MultiplexerDebugInfo;
   readonly legacyDriverDir?: string;
@@ -116,9 +101,9 @@ export class MultiplexerDaemonManager {
     roomId?: string;
   };
   readonly physicalConnectorOption?: PhysicalConnectorOption;
+
   private readonly readyPollInterval: number;
   private readonly replacementTimeout: number;
-  private readonly healthCheckTimeout: number;
   private readonly spawnLockStaleTimeout: number;
   private readonly spawnProcess: MultiplexerDaemonSpawn;
   private readonly killProcess: (pid: number, signal: NodeJS.Signals) => void;
@@ -130,16 +115,14 @@ export class MultiplexerDaemonManager {
 
   constructor(option: MultiplexerDaemonManagerOption) {
     this.discovery = option.discovery;
+    this.controlEndpoint = option.controlEndpoint;
     this.spawnLock = new FileLock(option.spawnLockPath);
     this.daemonLock = new FileLock(option.daemonLockPath);
     this.daemonEntry = option.daemonEntry;
     this.startupTimeout =
       option.startupTimeout ?? DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT;
-    this.staleTimeout = option.staleTimeout ?? this.discovery.staleTimeout;
     this.localProtocolVersion =
       option.localProtocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION;
-    this.controlPort = option.controlPort ?? 0;
-    this.heartbeatInterval = option.heartbeatInterval;
     this.minSupportedProtocolVersion =
       option.minSupportedProtocolVersion ??
       MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
@@ -155,8 +138,6 @@ export class MultiplexerDaemonManager {
       option.readyPollInterval ?? DEFAULT_MULTIPLEXER_READY_POLL_INTERVAL;
     this.replacementTimeout =
       option.replacementTimeout ?? DEFAULT_MULTIPLEXER_REPLACEMENT_TIMEOUT;
-    this.healthCheckTimeout =
-      option.healthCheckTimeout ?? DEFAULT_MULTIPLEXER_HEALTH_CHECK_TIMEOUT;
     this.spawnLockStaleTimeout =
       this.startupTimeout +
       this.replacementTimeout +
@@ -178,9 +159,12 @@ export class MultiplexerDaemonManager {
     }
 
     try {
-      const validation = this.discovery.validateDiscovery();
-      if (validation.status === "usable") {
-        await this.tryGracefullyStopDaemon(validation.info, "force-stop");
+      const validation = await this.probeDaemonHealthWithRetry();
+      if (
+        validation.status === "usable" ||
+        validation.status === "replace-required"
+      ) {
+        await this.tryGracefullyStopDaemon("force-stop");
       } else {
         await this.forceStopDaemon();
       }
@@ -189,79 +173,88 @@ export class MultiplexerDaemonManager {
     }
   }
 
-  async ensureDaemon(): Promise<MultiplexerDiscoveryInfo> {
+  async ensureDaemon(): Promise<void> {
     if (this.forceRespawnDaemonPending) {
       return this.forceRespawnDaemon();
     }
-    return this.ensureDaemonFromDiscoveryValidation(
-      this.discovery.validateDiscovery(),
-    );
+
+    while (true) {
+      const validation = await this.probeDaemonHealthWithRetry();
+      if (await this.ensureDaemonFromDiscoveryValidation(validation)) return;
+      // If another connector process has spawned an unavailable or lower version Daemon, Retry to ensureDaemon again
+    }
   }
 
   async ensureDaemonFromDiscoveryValidation(
     validation: MultiplexerDiscoveryValidation,
-  ): Promise<MultiplexerDiscoveryInfo> {
+  ): Promise<boolean> {
     if (validation.status === "usable") {
-      const healthyInfo = await this.waitForDaemonHealth(validation.info);
-      if (healthyInfo) {
-        return healthyInfo;
-      }
-
-      return this.ensureDaemonWithSpawnLock(async () => {
-        await this.forceStopDaemon();
-      });
+      return true;
     }
-
     if (validation.status === "replace-required") {
       return this.ensureDaemonWithSpawnLock(async () => {
         await this.tryGracefullyStopDaemon(
-          validation.info,
           "daemon-protocol-older-than-connector",
         );
       });
     }
-
     if (isConnectorProtocolTooOld(validation)) {
       throw createConnectorUpgradeError(validation);
     }
-
     return this.ensureDaemonWithSpawnLock(async () => {
       await this.forceStopDaemon();
     });
+  }
+
+  private async ensureDaemonWithSpawnLock(
+    beforeSpawn: () => void | Promise<void>,
+  ): Promise<boolean> {
+    if (!this.acquireSpawnLock()) {
+      try {
+        await this.waitUntilReady(this.startupTimeout);
+        return true;
+      } catch (_error) {
+        return false;
+      }
+    }
+
+    try {
+      await beforeSpawn();
+      await this.spawnDaemon();
+      await this.waitUntilReady(this.startupTimeout);
+      return true;
+    } finally {
+      this.releaseSpawnLock();
+    }
   }
 
   async spawnDaemon(): Promise<void> {
     const child = this.spawnProcess(
       process.execPath,
       [this.daemonEntry, ...this.createDaemonEntryArgs()],
-      {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      },
+      { detached: true, stdio: "ignore", windowsHide: true },
     );
-
     child.unref();
   }
 
-  async waitUntilReady(timeout: number): Promise<MultiplexerDiscoveryInfo> {
+  async waitUntilReady(timeout: number): Promise<void> {
     const startedAt = this.now();
     let lastValidation: MultiplexerDiscoveryValidation | null = null;
     let lastHealthCheckFailure: string | null = null;
 
     while (this.now() - startedAt <= timeout) {
-      const validation = this.discovery.validateDiscovery();
+      const validation = await this.discovery.probeHealth();
       lastValidation = validation;
-
       if (validation.status === "usable") {
-        const healthCheck = await this.checkDaemonHealth(validation.info);
-        if (healthCheck.ok) {
-          return validation.info;
-        }
-
-        lastHealthCheckFailure = healthCheck.reason;
+        return;
       }
-
+      if (validation.status === "replace-required") {
+        throw createDaemonReplacementRequiredError(validation);
+      }
+      if (isConnectorProtocolTooOld(validation)) {
+        throw createConnectorUpgradeError(validation);
+      }
+      lastHealthCheckFailure = validation.error?.message ?? null;
       await this.sleepFor(this.readyPollInterval);
     }
 
@@ -274,67 +267,31 @@ export class MultiplexerDaemonManager {
     );
   }
 
-  acquireSpawnLock(): boolean {
-    this.spawnLock.cleanupStale(this.spawnLockStaleTimeout, this.now());
-    return this.spawnLock.acquire();
-  }
-
-  releaseSpawnLock(): void {
-    this.spawnLock.release();
-  }
-
   async tryGracefullyStopDaemon(
-    info: MultiplexerDiscoveryInfo,
     reason: MultiplexerDaemonReplaceReason,
   ): Promise<void> {
-    await this.stopDaemonProcessForCleanup(info, reason);
+    const owner = this.daemonLock.readOwner();
+    const requested = await this.sendDaemonShutdownRpc(reason);
+
+    if (owner && requested) {
+      await this.waitUntilProcessExits(owner.pid, this.replacementTimeout);
+    }
+    if (owner && this.isProcessAlive(owner.pid)) {
+      await this.forceStopDaemonProcess(owner.pid);
+    }
     this.removeDaemonArtifacts();
   }
 
-  private async stopDaemonProcessForCleanup(
-    info: MultiplexerDiscoveryInfo,
-    reason: MultiplexerDaemonReplaceReason,
-  ): Promise<void> {
-    const yielded = await this.requestDaemonStop(info, reason);
-    if (!yielded) {
-      await this.forceStopDaemonProcess(info.pid);
-    }
-  }
-
-  async requestDaemonStop(
-    info: MultiplexerDiscoveryInfo,
-    reason: MultiplexerDaemonReplaceReason,
-  ): Promise<boolean> {
-    const requested = await this.sendDaemonShutdownRpc(info, reason);
-    if (!requested) {
-      return false;
-    }
-
-    return this.waitUntilProcessExits(info.pid, this.replacementTimeout);
-  }
-
   private sendDaemonShutdownRpc(
-    info: MultiplexerDiscoveryInfo,
     reason: MultiplexerDaemonReplaceReason,
   ): Promise<boolean> {
-    if (
-      !Number.isInteger(info.controlPort) ||
-      info.controlPort <= 0 ||
-      info.controlPort > 65535
-    ) {
-      return Promise.resolve(false);
-    }
-
     if (!this.daemonClient) {
       return Promise.resolve(false);
     }
-
-    return this.daemonClient
-      .callOnDiscovery(info, "shutdownDaemon", { reason })
-      .then(
-        () => true,
-        () => false,
-      );
+    return this.daemonClient.callOnDaemon("shutdownDaemon", { reason }).then(
+      () => true,
+      () => false,
+    );
   }
 
   private async forceStopDaemonProcess(pid: number): Promise<void> {
@@ -352,30 +309,31 @@ export class MultiplexerDaemonManager {
       }
       await this.waitUntilProcessExits(pid, this.replacementTimeout);
     }
-
     if (!this.isProcessAlive(pid)) {
       return;
     }
-
     if (sigkillError && (sigkillError as any)?.code !== "ESRCH") {
-      throw sigkillError instanceof Error
-        ? sigkillError
-        : new Error(String(sigkillError));
+      throw asError(sigkillError);
     }
-
     if (sigtermError && (sigtermError as any)?.code !== "ESRCH") {
-      throw sigtermError instanceof Error
-        ? sigtermError
-        : new Error(String(sigtermError));
+      throw asError(sigtermError);
     }
     throw new Error(`Failed to stop multiplexer daemon ${pid}`);
+  }
+
+  private async forceStopDaemon(): Promise<void> {
+    const owner = this.daemonLock.readOwner();
+    if (owner && this.isProcessAlive(owner.pid)) {
+      await this.forceStopDaemonProcess(owner.pid);
+    }
+    this.removeDaemonArtifacts();
   }
 
   private tryKillProcess(pid: number, signal: NodeJS.Signals): unknown {
     try {
       this.killProcess(pid, signal);
       return null;
-    } catch (error: any) {
+    } catch (error) {
       return error;
     }
   }
@@ -385,39 +343,32 @@ export class MultiplexerDaemonManager {
     timeout: number,
   ): Promise<boolean> {
     const startedAt = this.now();
-
     while (this.now() - startedAt <= timeout) {
       if (!this.isProcessAlive(pid)) {
         return true;
       }
       await this.sleepFor(this.readyPollInterval);
     }
-
     return !this.isProcessAlive(pid);
   }
 
-  private async ensureDaemonWithSpawnLock(
-    beforeSpawn: () => void | Promise<void>,
-  ): Promise<MultiplexerDiscoveryInfo> {
-    if (!this.acquireSpawnLock()) {
-      return this.waitUntilReady(this.startupTimeout);
+  private async probeDaemonHealthWithRetry(): Promise<MultiplexerDiscoveryValidation> {
+    let validation = await this.discovery.probeHealth();
+
+    for (
+      let attempt = 0;
+      attempt < MULTIPLEXER_HEALTH_PROBE_RETRY_COUNT &&
+      isRetryableHealthProbeResult(validation);
+      attempt++
+    ) {
+      await this.sleepFor(this.readyPollInterval);
+      validation = await this.discovery.probeHealth();
     }
 
-    try {
-      const healthyInfoBeforeSpawn = await this.getHealthyDiscovery();
-      if (healthyInfoBeforeSpawn) {
-        return healthyInfoBeforeSpawn;
-      }
-
-      await beforeSpawn();
-      await this.spawnDaemon();
-      return this.waitUntilReady(this.startupTimeout);
-    } finally {
-      this.releaseSpawnLock();
-    }
+    return validation;
   }
 
-  private async forceRespawnDaemon(): Promise<MultiplexerDiscoveryInfo> {
+  private async forceRespawnDaemon(): Promise<void> {
     // forceRespawnDaemon is intended for testing only and does not support
     // concurrent use. Running multiple Connector facades with
     // forceRespawnDaemon enabled at the same time may lead to undefined
@@ -429,9 +380,12 @@ export class MultiplexerDaemonManager {
 
     try {
       this.forceRespawnDaemonPending = false;
-      const validation = this.discovery.validateDiscovery();
-      if (validation.status === "usable") {
-        await this.tryGracefullyStopDaemon(validation.info, "force-respawn");
+      const validation = await this.probeDaemonHealthWithRetry();
+      if (
+        validation.status === "usable" ||
+        validation.status === "replace-required"
+      ) {
+        await this.tryGracefullyStopDaemon("force-respawn");
       } else {
         await this.forceStopDaemon();
       }
@@ -442,103 +396,50 @@ export class MultiplexerDaemonManager {
     }
   }
 
-  private async getHealthyDiscovery(): Promise<MultiplexerDiscoveryInfo | null> {
-    const validation = this.discovery.validateDiscovery();
-    if (validation.status !== "usable") {
-      return null;
-    }
-
-    return this.waitForDaemonHealth(validation.info);
+  acquireSpawnLock(): boolean {
+    this.spawnLock.cleanupStale(this.spawnLockStaleTimeout, this.now());
+    return this.spawnLock.acquire();
   }
 
-  private async waitForDaemonHealth(
-    info: MultiplexerDiscoveryInfo,
-  ): Promise<MultiplexerDiscoveryInfo | null> {
-    let healthCheck = await this.checkDaemonHealth(info);
-    if (healthCheck.ok) {
-      return info;
-    }
-
-    for (
-      let attempt = 0;
-      attempt < MULTIPLEXER_HEALTH_RECOVERY_RETRY_COUNT;
-      attempt++
-    ) {
-      if (
-        !this.isProcessAlive(info.pid) ||
-        healthCheck.reason === "pid-mismatch" ||
-        healthCheck.reason === "protocol-version-mismatch" ||
-        healthCheck.reason.startsWith("invalid-control-port:")
-      ) {
-        break;
-      }
-
-      await this.sleepFor(this.readyPollInterval);
-      healthCheck = await this.checkDaemonHealth(info);
-      if (healthCheck.ok) {
-        return info;
-      }
-    }
-
-    return null;
-  }
-
-  private async forceStopDaemon(): Promise<void> {
-    const validation = this.discovery.validateDiscovery();
-    const info = "info" in validation ? validation.info ?? null : null;
-    let stoppedPid: number | null = null;
-
-    if (info && this.isProcessAlive(info.pid)) {
-      await this.forceStopDaemonProcess(info.pid);
-      stoppedPid = info.pid;
-    }
-
-    const owner = this.daemonLock.readOwner();
-    if (owner && this.isProcessAlive(owner.pid) && owner.pid !== stoppedPid) {
-      await this.forceStopDaemonProcess(owner.pid);
-    }
-
-    this.removeDaemonArtifacts();
+  releaseSpawnLock(): void {
+    this.spawnLock.release();
   }
 
   private removeDaemonArtifacts(): void {
     this.daemonLock.cleanup();
-    removeFileIfExists(this.discovery.discoveryPath);
+    if (process.platform !== "win32") {
+      try {
+        fs.rmSync(this.controlEndpoint, { force: true });
+      } catch (_error) {
+        // A stale Unix socket is best-effort cleanup after its owner is gone.
+      }
+    }
   }
 
   private createDaemonEntryArgs(): string[] {
     const args = [
-      "--discovery-path",
-      this.discovery.discoveryPath,
+      "--control-endpoint",
+      this.controlEndpoint,
       "--daemon-lock-path",
       this.daemonLock.lockPath,
       "--protocol-version",
       String(this.localProtocolVersion),
       "--min-supported-protocol-version",
       String(this.minSupportedProtocolVersion),
-      "--control-port",
-      String(this.controlPort),
     ];
-
-    if (this.heartbeatInterval !== undefined) {
-      args.push("--heartbeat-interval", String(this.heartbeatInterval));
-    }
 
     if (this.debugInfo) {
       args.push("--debug-info", JSON.stringify(this.debugInfo));
     }
-
     if (this.legacyDriverDir !== undefined) {
       args.push("--legacy-driver-dir", this.legacyDriverDir);
     }
-
     if (this.multiplexerDaemonIdleTimeout !== undefined) {
       args.push(
         "--multiplexer-daemon-idle-timeout",
         String(this.multiplexerDaemonIdleTimeout),
       );
     }
-
     if (this.enableWebSocket !== undefined) {
       args.push("--enable-websocket", String(this.enableWebSocket));
     }
@@ -550,118 +451,16 @@ export class MultiplexerDaemonManager {
     if (this.websocketOption?.roomId !== undefined) {
       args.push("--websocket-room-id", this.websocketOption.roomId);
     }
-
     if (this.connectionTrace !== undefined) {
       args.push("--connection-trace", JSON.stringify(this.connectionTrace));
     }
-
     if (this.physicalConnectorOption !== undefined) {
       args.push(
         "--physical-connector-option",
         JSON.stringify(this.physicalConnectorOption),
       );
     }
-
     return args;
-  }
-
-  private checkDaemonHealth(
-    info: MultiplexerDiscoveryInfo,
-  ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (
-      !Number.isInteger(info.controlPort) ||
-      info.controlPort <= 0 ||
-      info.controlPort > 65535
-    ) {
-      return Promise.resolve({
-        ok: false,
-        reason: `invalid-control-port:${info.controlPort}`,
-      });
-    }
-
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = (result: { ok: true } | { ok: false; reason: string }) => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        resolve(result);
-      };
-
-      const request = httpGet(
-        {
-          host: "127.0.0.1",
-          port: info.controlPort,
-          path: MULTIPLEXER_HEALTH_PATH,
-          timeout: this.healthCheckTimeout,
-          agent: false,
-        },
-        (response) => {
-          if (response.statusCode !== 200) {
-            response.resume();
-            finish({
-              ok: false,
-              reason: `status:${response.statusCode ?? "unknown"}`,
-            });
-            return;
-          }
-
-          response.setEncoding("utf8");
-          let body = "";
-          response.on("data", (chunk) => {
-            body += chunk;
-            if (body.length > MULTIPLEXER_HEALTH_RESPONSE_LIMIT) {
-              finish({
-                ok: false,
-                reason: "multiplexer health response is too large",
-              });
-              response.destroy();
-              request.destroy();
-            }
-          });
-          response.on("error", (error) => {
-            finish({ ok: false, reason: error.message });
-          });
-          response.on("end", () => {
-            const value = parseJsonValue(body);
-            if (!isMultiplexerHealthResponse(value)) {
-              finish({
-                ok: false,
-                reason: "invalid-health-response",
-              });
-              return;
-            }
-
-            if (value.pid !== info.pid) {
-              finish({
-                ok: false,
-                reason: "pid-mismatch",
-              });
-              return;
-            }
-
-            if (value.protocolVersion !== info.protocolVersion) {
-              finish({
-                ok: false,
-                reason: "protocol-version-mismatch",
-              });
-              return;
-            }
-
-            finish({ ok: true });
-          });
-        },
-      );
-
-      request.on("timeout", () => {
-        request.destroy(new Error("multiplexer health check timed out"));
-      });
-      request.on("error", (error) => {
-        finish({ ok: false, reason: error.message });
-      });
-    });
   }
 }
 
@@ -673,7 +472,6 @@ function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) {
     return false;
   }
-
   try {
     process.kill(pid, 0);
     return true;
@@ -686,22 +484,9 @@ function formatValidation(
   validation: MultiplexerDiscoveryValidation | null,
 ): string {
   if (!validation) {
-    return "no discovery validation result";
+    return "no health result";
   }
-
-  if (validation.status === "usable") {
-    return "usable";
-  }
-
-  if (validation.status === "replace-required") {
-    return `replace-required/${validation.compatibility.reason}`;
-  }
-
-  if (isConnectorProtocolTooOld(validation)) {
-    return `unusable/${validation.reason}`;
-  }
-
-  return `unusable/${validation.reason}`;
+  return `${validation.status}/${validation.reason}`;
 }
 
 function isConnectorProtocolTooOld(
@@ -712,8 +497,19 @@ function isConnectorProtocolTooOld(
 > {
   return (
     validation.status === "unusable" &&
-    validation.reason === "connector-protocol-too-old" &&
-    !!validation.compatibility
+    validation.reason === "connector-protocol-too-old"
+  );
+}
+
+function isRetryableHealthProbeResult(
+  validation: MultiplexerDiscoveryValidation,
+): boolean {
+  return (
+    validation.status === "unusable" &&
+    (validation.reason === "unreachable" ||
+      validation.reason === "timeout" ||
+      validation.reason === "invalid-frame" ||
+      validation.reason === "invalid-response")
   );
 }
 
@@ -723,12 +519,27 @@ function createConnectorUpgradeError(
     { status: "unusable"; reason: "connector-protocol-too-old" }
   >,
 ): Error {
-  const compatibility = validation.compatibility;
   return new Error(
     `Multiplexer daemon requires debug-router-connector protocol ` +
-      `${compatibility.daemonMinSupportedProtocolVersion} or newer, ` +
+      `${validation.daemonMinSupportedProtocolVersion} or newer, ` +
       `but current connector protocol is ` +
-      `${compatibility.connectorProtocolVersion}. Please upgrade ` +
+      `${validation.connectorProtocolVersion}. Please upgrade ` +
       `@lynx-js/debug-router-connector.`,
   );
+}
+
+function createDaemonReplacementRequiredError(
+  validation: Extract<
+    MultiplexerDiscoveryValidation,
+    { status: "replace-required" }
+  >,
+): Error {
+  return new Error(
+    `Multiplexer daemon protocol ${validation.daemonProtocolVersion} is older ` +
+      `than current connector protocol ${validation.connectorProtocolVersion}`,
+  );
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }

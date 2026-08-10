@@ -28,8 +28,6 @@ describe("multiplexer integration connection trace", function () {
 
   it("writes one daemon-owned trace file without connector trace APIs", async function () {
     context = createIntegrationContext("connection-trace", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       multiplexerDaemonIdleTimeout: TRACE_DAEMON_IDLE_TIMEOUT_MS,
     });
     const tracePath = path.join(context.rootDir, "connection-trace.ndjson");

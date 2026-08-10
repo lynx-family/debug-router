@@ -12,16 +12,16 @@ const {
   getUsableDiscovery,
   platformTimeout,
   processExists,
+  reconnectDaemonClient,
   waitFor,
 } = require("./helpers/integration_harness");
 
 const DISCONNECT_CALLBACK_LATENCY_BUDGET_MS = platformTimeout(1000);
 const RECONNECT_CALLBACK_LATENCY_BUDGET_MS = platformTimeout(3000);
-const RECOVERY_STALE_TIMEOUT_MS = 1000;
 const STRESS_CONNECTOR_COUNT = 20;
 const STRESS_CLOSES_PER_CONNECTOR_PER_DIRECTION = 5;
 
-describe("multiplexer integration control WebSocket reliability", function () {
+describe("multiplexer integration control net reliability", function () {
   this.timeout(platformTimeout(30000));
 
   let context;
@@ -48,8 +48,8 @@ describe("multiplexer integration control WebSocket reliability", function () {
 
     // The public Connector facade intentionally hides its control client. This
     // integration test reaches through that boundary only to initiate the
-    // exact Connector-side WebSocket reconnect whose callbacks are under test.
-    await connectors[0].daemonClient.reconnect();
+    // exact Connector-side net.Socket reconnect whose callbacks are under test.
+    await reconnectDaemonClient(connectors[0].daemonClient);
 
     await waitFor(
       () =>
@@ -633,7 +633,7 @@ describe("multiplexer integration control WebSocket reliability", function () {
         const stateOffset = observations[connectorIndex].states.length;
         const daemonLogOffset = context.readLog().length;
 
-        await connector.daemonClient.reconnect();
+        await reconnectDaemonClient(connector.daemonClient);
         const daemonCallbacks = await waitForDaemonControlCallbackPair(
           context,
           daemonLogOffset
@@ -761,10 +761,8 @@ describe("multiplexer integration control WebSocket reliability", function () {
     withClients = false
   ) {
     context = createIntegrationContext(name, {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
       replacementTimeout: 20,
-      staleTimeout: RECOVERY_STALE_TIMEOUT_MS,
       multiplexerDaemonIdleTimeout: 30000,
     });
     const tracePath = path.join(context.rootDir, "control-reliability.ndjson");
@@ -791,9 +789,12 @@ describe("multiplexer integration control WebSocket reliability", function () {
       } catch (error) {
         error.message += `; connector=${index}, daemonLog=${JSON.stringify(
           context.readLog()
-        )}, discovery=${
-          fs.existsSync(context.paths.discoveryPath)
-            ? fs.readFileSync(context.paths.discoveryPath, "utf8")
+        )}, daemonLock=${
+          fs.existsSync(context.paths.daemonLockPath)
+            ? fs.readFileSync(
+                path.join(context.paths.daemonLockPath, "owner.json"),
+                "utf8"
+              )
             : "missing"
         }`;
         throw error;
@@ -826,14 +827,20 @@ describe("multiplexer integration control WebSocket reliability", function () {
 
 function observeConnectionState(connector) {
   const states = [];
-  connector.daemonClient.subscribeConnectionState((state) => {
+  // Keep the production listener single-owner. This white-box test wraps the
+  // emission point only to record callback ordering and latency.
+  const emitConnectionState = connector.daemonClient.emitConnectionState.bind(
+    connector.daemonClient
+  );
+  connector.daemonClient.emitConnectionState = (state) => {
+    emitConnectionState(state);
     states.push({
       state: state.state,
       error: state.state === "disconnected" ? state.error.message : undefined,
       at: Date.now(),
       monotonicAtNs: monotonicNowNs(),
     });
-  });
+  };
   return { states };
 }
 

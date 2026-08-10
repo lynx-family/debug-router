@@ -358,7 +358,7 @@ Trace 配置是 daemon 启动级全局配置。真正首次启动 daemon 的 Con
 
 `startWSServer` RPC 在 daemon 内执行：
 
-1. 根据 `websocketOption.port` 或默认 `19783` 选择端口，使用 `detect-port` 避免冲突。
+1. 从旧版默认端口 `19783` 开始选择端口，使用 `detect-port` 避免冲突。公开的 `websocketOption.port` 字段仅保留调用形状，运行时忽略该值，与旧版 Connector 行为一致。
 2. 使用 `ip.address()` 生成 host，返回 `WebSocketServerInfo`。
 3. 创建 `WebSocketController`，监听 `/mdevices/page/android`。
 
@@ -682,7 +682,7 @@ Host 收到带有效 response id、但 route 表中没有匹配项的 runtime �
 | `multiplexerDataDir`           | Multiplexer 数据目录，优先级高于 root dir                   |
 | `multiplexerDaemonEntry`       | daemon entry js 路径，测试或特殊打包场景使用                |
 | `multiplexerLegacyDriverDir`   | 旧 `LatestDriverProcess` 所在目录                           |
-| `websocketOption.port`         | daemon WebSocket server 期望端口，默认 19783                |
+| `websocketOption.port`         | 保留旧版调用形状但运行时忽略；端口选择从 19783 开始          |
 | `websocketOption.roomId`       | WebSocket `RoomJoined` 返回的 room id                       |
 
 `MultiplexerHostOption.memoizedNotificationTtlMs` 控制 daemon 侧 pending/cache TTL，默认 1000ms。它是 Host 内部 option，用于嵌入场景和确定性测试，不是通过 daemon 启动链路传递的公开 `DebugRouterConnectorOption`。

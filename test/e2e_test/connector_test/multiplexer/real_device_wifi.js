@@ -11,6 +11,9 @@ const path = require("path");
 const { WebSocket } = require("ws");
 
 const { DebugRouterConnector } = require("@lynx-js/debug-router-connector");
+const {
+  createMultiplexerPaths,
+} = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
 
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
@@ -308,10 +311,7 @@ async function runProxyRoundTripCase(args, serial) {
     );
     logStep(`proxy-cdp-roundtrip response=${JSON.stringify(cdpResponse)}`);
     assert.strictEqual(cdpResponse.result?.ok, true);
-    assert.strictEqual(
-      cdpResponse.result?.method,
-      DEFAULT_CDP_MESSAGE_METHOD
-    );
+    assert.strictEqual(cdpResponse.result?.method, DEFAULT_CDP_MESSAGE_METHOD);
     assert.strictEqual(cdpResponse.result?.params?.marker, cdpMarker);
   });
 }
@@ -395,12 +395,12 @@ async function withConnectedRuntime(name, args, serial, run) {
 
 function createContext(name, args) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-real-wifi-android-${name}-`)
+    path.join(getIpcTestTempDir(), `debug-router-real-wifi-android-${name}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
-  const dataDir = path.join(rootDir, "multiplexer");
-  const discoveryPath = path.join(dataDir, "daemon.json");
+  const paths = createMultiplexerPaths({ rootDir });
+  const dataDir = paths.dataDir;
   const originalHome = process.env.HOME;
   const hadHome = Object.prototype.hasOwnProperty.call(process.env, "HOME");
   const connectors = [];
@@ -431,7 +431,6 @@ function createContext(name, args) {
         multiplexerLegacyDriverDir: legacyDriverDir,
         multiplexerDaemonEntry: fakeDaemonEntry,
         multiplexerStartupTimeout: 8000,
-        multiplexerStaleTimeout: 1000,
         multiplexerRpcTimeout: args.timeout,
         multiplexerDaemonIdleTimeout: args.multiplexerDaemonIdleTimeout,
       });
@@ -454,7 +453,7 @@ function createContext(name, args) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(discoveryPath);
+        await stopDaemon(paths.daemonLockPath);
         if (process.env.DEBUG_ROUTER_KEEP_E2E_TMP === "1") {
           logStep(`preserving temporary files at ${rootDir}`);
         } else {
@@ -469,6 +468,10 @@ function createContext(name, args) {
       }
     },
   };
+}
+
+function getIpcTestTempDir() {
+  return process.platform === "win32" ? os.tmpdir() : "/tmp";
 }
 
 function getMobileWebSocketUrl(connector) {
@@ -817,23 +820,23 @@ function execFile(command, args, timeout) {
   });
 }
 
-async function stopDaemon(discoveryPath) {
-  const discovery = readJsonFile(discoveryPath, null);
-  if (!discovery?.pid) {
+async function stopDaemon(daemonLockPath) {
+  const owner = readJsonFile(path.join(daemonLockPath, "owner.json"), null);
+  if (!owner?.pid) {
     return;
   }
   try {
-    process.kill(discovery.pid, "SIGTERM");
+    process.kill(owner.pid, "SIGTERM");
   } catch (_error) {
     return;
   }
   await waitFor(
-    () => !processExists(discovery.pid),
+    () => !processExists(owner.pid),
     1500,
     "real WiFi daemon termination"
   ).catch(() => {
     try {
-      process.kill(discovery.pid, "SIGKILL");
+      process.kill(owner.pid, "SIGKILL");
     } catch (_error) {}
   });
 }

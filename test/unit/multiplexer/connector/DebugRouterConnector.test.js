@@ -20,7 +20,9 @@ const connectorPath = require.resolve(
 const connectorIndexPath = require.resolve(
   "../../../../debug_router_connector/dist/cjs/src/connector"
 );
-const rootIndexPath = require.resolve("../../../../debug_router_connector/dist/cjs/src");
+const rootIndexPath = require.resolve(
+  "../../../../debug_router_connector/dist/cjs/src"
+);
 
 const {
   defaultLogger,
@@ -205,9 +207,7 @@ function loadConnectorWithFakes(config = {}) {
         }
         active = false;
         state.unsubscribeCalls++;
-        if (this.listener === listener) {
-          this.listener = undefined;
-        }
+        this.listener = undefined;
       };
     }
 
@@ -220,9 +220,7 @@ function loadConnectorWithFakes(config = {}) {
         }
         active = false;
         state.unsubscribeConnectionCalls++;
-        if (this.connectionListener === listener) {
-          this.connectionListener = undefined;
-        }
+        this.connectionListener = undefined;
       };
     }
 
@@ -283,9 +281,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
         multiplexerDataDir: "/tmp/mux-data",
         multiplexerDaemonEntry: "/tmp/entry.js",
         multiplexerLegacyDriverDir: "/tmp/legacy-driver",
-        multiplexerStaleTimeout: 222,
         multiplexerStartupTimeout: 333,
-        multiplexerHeartbeatInterval: 25,
         multiplexerDaemonIdleTimeout: 444,
         multiplexerRpcTimeout: 555,
         forceRespawnDaemon: true,
@@ -306,13 +302,12 @@ describe("DebugRouterConnector multiplexer facade", function () {
       });
 
       assert.strictEqual(connector.enableWebSocket, false);
-      assert.strictEqual(connector.wssPort, 7777);
+      assert.strictEqual(connector.wssPort, 19783);
       assert.strictEqual(connector.roomId, "room-1");
       assert.strictEqual(state.discoveries.length, 1);
-      assert.strictEqual(state.discoveries[0].option.staleTimeout, 222);
       assert.strictEqual(
-        state.discoveries[0].option.discoveryPath,
-        path.join("/tmp/mux-data", "daemon.json")
+        state.discoveries[0].option.controlEndpoint,
+        path.join("/tmp/mux-data", "control.sock")
       );
       assert.strictEqual(state.managers.length, 1);
       assert.strictEqual(
@@ -321,8 +316,10 @@ describe("DebugRouterConnector multiplexer facade", function () {
       );
       assert.strictEqual(state.managers[0].option.daemonEntry, "/tmp/entry.js");
       assert.strictEqual(state.managers[0].option.startupTimeout, 333);
-      assert.strictEqual(state.managers[0].option.staleTimeout, 222);
-      assert.strictEqual(state.managers[0].option.heartbeatInterval, 25);
+      assert.strictEqual(
+        state.managers[0].option.controlEndpoint,
+        path.join("/tmp/mux-data", "control.sock")
+      );
       assert.strictEqual(
         state.managers[0].option.legacyDriverDir,
         "/tmp/legacy-driver"
@@ -368,17 +365,13 @@ describe("DebugRouterConnector multiplexer facade", function () {
           port: [9100],
         }
       );
-      assert.deepStrictEqual(
-        state.managers[0].option.connectionTrace,
-        {
-          enabled: true,
-          output: path.resolve("relative-trace.ndjson"),
-          bufferSize: 200,
-        }
-      );
+      assert.deepStrictEqual(state.managers[0].option.connectionTrace, {
+        enabled: true,
+        output: path.resolve("relative-trace.ndjson"),
+        bufferSize: 200,
+      });
       assert.strictEqual(
-        "connectionTrace" in
-          state.managers[0].option.physicalConnectorOption,
+        "connectionTrace" in state.managers[0].option.physicalConnectorOption,
         false
       );
       assert.strictEqual(
@@ -972,10 +965,11 @@ describe("DebugRouterConnector multiplexer facade", function () {
       });
       assert.strictEqual(connector.getConnectionTrace, undefined);
       assert.strictEqual(connector.onConnectionTrace, undefined);
-      assert.deepStrictEqual(
-        state.managers[0].option.connectionTrace,
-        { enabled: true, bufferSize: 100, output: undefined }
-      );
+      assert.deepStrictEqual(state.managers[0].option.connectionTrace, {
+        enabled: true,
+        bufferSize: 100,
+        output: undefined,
+      });
       assert.strictEqual(
         warnings.some((message) => message.includes("WritableStream")),
         true
@@ -1102,7 +1096,8 @@ describe("DebugRouterConnector multiplexer facade", function () {
         state.clients[0].calls
           .filter(
             (call) =>
-              call.method === "sendMessageWithoutReply" && call.params.target === "app"
+              call.method === "sendMessageWithoutReply" &&
+              call.params.target === "app"
           )
           .map((call) => JSON.parse(call.params.message).data.data.client_id),
         [-1, 0]

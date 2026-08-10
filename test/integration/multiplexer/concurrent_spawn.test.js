@@ -6,9 +6,10 @@ const assert = require("assert");
 const fs = require("fs");
 
 const {
-  assertSamePid,
   createIntegrationContext,
+  getUsableDiscovery,
   platformTimeout,
+  waitFor,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration concurrent spawn", function () {
@@ -25,58 +26,57 @@ describe("multiplexer integration concurrent spawn", function () {
 
   it("serializes concurrent ensureDaemon calls so only one detached daemon becomes ready", async function () {
     context = createIntegrationContext("concurrent-spawn", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
-      staleTimeout: 500,
     });
 
     const managers = Array.from({ length: 6 }, () =>
       context.createManager({
         readyPollInterval: 10,
-        staleTimeout: 500,
-      }),
+      })
     );
 
-    const infos = await Promise.all(
-      managers.map((manager) => manager.ensureDaemon()),
+    await Promise.all(managers.map((manager) => manager.ensureDaemon()));
+    const daemon = await waitFor(
+      () => getUsableDiscovery(context.discovery),
+      3000
     );
-    const pid = assertSamePid(infos);
-    assert(Number.isInteger(pid));
+    assert(Number.isInteger(daemon.pid));
     assert.strictEqual(fs.existsSync(context.paths.spawnLockPath), false);
     assert.strictEqual(fs.existsSync(context.paths.daemonLockPath), true);
 
     const log = context.readLog();
     assert.strictEqual(
       log.filter((entry) => entry.event === "daemon-entry-start").length,
-      1,
+      1
     );
     assert.strictEqual(
       log.filter((entry) => entry.event === "daemon-started").length,
-      1,
+      1
     );
   });
 
   it("makes later managers reuse the daemon created by the first manager", async function () {
-    context = createIntegrationContext("sequential-reuse", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
-    });
+    context = createIntegrationContext("sequential-reuse");
 
-    const first = await context.manager.ensureDaemon();
+    await context.manager.ensureDaemon();
+    const firstDaemon = await waitFor(
+      () => getUsableDiscovery(context.discovery),
+      3000
+    );
     const secondManager = context.createManager();
     const thirdManager = context.createManager();
-    const [second, third] = await Promise.all([
+    await Promise.all([
       secondManager.ensureDaemon(),
       thirdManager.ensureDaemon(),
     ]);
-
-    assert.strictEqual(second.pid, first.pid);
-    assert.strictEqual(third.pid, first.pid);
     assert.strictEqual(
-      context
-        .readLog()
-        .filter((entry) => entry.event === "daemon-entry-start").length,
-      1,
+      getUsableDiscovery(context.discovery).pid,
+      firstDaemon.pid
+    );
+    assert.strictEqual(
+      context.readLog().filter((entry) => entry.event === "daemon-entry-start")
+        .length,
+      1
     );
   });
 });

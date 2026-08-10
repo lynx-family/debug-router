@@ -405,8 +405,8 @@ class FakePhysicalConnector extends EventEmitter {
 }
 
 class FakeControlServer {
-  constructor(port = 7777) {
-    this.controlPort = port;
+  constructor(endpoint = "/tmp/debug-router-host-attached.sock") {
+    this.controlEndpoint = endpoint;
     this.broadcasts = [];
     this.targeted = [];
     this.stopCalls = 0;
@@ -435,7 +435,7 @@ class FakeStartControlServer {
 
   constructor(option) {
     this.option = option;
-    this.controlPort = option.controlPort ?? 8899;
+    this.controlEndpoint = option.controlEndpoint;
     this.startCalls = 0;
     this.stopCalls = 0;
     this.broadcasts = [];
@@ -512,7 +512,8 @@ function createHost(options = {}) {
     protocolVersion: options.protocolVersion,
     minSupportedProtocolVersion: options.minSupportedProtocolVersion,
     debugInfo: options.debugInfo,
-    controlPort: options.controlPort,
+    controlEndpoint:
+      options.controlEndpoint ?? "/tmp/debug-router-host-control.sock",
     manualConnect: options.manualConnect,
     enableWebSocket: options.enableWebSocket,
     websocketOption: options.websocketOption,
@@ -530,8 +531,11 @@ function createHost(options = {}) {
   };
 }
 
-function attachControlServer(host, port = 7777) {
-  const controlServer = new FakeControlServer(port);
+function attachControlServer(
+  host,
+  endpoint = "/tmp/debug-router-host-attached.sock"
+) {
+  const controlServer = new FakeControlServer(endpoint);
   host.controlServer = controlServer;
   return controlServer;
 }
@@ -807,7 +811,7 @@ describe("MultiplexerHost", function () {
       );
       assert.deepStrictEqual(trace[0].metadata, {
         pid: process.pid,
-        controlPort: 8899,
+        controlEndpoint: "/tmp/debug-router-host-control.sock",
         protocolVersion: 3,
         minSupportedProtocolVersion: 2,
         debugInfo: {
@@ -841,7 +845,7 @@ describe("MultiplexerHost", function () {
     }
   });
 
-  it("starts once, reports the listening port, and stops idempotently", async function () {
+  it("starts the fixed control endpoint once and stops idempotently", async function () {
     FakeStartControlServer.instances = [];
     FakeStartControlServer.startError = null;
     FakeStartControlServer.stopError = null;
@@ -849,13 +853,14 @@ describe("MultiplexerHost", function () {
     const { host, physical } = createHost();
 
     try {
-      assert.strictEqual(host.getControlPort(), 0);
       await host.start();
-      const port = host.getControlPort();
       await host.start();
 
-      assert.strictEqual(port, 8899);
       assert.strictEqual(FakeStartControlServer.instances.length, 1);
+      assert.strictEqual(
+        FakeStartControlServer.instances[0].controlEndpoint,
+        "/tmp/debug-router-host-control.sock"
+      );
       assert.strictEqual(FakeStartControlServer.instances[0].startCalls, 1);
       assert.strictEqual(physical.listenerCount("device-connected"), 1);
       assert.strictEqual(physical.listenerCount("device-disconnected"), 1);
@@ -1906,7 +1911,10 @@ describe("MultiplexerHost", function () {
       1,
       createRpcRequest("startAllDeviceClientWatchers", {})
     );
-    await host.handleControlRpc(1, createRpcRequest("stopAllDeviceClientWatchers", {}));
+    await host.handleControlRpc(
+      1,
+      createRpcRequest("stopAllDeviceClientWatchers", {})
+    );
 
     physical.devices.set(laterDevice.serial, laterDevice);
     physical.emit("device-connected", laterDevice);
@@ -1940,7 +1948,10 @@ describe("MultiplexerHost", function () {
       createRpcRequest("startAllDeviceClientWatchers", {})
     );
     await nextTick();
-    await host.handleControlRpc(1, createRpcRequest("stopAllDeviceClientWatchers", {}));
+    await host.handleControlRpc(
+      1,
+      createRpcRequest("stopAllDeviceClientWatchers", {})
+    );
 
     deferred.resolve([device]);
     await starting;
@@ -2490,7 +2501,7 @@ describe("MultiplexerHost", function () {
     }
     const reset = replaceWebSocketStartDependencies({
       detectPortImpl: async (port) => {
-        assert.strictEqual(port, 19000);
+        assert.strictEqual(port, 19783);
         return 19001;
       },
       addressImpl: () => "10.0.0.5",

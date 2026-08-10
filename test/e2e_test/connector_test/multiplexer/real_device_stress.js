@@ -14,6 +14,9 @@ const {
   DebugRouterConnector,
   MultiOpenStatus,
 } = require("@lynx-js/debug-router-connector");
+const {
+  createMultiplexerPaths,
+} = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
 
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
@@ -379,9 +382,9 @@ async function runPlatformStressScenario(platform, args) {
     await refreshAndAssertState(context, state, args, report, "warmup");
 
     const daemonInfo = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+      () => readDaemonOwner(context.paths.daemonLockPath),
       5000,
-      `${platform} daemon discovery`
+      `${platform} daemon lock owner`
     );
     report.daemon.initialPid = daemonInfo.pid;
     report.daemon.finalPid = daemonInfo.pid;
@@ -407,11 +410,7 @@ async function runPlatformStressScenario(platform, args) {
     recordFailure(report, classifyError(error), error);
   } finally {
     try {
-      if (
-        args.transport === "wifi" &&
-        state?.serial &&
-        args.launchAndroidApp
-      ) {
+      if (args.transport === "wifi" && state?.serial && args.launchAndroidApp) {
         await forceStopAndroidApp(
           state.serial,
           args.androidActivity
@@ -447,7 +446,7 @@ function createScenarioState(platform, args) {
 
 function createContext(platform, args, option = {}) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-real-stress-${platform}-`)
+    path.join(getIpcTestTempDir(), `debug-router-real-stress-${platform}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
@@ -520,14 +519,12 @@ function createContext(platform, args, option = {}) {
   };
 }
 
+function getIpcTestTempDir() {
+  return process.platform === "win32" ? os.tmpdir() : "/tmp";
+}
+
 function createPaths(rootDir) {
-  const dataDir = path.join(rootDir, "multiplexer");
-  return {
-    rootDir,
-    dataDir,
-    discoveryPath: path.join(dataDir, "daemon.json"),
-    daemonLockPath: path.join(dataDir, "daemon.lock"),
-  };
+  return createMultiplexerPaths({ rootDir });
 }
 
 async function createAdditionalConnectors(context, state, args) {
@@ -651,22 +648,22 @@ async function refreshAndAssertState(context, state, args, report, label) {
     await assertFrontendClientLists(state, args, label);
   }
 
-  const discovery = readJsonFile(context.paths.discoveryPath, null);
-  if (!discovery?.pid || !processExists(discovery.pid)) {
+  const daemon = readDaemonOwner(context.paths.daemonLockPath);
+  if (!daemon?.pid || !processExists(daemon.pid)) {
     throw new StressError("daemon_exited", `${label}: daemon is not alive`);
   }
-  if (state.lastDaemonPid && discovery.pid !== state.lastDaemonPid) {
+  if (state.lastDaemonPid && daemon.pid !== state.lastDaemonPid) {
     report.daemon.pidChanges++;
     recordFailure(
       report,
       "daemon_exited",
       new Error(
-        `${label}: daemon pid changed unexpectedly ${state.lastDaemonPid} -> ${discovery.pid}`
+        `${label}: daemon pid changed unexpectedly ${state.lastDaemonPid} -> ${daemon.pid}`
       )
     );
   }
-  state.lastDaemonPid = discovery.pid;
-  report.daemon.finalPid = discovery.pid;
+  state.lastDaemonPid = daemon.pid;
+  report.daemon.finalPid = daemon.pid;
 }
 
 async function runStressRounds(context, state, args, report) {
@@ -731,9 +728,7 @@ function createMessageTasks(state, args, round, offset, count) {
         path: "connector",
         marker: `${state.platform}-${args.transport}-round-${
           round + 1
-        }-connector-${
-          connectorEntry.id
-        }-message-${absoluteIndex}`,
+        }-connector-${connectorEntry.id}-message-${absoluteIndex}`,
         connectorEntry,
         clientId,
       });
@@ -741,9 +736,7 @@ function createMessageTasks(state, args, round, offset, count) {
       const frontendEntry = frontends[absoluteIndex % frontends.length];
       tasks.push({
         path: "websocket",
-        marker: `${state.platform}-${args.transport}-round-${
-          round + 1
-        }-ws-${
+        marker: `${state.platform}-${args.transport}-round-${round + 1}-ws-${
           frontendEntry.id
         }-message-${absoluteIndex}`,
         frontendEntry,
@@ -997,13 +990,13 @@ async function runRecoveryProbe(context, state, args, report) {
 
   const newInfo = await waitFor(
     () => {
-      const info = readJsonFile(context.paths.discoveryPath, null);
+      const info = readDaemonOwner(context.paths.daemonLockPath);
       return info?.pid && info.pid !== oldPid && processExists(info.pid)
         ? info
         : null;
     },
     10000,
-    `${state.platform} replacement daemon discovery`
+    `${state.platform} replacement daemon lock owner`
   );
   report.daemon.recoveryCount++;
   state.lastDaemonPid = newInfo.pid;
@@ -1064,9 +1057,7 @@ async function runLegacyPreemptionProbe(context, state, args, report) {
       await waitFor(
         () => {
           if (args.transport === "wifi") {
-            return (
-              primary.connector.getAllWebsocketAppClients().length === 0
-            );
+            return primary.connector.getAllWebsocketAppClients().length === 0;
           }
           return (
             primary.connector.devices.size === 0 &&
@@ -1124,22 +1115,21 @@ async function cleanupContext(context, state, args, report) {
   }
   try {
     await context.cleanup();
-    const discoveryAfterClose = readJsonFile(context.paths.discoveryPath, null);
-    if (discoveryAfterClose?.pid) {
-      observedPids.add(discoveryAfterClose.pid);
+    const daemonAfterClose = readDaemonOwner(context.paths.daemonLockPath);
+    if (daemonAfterClose?.pid) {
+      observedPids.add(daemonAfterClose.pid);
     }
 
     let cleanupError = null;
-    if (observedPids.size > 0 || discoveryAfterClose?.pid) {
+    if (observedPids.size > 0 || daemonAfterClose?.pid) {
       await waitFor(
         () => {
-          const discovery = readJsonFile(context.paths.discoveryPath, null);
-          if (discovery?.pid) {
-            observedPids.add(discovery.pid);
+          const daemon = readDaemonOwner(context.paths.daemonLockPath);
+          if (daemon?.pid) {
+            observedPids.add(daemon.pid);
           }
           return (
             Array.from(observedPids).every((pid) => !processExists(pid)) &&
-            !fs.existsSync(context.paths.discoveryPath) &&
             !fs.existsSync(context.paths.daemonLockPath)
           );
         },
@@ -1151,10 +1141,10 @@ async function cleanupContext(context, state, args, report) {
       });
     }
 
-    const discovery = readJsonFile(context.paths.discoveryPath, null);
-    if (discovery?.pid) {
-      observedPids.add(discovery.pid);
-      await stopDaemon(context.paths.discoveryPath);
+    const daemon = readDaemonOwner(context.paths.daemonLockPath);
+    if (daemon?.pid) {
+      observedPids.add(daemon.pid);
+      await stopDaemon(context.paths.daemonLockPath);
     }
     for (const pid of observedPids) {
       if (processExists(pid)) {
@@ -1500,20 +1490,14 @@ async function launchAppIfNeeded(platform, args, device) {
   }
 }
 
-async function launchAndroidWiFiApp(
-  serial,
-  args,
-  websocketUrl,
-  roomId
-) {
+async function launchAndroidWiFiApp(serial, args, websocketUrl, roomId) {
   if (!args.launchAndroidApp) {
     return;
   }
   const packageName = getAndroidPackageName(args.androidActivity);
   const schema =
-    `lynx://remote_debug_lynx/enable?url=${encodeURIComponent(
-      websocketUrl
-    )}` + `&room=${encodeURIComponent(roomId ?? "")}`;
+    `lynx://remote_debug_lynx/enable?url=${encodeURIComponent(websocketUrl)}` +
+    `&room=${encodeURIComponent(roomId ?? "")}`;
   await execFile(
     "adb",
     ["-s", serial, "shell", "am", "force-stop", packageName],
@@ -1544,10 +1528,7 @@ async function launchAndroidWiFiApp(
       `Failed to launch Android WiFi app: ${output}`
     );
   }
-  logStep(
-    "android",
-    `launched Android WiFi runtime at ${websocketUrl}`
-  );
+  logStep("android", `launched Android WiFi runtime at ${websocketUrl}`);
 }
 
 function forceStopAndroidApp(serial, activity) {
@@ -1565,22 +1546,14 @@ function forceStopAndroidApp(serial, activity) {
   );
 }
 
-async function waitForWiFiRuntime(
-  connector,
-  timeout,
-  label,
-  expectedClientId
-) {
+async function waitForWiFiRuntime(connector, timeout, label, expectedClientId) {
   return waitFor(
     () =>
       connector.getAllWebsocketAppClients().find((client) => {
         if (expectedClientId !== undefined) {
           return client.clientId() === expectedClientId;
         }
-        return (
-          client.type() === "runtime" &&
-          client.info?.network === "WiFi"
-        );
+        return client.type() === "runtime" && client.info?.network === "WiFi";
       }),
     timeout,
     label
@@ -1868,13 +1841,7 @@ function printReport(report) {
   const failures = totalFailures(report);
   logStep(
     report.platform,
-    `summary transport=${report.transport} success=${
-      report.success
-    } failures=${failures} avg=${report.latencyMs.avg}ms p95=${
-      report.latencyMs.p95
-    }ms p99=${report.latencyMs.p99}ms daemonPidChanges=${
-      report.daemon.pidChanges
-    }`
+    `summary transport=${report.transport} success=${report.success} failures=${failures} avg=${report.latencyMs.avg}ms p95=${report.latencyMs.p95}ms p99=${report.latencyMs.p99}ms daemonPidChanges=${report.daemon.pidChanges}`
   );
   const nonZeroFailures = Object.entries(report.failures).filter(
     ([_category, count]) => count > 0
@@ -2058,28 +2025,32 @@ function withTimeout(promise, timeout, label) {
   });
 }
 
-async function stopDaemon(discoveryPath) {
-  const discovery = readJsonFile(discoveryPath, null);
-  if (!discovery?.pid) {
+async function stopDaemon(daemonLockPath) {
+  const owner = readDaemonOwner(daemonLockPath);
+  if (!owner?.pid) {
     return;
   }
   try {
-    process.kill(discovery.pid, "SIGTERM");
+    process.kill(owner.pid, "SIGTERM");
   } catch (_error) {}
   await waitFor(
-    () => !processExists(discovery.pid),
+    () => !processExists(owner.pid),
     1000,
     "daemon termination"
   ).catch(() => {
     try {
-      process.kill(discovery.pid, "SIGKILL");
+      process.kill(owner.pid, "SIGKILL");
     } catch (_error) {}
   });
   await waitFor(
-    () => !processExists(discovery.pid),
+    () => !processExists(owner.pid),
     1000,
     "daemon force termination"
   ).catch(() => {});
+}
+
+function readDaemonOwner(daemonLockPath) {
+  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
 }
 
 function readJsonFile(filePath, fallback) {
@@ -2225,11 +2196,11 @@ function listInterferingMultiplexerDaemons() {
         return;
       }
 
-      const defaultDiscoveryPath = path.join(
+      const defaultDaemonLockPath = path.join(
         process.env.HOME || os.homedir(),
         ".DebugRouterConnector",
         "multiplexer",
-        "daemon.json"
+        "daemon.lock"
       );
       const targets = stdout
         .split(/\n/)
@@ -2253,9 +2224,9 @@ function listInterferingMultiplexerDaemons() {
           }
           return (
             entry.command.includes(
-              `--discovery-path ${defaultDiscoveryPath}`
+              `--daemon-lock-path ${defaultDaemonLockPath}`
             ) ||
-            /\/T\/debug-router-real(?:-stress)?-[^/]+\/multiplexer\/daemon\.json/.test(
+            /\/T\/debug-router-real(?:-stress)?-[^/]+\/multiplexer\/daemon\.lock/.test(
               entry.command
             )
           );

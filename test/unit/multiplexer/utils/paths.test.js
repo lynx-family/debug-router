@@ -9,9 +9,9 @@ const path = require("path");
 const {
   createMultiplexerPaths,
   getDefaultMultiplexerRootDir,
+  getMultiplexerControlEndpoint,
   getMultiplexerDaemonLockPath,
   getMultiplexerDataDir,
-  getMultiplexerDiscoveryPath,
   getMultiplexerSpawnLockPath,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/paths");
 
@@ -27,16 +27,17 @@ describe("multiplexer paths", function () {
     );
   });
 
-  it("creates stable paths under the provided root directory", function () {
+  it("creates a fixed Unix endpoint and lock paths", function () {
     const rootDir = path.join(os.tmpdir(), "debug-router-mux-root");
     const paths = createMultiplexerPaths({ rootDir });
-
     assert.strictEqual(paths.rootDir, rootDir);
     assert.strictEqual(paths.dataDir, path.join(rootDir, "multiplexer"));
-    assert.strictEqual(
-      paths.discoveryPath,
-      path.join(rootDir, "multiplexer", "daemon.json")
-    );
+    if (process.platform !== "win32") {
+      assert.strictEqual(
+        paths.controlEndpoint,
+        path.join(rootDir, "multiplexer", "control.sock")
+      );
+    }
     assert.strictEqual(
       paths.spawnLockPath,
       path.join(rootDir, "multiplexer", "spawn.lock")
@@ -45,45 +46,47 @@ describe("multiplexer paths", function () {
       paths.daemonLockPath,
       path.join(rootDir, "multiplexer", "daemon.lock")
     );
+    assert.strictEqual(Object.hasOwn(paths, "discoveryPath"), false);
   });
 
-  it("allows explicit data directory override", function () {
-    const rootDir = path.join(os.tmpdir(), "debug-router-mux-root");
-    const dataDir = path.join(os.tmpdir(), "debug-router-mux-data");
-
-    assert.strictEqual(getMultiplexerDataDir({ rootDir, dataDir }), dataDir);
-    assert.strictEqual(
-      getMultiplexerDiscoveryPath({ dataDir }),
-      path.join(dataDir, "daemon.json")
+  it("derives the Windows named pipe from the custom data directory", function () {
+    const endpoint = getMultiplexerControlEndpoint(
+      { dataDir: "C:\\Users\\tester\\mux" },
+      "win32"
     );
+    assert.strictEqual(endpoint, "\\\\.\\pipe\\C:\\Users\\tester\\mux");
     assert.strictEqual(
-      getMultiplexerSpawnLockPath({ dataDir }),
-      path.join(dataDir, "spawn.lock")
+      getMultiplexerControlEndpoint(
+        { dataDir: "D:\\another\\directory" },
+        "win32"
+      ),
+      "\\\\.\\pipe\\D:\\another\\directory"
     );
-    assert.strictEqual(
-      getMultiplexerDaemonLockPath({ dataDir }),
-      path.join(dataDir, "daemon.lock")
-    );
-
-    const paths = createMultiplexerPaths({ rootDir, dataDir });
-    assert.strictEqual(paths.rootDir, rootDir);
-    assert.strictEqual(paths.dataDir, dataDir);
-    assert.strictEqual(paths.discoveryPath, path.join(dataDir, "daemon.json"));
-    assert.strictEqual(paths.spawnLockPath, path.join(dataDir, "spawn.lock"));
-    assert.strictEqual(paths.daemonLockPath, path.join(dataDir, "daemon.lock"));
   });
 
-  it("keeps different roots isolated", function () {
-    const first = createMultiplexerPaths({
-      rootDir: path.join(os.tmpdir(), "debug-router-mux-a"),
-    });
-    const second = createMultiplexerPaths({
-      rootDir: path.join(os.tmpdir(), "debug-router-mux-b"),
-    });
+  it("uses control.sock directly even for a long Unix data directory", function () {
+    const dataDir = path.join(os.tmpdir(), "x".repeat(180));
+    assert.strictEqual(
+      getMultiplexerControlEndpoint({ dataDir }, "darwin"),
+      path.join(dataDir, "control.sock")
+    );
+  });
 
-    assert.notStrictEqual(first.dataDir, second.dataDir);
-    assert.notStrictEqual(first.discoveryPath, second.discoveryPath);
-    assert.notStrictEqual(first.spawnLockPath, second.spawnLockPath);
-    assert.notStrictEqual(first.daemonLockPath, second.daemonLockPath);
+  it("allows explicit data directory override and isolates endpoints", function () {
+    const firstDir = path.join(os.tmpdir(), "debug-router-mux-a");
+    const secondDir = path.join(os.tmpdir(), "debug-router-mux-b");
+    assert.strictEqual(getMultiplexerDataDir({ dataDir: firstDir }), firstDir);
+    assert.strictEqual(
+      getMultiplexerSpawnLockPath({ dataDir: firstDir }),
+      path.join(firstDir, "spawn.lock")
+    );
+    assert.strictEqual(
+      getMultiplexerDaemonLockPath({ dataDir: firstDir }),
+      path.join(firstDir, "daemon.lock")
+    );
+    assert.notStrictEqual(
+      getMultiplexerControlEndpoint({ dataDir: firstDir }, "darwin"),
+      getMultiplexerControlEndpoint({ dataDir: secondDir }, "darwin")
+    );
   });
 });

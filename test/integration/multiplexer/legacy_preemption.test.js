@@ -32,9 +32,7 @@ describe("multiplexer integration legacy preemption", function () {
 
   it("preserves Driver mirrors, removes devices and USB/WiFi runtimes, and reacquires the legacy owner", async function () {
     context = createIntegrationContext("legacy-preemption", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
-      staleTimeout: 500,
       enableWebSocket: true,
       websocketOption: {
         port: 0,

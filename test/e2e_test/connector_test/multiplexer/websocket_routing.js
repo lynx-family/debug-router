@@ -5,30 +5,25 @@ const path = require("path");
 const { WebSocket } = require("ws");
 
 const { DebugRouterConnector } = require("@lynx-js/debug-router-connector");
+const {
+  createMultiplexerPaths,
+} = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
 
 const fakeDaemonEntry = path.resolve(
   __dirname,
   "../../../integration/multiplexer/fixtures/fake_daemon_entry.js"
 );
 
-const DATA_DIR_NAME = "multiplexer";
 const STATE_FILE_NAME = "fake_physical_state.json";
 const COMMAND_FILE_NAME = "fake_physical_commands.jsonl";
 const LOG_FILE_NAME = "fake_daemon_log.jsonl";
-const PACKAGE_ENTRY_STALE_TIMEOUT = 2000;
 
 function logStep(message) {
   console.log(`[multiplexer-websocket-e2e] ${message}`);
 }
 
 function createPaths(rootDir) {
-  const dataDir = path.join(rootDir, DATA_DIR_NAME);
-  return {
-    rootDir,
-    dataDir,
-    discoveryPath: path.join(dataDir, "daemon.json"),
-    daemonLockPath: path.join(dataDir, "daemon.lock"),
-  };
+  return createMultiplexerPaths({ rootDir });
 }
 
 function defaultState() {
@@ -60,7 +55,7 @@ function defaultState() {
 
 function createContext(name, state = defaultState()) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-e2e-${name}-`)
+    path.join(getIpcTestTempDir(), `debug-router-e2e-${name}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const hadOriginalHome = Object.prototype.hasOwnProperty.call(
@@ -101,7 +96,6 @@ function createContext(name, state = defaultState()) {
         multiplexerLegacyDriverDir: path.join(homeDir, ".DebugRouterConnector"),
         multiplexerDaemonEntry: fakeDaemonEntry,
         multiplexerStartupTimeout: 3000,
-        multiplexerStaleTimeout: PACKAGE_ENTRY_STALE_TIMEOUT,
         multiplexerRpcTimeout: 1200,
         multiplexerDaemonIdleTimeout: 150,
       });
@@ -134,7 +128,7 @@ function createContext(name, state = defaultState()) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(paths.discoveryPath);
+        await stopDaemon(paths.daemonLockPath);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
         if (hadOriginalHome) {
@@ -145,6 +139,10 @@ function createContext(name, state = defaultState()) {
       }
     },
   };
+}
+
+function getIpcTestTempDir() {
+  return process.platform === "win32" ? os.tmpdir() : "/tmp";
 }
 
 async function connectDriverWebSocket(url, info) {
@@ -197,13 +195,13 @@ async function runWebSocketRoutingFlow() {
     await connector.startWSServer();
     assert(connector.wssPort > 0, "websocket port should be assigned");
 
-    const discovery = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+    const daemon = await waitFor(
+      () => readDaemonOwner(context.paths.daemonLockPath),
       3000,
-      "websocket daemon discovery"
+      "websocket daemon lock owner"
     );
-    daemonPid = discovery?.pid;
-    assert(daemonPid, "expected daemon pid in discovery");
+    daemonPid = daemon?.pid;
+    assert(daemonPid, "expected daemon pid in daemon.lock");
 
     const url = `ws://127.0.0.1:${connector.wssPort}/mdevices/page/android`;
     const first = await connectDriverWebSocket(url, { app: "driver-a" });
@@ -271,7 +269,6 @@ async function runWebSocketRoutingFlow() {
     await connector.close();
     await waitFor(
       () =>
-        !fs.existsSync(context.paths.discoveryPath) &&
         !fs.existsSync(context.paths.daemonLockPath) &&
         !processExists(daemonPid),
       2500,
@@ -709,23 +706,27 @@ function waitForSocketMessage(socket, predicate, timeout = 2000) {
   });
 }
 
-async function stopDaemon(discoveryPath) {
-  const discovery = readJsonFile(discoveryPath, null);
-  if (!discovery?.pid) {
+async function stopDaemon(daemonLockPath) {
+  const owner = readDaemonOwner(daemonLockPath);
+  if (!owner?.pid) {
     return;
   }
   try {
-    process.kill(discovery.pid, "SIGTERM");
+    process.kill(owner.pid, "SIGTERM");
   } catch (_error) {}
   await waitFor(
-    () => !processExists(discovery.pid) || !fs.existsSync(discoveryPath),
+    () => !processExists(owner.pid) || !fs.existsSync(daemonLockPath),
     1000,
     "daemon termination"
   ).catch(() => {
     try {
-      process.kill(discovery.pid, "SIGKILL");
+      process.kill(owner.pid, "SIGKILL");
     } catch (_error) {}
   });
+}
+
+function readDaemonOwner(daemonLockPath) {
+  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
 }
 
 function readJsonFile(filePath, fallback) {

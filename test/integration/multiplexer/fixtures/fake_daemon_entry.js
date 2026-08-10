@@ -158,7 +158,7 @@ class FakePhysicalConnector {
     this.nextClientId = 1000;
     this.closed = false;
     this.traceRecorder = option.traceRecorder ?? null;
-    this.dataDir = path.dirname(option.discoveryPathForFake);
+    this.dataDir = option.multiplexerDataDirForFake;
     this.statePath = path.join(this.dataDir, STATE_FILE_NAME);
     this.commandPath = path.join(this.dataDir, COMMAND_FILE_NAME);
     this.logPath = path.join(this.dataDir, LOG_FILE_NAME);
@@ -475,7 +475,7 @@ function readJsonValue(text) {
 
 async function main() {
   const entryOption = parseEntryOption(process.argv.slice(2));
-  const dataDir = path.dirname(entryOption.discoveryPath);
+  const dataDir = path.dirname(entryOption.daemonLockPath);
   const logPath = path.join(dataDir, LOG_FILE_NAME);
 
   appendJsonLine(logPath, {
@@ -486,7 +486,7 @@ async function main() {
 
   const host = new MultiplexerHost({
     ...entryOption.physicalConnectorOption,
-    controlPort: entryOption.controlPort,
+    controlEndpoint: entryOption.controlEndpoint,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
     debugInfo: entryOption.debugInfo,
@@ -496,7 +496,7 @@ async function main() {
     connectionTrace: entryOption.connectionTrace,
     websocketOption: entryOption.websocketOption,
     PhysicalConnectorCtor: FakePhysicalConnector,
-    discoveryPathForFake: entryOption.discoveryPath,
+    multiplexerDataDirForFake: dataDir,
   });
   const handleControlConnected = host.handleControlConnected.bind(host);
   const handleControlDisconnected = host.handleControlDisconnected.bind(host);
@@ -534,16 +534,11 @@ async function main() {
           : `control socket ${controlId} is unavailable`
       );
     }
-    connection.socket.emit("error", new Error(message));
+    connection.transport.destroy(new Error(message));
   };
 
   const daemon = new MultiplexerDaemon({
-    discoveryPath: entryOption.discoveryPath,
     daemonLockPath: entryOption.daemonLockPath,
-    protocolVersion: entryOption.protocolVersion,
-    minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
-    debugInfo: entryOption.debugInfo,
-    heartbeatInterval: entryOption.heartbeatInterval,
     hostOption:
       entryOption.multiplexerDaemonIdleTimeout === undefined
         ? undefined
@@ -618,17 +613,22 @@ async function main() {
     event: "daemon-started",
     pid: process.pid,
     at: Date.now(),
-    controlPort: daemon.discoveryInfo?.controlPort,
+    controlEndpoint: entryOption.controlEndpoint,
+    protocolVersion: entryOption.protocolVersion,
+    minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
+    debugInfo: entryOption.debugInfo,
   });
 }
 
 void main().catch((error) => {
-  const discoveryPathIndex = process.argv.findIndex(
-    (arg) => arg === "--discovery-path"
+  const daemonLockPathIndex = process.argv.findIndex(
+    (arg) => arg === "--daemon-lock-path"
   );
-  const discoveryPath =
-    discoveryPathIndex >= 0 ? process.argv[discoveryPathIndex + 1] : undefined;
-  const dataDir = discoveryPath ? path.dirname(discoveryPath) : process.cwd();
+  const daemonLockPath =
+    daemonLockPathIndex >= 0
+      ? process.argv[daemonLockPathIndex + 1]
+      : undefined;
+  const dataDir = daemonLockPath ? path.dirname(daemonLockPath) : process.cwd();
   appendJsonLine(path.join(dataDir, LOG_FILE_NAME), {
     event: "daemon-entry-error",
     pid: process.pid,

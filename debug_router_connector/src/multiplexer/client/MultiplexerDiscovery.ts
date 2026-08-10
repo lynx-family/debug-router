@@ -2,23 +2,34 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import fs from "fs";
+import { createConnection } from "net";
 import {
-  MULTIPLEXER_PROTOCOL_VERSION,
-  MultiplexerDiscoveryInfo,
-} from "../protocol/discovery";
-import { isMultiplexerDiscoveryInfo, isRecord } from "../protocol/validation";
+  MultiplexerDebugInfo,
+  MultiplexerHealthRequest,
+  MultiplexerHealthResponse,
+  isMultiplexerHandshakeErrorResponse,
+  isMultiplexerHealthResponse,
+} from "../protocol";
+import {
+  MultiplexerControlTransport,
+  MultiplexerControlTransportError,
+} from "../transport/MultiplexerControlTransport";
+
+export const DEFAULT_MULTIPLEXER_HEALTH_CHECK_TIMEOUT = 500;
 
 export type MultiplexerDiscoveryOption = {
-  discoveryPath: string;
-  staleTimeout: number;
-  localProtocolVersion?: number;
+  controlEndpoint: string;
+  localProtocolVersion: number;
+  healthCheckTimeout?: number;
+  debugInfo?: MultiplexerDebugInfo;
+
+  // only used for tests or embedding
   now?: () => number;
 };
 
-export type MultiplexerProtocolCompatibility =
+export type MultiplexerDiscoveryValidation =
   | {
-      status: "compatible";
+      status: "usable";
       reason: "same-version" | "daemon-newer-compatible";
       daemonProtocolVersion: number;
       connectorProtocolVersion: number;
@@ -30,183 +41,146 @@ export type MultiplexerProtocolCompatibility =
       connectorProtocolVersion: number;
     }
   | {
-      status: "incompatible";
-      reason: "connector-older-than-daemon-min-supported";
+      status: "unusable";
+      reason: "connector-protocol-too-old";
       daemonProtocolVersion: number;
       daemonMinSupportedProtocolVersion: number;
       connectorProtocolVersion: number;
-    };
-
-export type MultiplexerDiscoveryValidation =
-  | {
-      status: "usable";
-      info: MultiplexerDiscoveryInfo;
-      compatibility: Extract<
-        MultiplexerProtocolCompatibility,
-        { status: "compatible" }
-      >;
-    }
-  | {
-      status: "replace-required";
-      info: MultiplexerDiscoveryInfo;
-      compatibility: Extract<
-        MultiplexerProtocolCompatibility,
-        { status: "replace-required" }
-      >;
     }
   | {
       status: "unusable";
-      reason: "connector-protocol-too-old";
-      info: MultiplexerDiscoveryInfo;
-      compatibility: Extract<
-        MultiplexerProtocolCompatibility,
-        { status: "incompatible" }
-      >;
-    }
-  | {
-      status: "unusable";
-      reason:
-        | "missing"
-        | "invalid-json"
-        | "invalid-shape"
-        | "stale"
-        | "missing-protocol-version";
-      info?: MultiplexerDiscoveryInfo;
-    };
-
-type DiscoveryReadResult =
-  | {
-      status: "loaded";
-      value: unknown;
-    }
-  | {
-      status: "missing" | "invalid-json";
+      reason: "unreachable" | "timeout" | "invalid-frame" | "invalid-response";
+      error?: Error;
     };
 
 export class MultiplexerDiscovery {
-  readonly discoveryPath: string;
+  readonly controlEndpoint: string;
   readonly localProtocolVersion: number;
-  readonly staleTimeout: number;
+  readonly healthCheckTimeout: number;
+
+  private readonly debugInfo?: MultiplexerDebugInfo;
   private readonly now: () => number;
 
   constructor(option: MultiplexerDiscoveryOption) {
-    this.discoveryPath = option.discoveryPath;
-    this.localProtocolVersion =
-      option.localProtocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION;
-    this.staleTimeout = option.staleTimeout;
+    this.controlEndpoint = option.controlEndpoint;
+    this.localProtocolVersion = option.localProtocolVersion;
+    this.healthCheckTimeout =
+      option.healthCheckTimeout ?? DEFAULT_MULTIPLEXER_HEALTH_CHECK_TIMEOUT;
+    this.debugInfo = option.debugInfo;
     this.now = option.now ?? Date.now;
   }
 
-  validateDiscovery(): MultiplexerDiscoveryValidation {
-    return this.validateReadResult(this.readDiscoveryFile());
-  }
+  async probeHealth(): Promise<MultiplexerDiscoveryValidation> {
+    return new Promise((resolve) => {
+      const transport = new MultiplexerControlTransport(
+        createConnection(this.controlEndpoint),
+      );
+      let settled = false;
 
-  private readDiscoveryFile(): DiscoveryReadResult {
-    if (!fs.existsSync(this.discoveryPath)) {
-      return { status: "missing" };
-    }
-
-    try {
-      return {
-        status: "loaded",
-        value: JSON.parse(fs.readFileSync(this.discoveryPath, "utf8")),
+      const finish = (result: MultiplexerDiscoveryValidation): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        unsubscribeConnect();
+        unsubscribeMessage();
+        unsubscribeClose();
+        void transport.end();
+        resolve(result);
       };
-    } catch (_error) {
-      return { status: "invalid-json" };
-    }
+
+      const handleConnect = (): void => {
+        const debugInfo = this.createDebugInfo();
+        const request: MultiplexerHealthRequest = {
+          kind: "health",
+          ...(debugInfo ? { debugInfo } : {}),
+        };
+        try {
+          transport.send(request);
+        } catch (error) {
+          finish({
+            status: "unusable",
+            reason: "unreachable",
+            error: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+      };
+
+      const unsubscribeMessage = transport.onMessage((message) => {
+        if (isMultiplexerHandshakeErrorResponse(message)) {
+          const error = new Error(message.error.message);
+          error.name = message.error.code;
+          finish({ status: "unusable", reason: "invalid-response", error });
+          return;
+        }
+        if (!isMultiplexerHealthResponse(message)) {
+          finish({ status: "unusable", reason: "invalid-response" });
+          return;
+        }
+        finish(this.compareProtocolVersion(message));
+      });
+      const unsubscribeClose = transport.onClose((error) => {
+        finish({
+          status: "unusable",
+          reason:
+            error instanceof MultiplexerControlTransportError
+              ? "invalid-frame"
+              : "unreachable",
+          ...(error ? { error } : {}),
+        });
+      });
+      const timer = setTimeout(() => {
+        finish({ status: "unusable", reason: "timeout" });
+      }, this.healthCheckTimeout);
+
+      const unsubscribeConnect = transport.onConnect(handleConnect);
+    });
   }
 
-  private validateReadResult(
-    readResult: DiscoveryReadResult,
+  compareProtocolVersion(
+    response: MultiplexerHealthResponse,
   ): MultiplexerDiscoveryValidation {
-    switch (readResult.status) {
-      case "missing":
-        return { status: "unusable", reason: "missing" };
-      case "invalid-json":
-        return { status: "unusable", reason: "invalid-json" };
-      case "loaded":
-        return this.validateValue(readResult.value);
-    }
-  }
-
-  private validateValue(value: unknown): MultiplexerDiscoveryValidation {
-    if (!isRecord(value)) {
-      return { status: "unusable", reason: "invalid-shape" };
-    }
-
-    if (!Object.prototype.hasOwnProperty.call(value, "protocolVersion")) {
-      return { status: "unusable", reason: "missing-protocol-version" };
-    }
-
-    if (!isMultiplexerDiscoveryInfo(value)) {
-      return { status: "unusable", reason: "invalid-shape" };
-    }
-
-    if (!this.isFresh(value)) {
-      return { status: "unusable", reason: "stale", info: value };
-    }
-
-    const compatibility = this.compareProtocolVersion(value);
-    if (compatibility.status === "incompatible") {
+    if (this.localProtocolVersion < response.minSupportedProtocolVersion) {
       return {
         status: "unusable",
         reason: "connector-protocol-too-old",
-        info: value,
-        compatibility,
+        daemonProtocolVersion: response.protocolVersion,
+        daemonMinSupportedProtocolVersion: response.minSupportedProtocolVersion,
+        connectorProtocolVersion: this.localProtocolVersion,
       };
     }
 
-    if (compatibility.status === "replace-required") {
+    if (response.protocolVersion < this.localProtocolVersion) {
       return {
         status: "replace-required",
-        info: value,
-        compatibility,
+        reason: "daemon-older-than-connector",
+        daemonProtocolVersion: response.protocolVersion,
+        connectorProtocolVersion: this.localProtocolVersion,
       };
     }
 
     return {
       status: "usable",
-      info: value,
-      compatibility,
-    };
-  }
-
-  compareProtocolVersion(
-    info: MultiplexerDiscoveryInfo,
-  ): MultiplexerProtocolCompatibility {
-    const daemonMinSupportedProtocolVersion = info.minSupportedProtocolVersion;
-
-    if (this.localProtocolVersion < daemonMinSupportedProtocolVersion) {
-      return {
-        status: "incompatible",
-        reason: "connector-older-than-daemon-min-supported",
-        daemonProtocolVersion: info.protocolVersion,
-        daemonMinSupportedProtocolVersion,
-        connectorProtocolVersion: this.localProtocolVersion,
-      };
-    }
-
-    if (info.protocolVersion < this.localProtocolVersion) {
-      return {
-        status: "replace-required",
-        reason: "daemon-older-than-connector",
-        daemonProtocolVersion: info.protocolVersion,
-        connectorProtocolVersion: this.localProtocolVersion,
-      };
-    }
-
-    return {
-      status: "compatible",
       reason:
-        info.protocolVersion === this.localProtocolVersion
+        response.protocolVersion === this.localProtocolVersion
           ? "same-version"
           : "daemon-newer-compatible",
-      daemonProtocolVersion: info.protocolVersion,
+      daemonProtocolVersion: response.protocolVersion,
       connectorProtocolVersion: this.localProtocolVersion,
     };
   }
 
-  isFresh(info: MultiplexerDiscoveryInfo): boolean {
-    return this.now() - info.heartbeat <= this.staleTimeout;
+  private createDebugInfo(): MultiplexerDebugInfo | undefined {
+    if (!this.debugInfo) {
+      return undefined;
+    }
+    return {
+      ...this.debugInfo,
+      protocolVersion:
+        this.debugInfo.protocolVersion ?? this.localProtocolVersion,
+      processId: process.pid,
+      timestamp: this.now(),
+    };
   }
 }

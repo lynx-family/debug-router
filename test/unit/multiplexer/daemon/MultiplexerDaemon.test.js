@@ -11,309 +11,96 @@ const {
   MultiplexerDaemon,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerDaemon");
 
-function createTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-daemon-"));
-}
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
-}
-
 function createHost(overrides = {}) {
-  const state = {
-    started: 0,
-    stopped: 0,
-    startOptions: [],
-    idleTimeoutHandler: null,
-    shutdownHandler: null,
-  };
-
   return {
-    state,
-    host: {
-      start: async (option) => {
-        state.started++;
-        state.startOptions.push(option);
-        if (overrides.start) {
-          await overrides.start(option);
-        }
-      },
-      stop: async () => {
-        state.stopped++;
-        if (overrides.stop) {
-          await overrides.stop();
-        }
-      },
-      getControlPort: () => {
-        return overrides.controlPort ?? 9100;
-      },
-      setIdleTimeoutHandler: (handler) => {
-        state.idleTimeoutHandler = handler;
-      },
-      setShutdownHandler: (handler) => {
-        state.shutdownHandler = handler;
-      },
+    startCalls: 0,
+    stopCalls: 0,
+    async start(option) {
+      this.startCalls++;
+      this.startOption = option;
+      if (overrides.start) return overrides.start();
+    },
+    async stop() {
+      this.stopCalls++;
+      if (overrides.stop) return overrides.stop();
+    },
+    setIdleTimeoutHandler(handler) {
+      this.idleHandler = handler;
+    },
+    setShutdownHandler(handler) {
+      this.shutdownHandler = handler;
     },
   };
 }
 
 describe("MultiplexerDaemon", function () {
   let tempDir;
-  let discoveryPath;
   let daemonLockPath;
-  let now;
-  let daemon;
 
   beforeEach(function () {
-    tempDir = createTempDir();
-    discoveryPath = path.join(tempDir, "daemon.json");
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-daemon-"));
     daemonLockPath = path.join(tempDir, "daemon.lock");
-    now = 1000;
   });
 
-  afterEach(async function () {
-    if (daemon) {
-      try {
-        await daemon.stop();
-      } catch (_error) {}
-    }
+  afterEach(function () {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function createDaemon(host, extra = {}) {
-    daemon = new MultiplexerDaemon({
-      discoveryPath,
+  it("holds daemon.lock, starts once, and never creates daemon.json", async function () {
+    const host = createHost();
+    const daemon = new MultiplexerDaemon({
       daemonLockPath,
-      protocolVersion: 1,
-      minSupportedProtocolVersion: 1,
-      debugInfo: {
-        daemonVersion: "0.0.1",
-      },
-      heartbeatInterval: 100000,
       host,
-      hostOption: { source: "test" },
-      now: () => now,
-      ...extra,
+      hostOption: { idle: 10 },
     });
-    return daemon;
-  }
-
-  it("starts host, holds daemon lock, and writes discovery", async function () {
-    const { host, state } = createHost();
-    createDaemon(host);
-
-    await daemon.start();
-
-    assert.strictEqual(state.started, 1);
-    assert.deepStrictEqual(state.startOptions, [{ source: "test" }]);
-    assert.strictEqual(fs.existsSync(daemonLockPath), true);
-    assert.deepStrictEqual(readJson(discoveryPath), {
-      pid: process.pid,
-      protocolVersion: 1,
-      minSupportedProtocolVersion: 1,
-      controlPort: 9100,
-      heartbeat: 1000,
-      debugInfo: {
-        protocolVersion: 1,
-        daemonVersion: "0.0.1",
-        processId: process.pid,
-        timestamp: 1000,
-      },
-    });
-    assert.ok(daemon.heartbeatTimer);
-  });
-
-  it("is idempotent when started more than once", async function () {
-    const { host, state } = createHost();
-    createDaemon(host);
-
     await daemon.start();
     await daemon.start();
-
-    assert.strictEqual(state.started, 1);
-  });
-
-  it("refreshes heartbeat while preserving other discovery fields", async function () {
-    const { host } = createHost();
-    createDaemon(host);
-
-    await daemon.start();
-    now = 1500;
-    daemon.refreshHeartbeat();
-
-    assert.deepStrictEqual(readJson(discoveryPath), {
-      pid: process.pid,
-      protocolVersion: 1,
-      minSupportedProtocolVersion: 1,
-      controlPort: 9100,
-      heartbeat: 1500,
-      debugInfo: {
-        protocolVersion: 1,
-        daemonVersion: "0.0.1",
-        processId: process.pid,
-        timestamp: 1500,
-      },
-    });
-  });
-
-  it("omits debug info from discovery when it is not configured", async function () {
-    const { host } = createHost();
-    createDaemon(host, { debugInfo: undefined });
-
-    await daemon.start();
-    assert.deepStrictEqual(readJson(discoveryPath), {
-      pid: process.pid,
-      protocolVersion: 1,
-      minSupportedProtocolVersion: 1,
-      controlPort: 9100,
-      heartbeat: 1000,
-    });
-
-    now = 1500;
-    daemon.refreshHeartbeat();
-    assert.deepStrictEqual(readJson(discoveryPath), {
-      pid: process.pid,
-      protocolVersion: 1,
-      minSupportedProtocolVersion: 1,
-      controlPort: 9100,
-      heartbeat: 1500,
-    });
-  });
-
-  it("stops timer, host, discovery, and daemon lock", async function () {
-    const { host, state } = createHost();
-    createDaemon(host);
-
-    await daemon.start();
+    assert.strictEqual(host.startCalls, 1);
+    assert.deepStrictEqual(host.startOption, { idle: 10 });
+    const owner = daemon.daemonLock.readOwner();
+    assert.strictEqual(owner.pid, process.pid);
+    assert.strictEqual(fs.existsSync(path.join(tempDir, "daemon.json")), false);
     await daemon.stop();
-
-    assert.strictEqual(state.stopped, 1);
-    assert.strictEqual(daemon.heartbeatTimer, undefined);
-    assert.strictEqual(daemon.discoveryInfo, null);
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
     assert.strictEqual(fs.existsSync(daemonLockPath), false);
   });
 
-  it("fails without starting host when daemon lock is already held", async function () {
-    fs.mkdirSync(daemonLockPath, { recursive: true });
-    const { host, state } = createHost();
-    createDaemon(host);
-
-    await assert.rejects(() => daemon.start(), /Failed to acquire/);
-
-    assert.strictEqual(state.started, 0);
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
-    assert.strictEqual(fs.existsSync(daemonLockPath), true);
-  });
-
-  it("cleans daemon lock when host start fails", async function () {
-    const { host } = createHost({
-      start: async () => {
-        throw new Error("host start failed");
+  it("releases daemon.lock when host start fails", async function () {
+    const host = createHost({
+      start() {
+        throw new Error("start failed");
       },
     });
-    createDaemon(host);
-
-    await assert.rejects(() => daemon.start(), /host start failed/);
-
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
+    const daemon = new MultiplexerDaemon({ daemonLockPath, host });
+    await assert.rejects(() => daemon.start(), /start failed/);
     assert.strictEqual(fs.existsSync(daemonLockPath), false);
-    assert.strictEqual(daemon.discoveryInfo, null);
   });
 
-  it("cleans local resources and rethrows host stop errors", async function () {
-    const { host } = createHost({
-      stop: async () => {
-        throw new Error("host stop failed");
+  it("releases daemon.lock and rethrows host stop failures", async function () {
+    const host = createHost({
+      stop() {
+        throw new Error("stop failed");
       },
     });
-    createDaemon(host);
-
+    const daemon = new MultiplexerDaemon({ daemonLockPath, host });
     await daemon.start();
-    await assert.rejects(() => daemon.stop(), /host stop failed/);
-
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
-    assert.strictEqual(fs.existsSync(daemonLockPath), false);
-    assert.strictEqual(daemon.discoveryInfo, null);
-  });
-
-  it("rejects invalid control ports from host", async function () {
-    const { host } = createHost({ controlPort: Number.NaN });
-    createDaemon(host);
-
-    await assert.rejects(
-      () => daemon.start(),
-      /Invalid multiplexer daemon control port/
-    );
-
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
+    await assert.rejects(() => daemon.stop(), /stop failed/);
     assert.strictEqual(fs.existsSync(daemonLockPath), false);
   });
 
-  it("stops daemon resources and invokes idle callback when host idles", async function () {
-    const idleCalls = [];
-    const { host, state } = createHost();
-    createDaemon(host, {
-      onIdleTimeout: (stopError) => {
-        idleCalls.push(stopError);
-      },
-    });
-
-    await daemon.start();
-    assert.strictEqual(typeof state.idleTimeoutHandler, "function");
-
-    await state.idleTimeoutHandler();
-
-    assert.strictEqual(state.stopped, 1);
-    assert.deepStrictEqual(idleCalls, [undefined]);
-    assert.strictEqual(daemon.heartbeatTimer, undefined);
-    assert.strictEqual(daemon.discoveryInfo, null);
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
-    assert.strictEqual(fs.existsSync(daemonLockPath), false);
-  });
-
-  it("stops daemon resources and invokes shutdown callback when host requests shutdown", async function () {
-    const shutdownCalls = [];
-    const { host, state } = createHost();
-    createDaemon(host, {
-      onShutdownRequest: (stopError) => {
-        shutdownCalls.push(stopError);
-      },
-    });
-
-    await daemon.start();
-    assert.strictEqual(typeof state.shutdownHandler, "function");
-
-    await state.shutdownHandler();
-
-    assert.strictEqual(state.stopped, 1);
-    assert.deepStrictEqual(shutdownCalls, [undefined]);
-    assert.strictEqual(daemon.heartbeatTimer, undefined);
-    assert.strictEqual(daemon.discoveryInfo, null);
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
-    assert.strictEqual(fs.existsSync(daemonLockPath), false);
-  });
-
-  it("still invokes idle callback when stop reports an error", async function () {
-    const stopError = new Error("host stop failed");
-    const idleCalls = [];
-    const { host, state } = createHost({
-      stop: async () => {
-        throw stopError;
-      },
-    });
-    createDaemon(host, {
-      onIdleTimeout: (error) => {
-        idleCalls.push(error);
-      },
-    });
-
-    await daemon.start();
-    await state.idleTimeoutHandler();
-
-    assert.strictEqual(state.stopped, 1);
-    assert.deepStrictEqual(idleCalls, [stopError]);
-    assert.strictEqual(fs.existsSync(discoveryPath), false);
-    assert.strictEqual(fs.existsSync(daemonLockPath), false);
+  it("stops for idle and shutdown callbacks", async function () {
+    for (const kind of ["idle", "shutdown"]) {
+      const host = createHost();
+      const calls = [];
+      const daemon = new MultiplexerDaemon({
+        daemonLockPath,
+        host,
+        onIdleTimeout: (error) => calls.push(["idle", error]),
+        onShutdownRequest: (error) => calls.push(["shutdown", error]),
+      });
+      await daemon.start();
+      await (kind === "idle" ? host.idleHandler() : host.shutdownHandler());
+      assert.strictEqual(host.stopCalls, 1);
+      assert.deepStrictEqual(calls, [[kind, undefined]]);
+    }
   });
 });

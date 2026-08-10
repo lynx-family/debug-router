@@ -16,6 +16,7 @@ import { DriverClient } from "./DriverClient";
 import { MultiOpenCallback, MultiOpenStatus } from "./MultiOpenCallBack";
 import {
   ControlEvent,
+  MULTIPLEXER_PROTOCOL_VERSION,
   DeviceSnapshot,
   ClientSnapshot,
   Snapshot,
@@ -34,7 +35,6 @@ import { createMultiplexerPaths } from "../multiplexer/utils/paths";
 
 const DEFAULT_DEV_SERVE_PORT = 19783;
 const DEFAULT_MULTIPLEXER_DAEMON_IDLE_TIMEOUT = 600000;
-const DEFAULT_MULTIPLEXER_STALE_TIMEOUT = 5000;
 const DESIRED_RECOVERY_RETRY_DELAY_MS = 100;
 
 type WebSocketServerCompat = {
@@ -52,7 +52,7 @@ type WebSocketServerCompat = {
  * daemon startup, the replacement uses this Connector's manualConnect and
  * capability options exactly, so disabled-capability scenarios can be
  * tested. Closing this Connector force-stops the daemon and removes its
- * discovery/lock artifacts instead of waiting for the daemon idle timeout.
+ * endpoint/lock artifacts instead of waiting for the daemon idle timeout.
  * Close never starts or reconnects a daemon, but it still cleans up a daemon
  * and artifacts already present in the selected multiplexerDataDir.
  *
@@ -68,8 +68,6 @@ export type DebugRouterConnectorOption = PhysicalConnectorOption & {
   forceRespawnDaemon?: boolean;
   multiplexerDaemonIdleTimeout?: number;
   multiplexerStartupTimeout?: number;
-  multiplexerStaleTimeout?: number;
-  multiplexerHeartbeatInterval?: number;
   multiplexerRpcTimeout?: number;
   multiplexerRootDir?: string;
   multiplexerDataDir?: string;
@@ -87,7 +85,7 @@ export class DebugRouterConnector {
   readonly devices: Map<string, MultiplexerDevice> = new Map();
   readonly usbClients: Map<number, MultiplexerUsbClient> = new Map();
   readonly enableWebSocket;
-  wssPort: number;
+  wssPort: number = DEFAULT_DEV_SERVE_PORT;
   wssHost: string | undefined;
   roomId: string | undefined;
   wss: WebSocketServerCompat | null = null;
@@ -163,7 +161,6 @@ export class DebugRouterConnector {
     this.enableDesktop = option.enableDesktop ?? false;
     this.enableNetworkDevice = option.enableNetworkDevice ?? false;
     this.forceRespawnDaemon = option.forceRespawnDaemon ?? false;
-    this.wssPort = option.websocketOption?.port ?? DEFAULT_DEV_SERVE_PORT;
     this.roomId = option.websocketOption?.roomId;
     if (this.forceRespawnDaemon) {
       defaultLogger.warn(
@@ -175,21 +172,18 @@ export class DebugRouterConnector {
       rootDir: option.multiplexerRootDir,
       dataDir: option.multiplexerDataDir,
     });
-    const staleTimeout =
-      option.multiplexerStaleTimeout ?? DEFAULT_MULTIPLEXER_STALE_TIMEOUT;
     const discovery = new MultiplexerDiscovery({
-      discoveryPath: paths.discoveryPath,
-      staleTimeout,
+      controlEndpoint: paths.controlEndpoint,
+      localProtocolVersion: MULTIPLEXER_PROTOCOL_VERSION,
     });
     const daemonManager = new MultiplexerDaemonManager({
       discovery,
+      controlEndpoint: paths.controlEndpoint,
       spawnLockPath: paths.spawnLockPath,
       daemonLockPath: paths.daemonLockPath,
       daemonEntry: option.multiplexerDaemonEntry ?? resolveDaemonEntryPath(),
       startupTimeout:
         option.multiplexerStartupTimeout ?? DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT,
-      staleTimeout,
-      heartbeatInterval: option.multiplexerHeartbeatInterval,
       legacyDriverDir: option.multiplexerLegacyDriverDir ?? driver_dir,
       multiplexerDaemonIdleTimeout:
         option.multiplexerDaemonIdleTimeout ??
@@ -206,6 +200,7 @@ export class DebugRouterConnector {
 
     this.daemonClient = new MultiplexerDaemonClient({
       daemonManager,
+      controlEndpoint: paths.controlEndpoint,
       rpcTimeout: option.multiplexerRpcTimeout,
     });
     this.unsubscribeDaemonEvents = this.daemonClient.subscribe((event) =>

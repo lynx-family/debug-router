@@ -2,28 +2,28 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { WebSocket } from "ws";
-import type { RawData } from "ws";
+import { createConnection } from "net";
 import { defaultLogger } from "../../utils/logger";
 import {
-  ControlRpcError,
   ControlEvent,
-  MultiplexerDebugInfo,
+  ControlRpcError,
   ControlRpcMethod,
   ControlRpcParams,
   ControlRpcRequest,
   ControlRpcResponse,
   ControlRpcResult,
-  MULTIPLEXER_CONTROL_PATH,
   MULTIPLEXER_PROTOCOL_VERSION,
-  MultiplexerDiscoveryInfo,
+  MultiplexerDebugInfo,
+  MultiplexerRegisterRequest,
   Snapshot,
   isControlEvent,
   isControlRpcRequest,
   isControlRpcResponse,
+  isMultiplexerHandshakeErrorResponse,
+  isMultiplexerRegisterResponse,
   isRecord,
-  parseJsonValue,
 } from "../protocol";
+import { MultiplexerControlTransport } from "../transport/MultiplexerControlTransport";
 import type { MultiplexerDaemonManager } from "./MultiplexerDaemonManager";
 
 export const DEFAULT_MULTIPLEXER_RPC_TIMEOUT = 5000;
@@ -32,12 +32,11 @@ const UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT = 500;
 
 export type MultiplexerDaemonClientOption = {
   daemonManager: MultiplexerDaemonManager;
-  controlPath?: string;
+  controlEndpoint: string;
   rpcTimeout?: number;
   debugInfo?: MultiplexerDebugInfo;
 
   // only used for tests or embedding
-  WebSocketCtor?: typeof WebSocket;
   now?: () => number;
 };
 
@@ -55,23 +54,25 @@ export type MultiplexerDaemonConnectionState =
 export class MultiplexerDaemonClient {
   readonly pendingRpc: Map<number, PendingRpc> = new Map();
   private readonly daemonManager: MultiplexerDaemonManager;
-  private readonly controlPath: string;
+  private readonly controlEndpoint: string;
   private readonly rpcTimeout: number;
   private readonly debugInfo?: MultiplexerDebugInfo;
-  private readonly WebSocketCtor: typeof WebSocket;
   private readonly now: () => number;
   private eventListener?: (event: ControlEvent) => void;
-  private readonly connectionListeners = new Set<
-    (state: MultiplexerDaemonConnectionState) => void
-  >();
-  private controlSocket: WebSocket | null = null;
+  private connectionStateListener?: (
+    state: MultiplexerDaemonConnectionState,
+  ) => void;
+  private controlTransport: MultiplexerControlTransport | null = null;
+  private unsubscribeTransportMessage: (() => void) | undefined;
+  private unsubscribeTransportClose: (() => void) | undefined;
   private nextRpcId = 1;
   private connecting: Promise<void> | null = null;
   private closed = false;
+  private registered = false;
 
   constructor(option: MultiplexerDaemonClientOption) {
     this.daemonManager = option.daemonManager;
-    this.controlPath = option.controlPath ?? MULTIPLEXER_CONTROL_PATH;
+    this.controlEndpoint = option.controlEndpoint;
     this.rpcTimeout = option.rpcTimeout ?? DEFAULT_MULTIPLEXER_RPC_TIMEOUT;
     this.debugInfo = option.debugInfo
       ? {
@@ -80,29 +81,30 @@ export class MultiplexerDaemonClient {
           ...option.debugInfo,
         }
       : undefined;
-    this.WebSocketCtor = option.WebSocketCtor ?? WebSocket;
     this.now = option.now ?? Date.now;
     this.daemonManager.setDaemonClient?.(this);
   }
 
   get ready(): boolean {
-    return this.isSocketOpen();
+    return (
+      this.registered &&
+      !!this.controlTransport &&
+      this.controlTransport.writable
+    );
   }
 
   async connect(): Promise<void> {
     if (this.ready) {
       return;
     }
-
     if (this.connecting) {
       return this.connecting;
     }
 
     this.closed = false;
-    this.connecting = this.connectInternal().finally(() => {
+    this.connecting = this.connectInternal(true).finally(() => {
       this.connecting = null;
     });
-
     return this.connecting;
   }
 
@@ -115,31 +117,23 @@ export class MultiplexerDaemonClient {
     return this.callConnected(method, params);
   }
 
-  async callOnDiscovery<M extends ControlRpcMethod>(
-    discovery: MultiplexerDiscoveryInfo,
+  async callOnDaemon<M extends ControlRpcMethod>(
     method: M,
     params: ControlRpcParams[M],
   ): Promise<ControlRpcResult[M]> {
     this.assertValidRpcParams(method, params);
-    await this.connectToDiscovery(discovery);
+    if (!this.ready) {
+      await this.connectInternal(false);
+    }
     return this.callConnected(method, params);
-  }
-
-  async connectToDiscovery(discovery: MultiplexerDiscoveryInfo): Promise<void> {
-    this.closed = false;
-    this.connecting = this.connectInternal(discovery).finally(() => {
-      this.connecting = null;
-    });
-
-    return this.connecting;
   }
 
   private callConnected<M extends ControlRpcMethod>(
     method: M,
     params: ControlRpcParams[M],
   ): Promise<ControlRpcResult[M]> {
-    const socket = this.controlSocket;
-    if (!socket || !this.ready) {
+    const transport = this.controlTransport;
+    if (!transport || !this.ready) {
       throw new Error("Multiplexer control socket is not connected");
     }
 
@@ -159,8 +153,7 @@ export class MultiplexerDaemonClient {
         reject(
           new Error(`Timed out waiting for multiplexer RPC ${method} response`),
         );
-      }, this.getRpcTimeout(method, params));
-
+      }, this.getRpcTimeout(params));
       this.pendingRpc.set(id, {
         method,
         resolve: resolve as (value: unknown) => void,
@@ -168,20 +161,16 @@ export class MultiplexerDaemonClient {
         timer,
       });
 
-      socket.send(JSON.stringify(request), (error) => {
-        if (!error) {
-          return;
-        }
-
+      try {
+        transport.send(request);
+      } catch (error) {
         const pending = this.pendingRpc.get(id);
-        if (!pending) {
-          return;
+        if (pending) {
+          this.pendingRpc.delete(id);
+          clearTimeout(pending.timer);
+          pending.reject(asError(error));
         }
-
-        this.pendingRpc.delete(id);
-        clearTimeout(pending.timer);
-        pending.reject(error);
-      });
+      }
     });
   }
 
@@ -205,26 +194,17 @@ export class MultiplexerDaemonClient {
   subscribe(listener: (event: ControlEvent) => void): () => void {
     this.eventListener = listener;
     return () => {
-      if (this.eventListener === listener) {
-        this.eventListener = undefined;
-      }
+      this.eventListener = undefined;
     };
   }
 
   subscribeConnectionState(
     listener: (state: MultiplexerDaemonConnectionState) => void,
   ): () => void {
-    this.connectionListeners.add(listener);
+    this.connectionStateListener = listener;
     return () => {
-      this.connectionListeners.delete(listener);
+      this.connectionStateListener = undefined;
     };
-  }
-
-  async reconnect(): Promise<void> {
-    await this.closeSocket(
-      new Error("Multiplexer control socket reconnecting"),
-    );
-    await this.connect();
   }
 
   async forceStopDaemon(): Promise<void> {
@@ -238,11 +218,7 @@ export class MultiplexerDaemonClient {
   }
 
   handleSnapshot(snapshot: Snapshot): void {
-    this.handleHostEvent({
-      kind: "event",
-      event: "snapshot",
-      data: snapshot,
-    });
+    this.handleHostEvent({ kind: "event", event: "snapshot", data: snapshot });
   }
 
   handleHostEvent(event: ControlEvent): void {
@@ -257,97 +233,105 @@ export class MultiplexerDaemonClient {
     }
   }
 
-  private async connectInternal(
-    discovery?: MultiplexerDiscoveryInfo,
-  ): Promise<void> {
-    if (this.controlSocket) {
+  private async connectInternal(ensureDaemon: boolean): Promise<void> {
+    if (this.controlTransport) {
       await this.closeSocket(
         new Error("Replacing multiplexer control socket"),
         true,
         false,
       );
     }
+    if (ensureDaemon) {
+      await this.daemonManager.ensureDaemon();
+    }
 
-    const resolvedDiscovery =
-      discovery ?? (await this.daemonManager.ensureDaemon());
-    const socket = new this.WebSocketCtor(
-      this.createControlUrl(resolvedDiscovery),
+    const transport = new MultiplexerControlTransport(
+      createConnection(this.controlEndpoint),
     );
-
-    this.controlSocket = socket;
+    this.controlTransport = transport;
+    this.registered = false;
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-
-      const cleanup = () => {
-        socket.off("open", onOpen);
-        socket.off("error", onError);
-        socket.off("close", onCloseBeforeOpen);
+      const cleanupHandshake = () => {
+        unsubscribeConnect();
+        unsubscribeMessage();
+        unsubscribeClose();
       };
       const fail = (error: Error) => {
         if (settled) {
           return;
         }
-
         settled = true;
-        cleanup();
-        if (this.controlSocket === socket) {
-          this.controlSocket = null;
+        cleanupHandshake();
+        if (this.controlTransport === transport) {
+          this.controlTransport = null;
         }
+        transport.destroy(error);
         reject(error);
       };
-      const onOpen = () => {
-        if (settled) {
+      const onConnect = () => {
+        const debugInfo = this.createDebugInfo();
+        const request: MultiplexerRegisterRequest = {
+          kind: "register",
+          ...(debugInfo ? { debugInfo } : {}),
+        };
+        try {
+          transport.send(request);
+        } catch (error) {
+          fail(asError(error));
+        }
+      };
+      const unsubscribeMessage = transport.onMessage((message) => {
+        if (isMultiplexerHandshakeErrorResponse(message)) {
+          fail(createRpcError(message.error));
+          return;
+        }
+        if (!isMultiplexerRegisterResponse(message)) {
+          fail(new Error("Invalid multiplexer register response"));
           return;
         }
 
         settled = true;
-        cleanup();
-        socket.on("message", this.handleSocketMessage);
-        socket.on("close", this.handleSocketClose);
-        socket.on("error", this.handleSocketError);
+        cleanupHandshake();
+        this.registered = true;
+        this.unsubscribeTransportMessage = transport.onMessage(
+          this.handleTransportMessage,
+        );
+        this.unsubscribeTransportClose = transport.onClose(
+          this.handleTransportClose,
+        );
         this.emitConnectionState({ state: "connected" });
         resolve();
-      };
-      const onError = (error: Error) => {
-        fail(error);
-      };
-      const onCloseBeforeOpen = () => {
-        fail(new Error("Multiplexer control socket closed before open"));
-      };
+      });
+      const unsubscribeClose = transport.onClose((error) => {
+        fail(
+          error ??
+            new Error("Multiplexer control socket closed before register"),
+        );
+      });
 
-      socket.once("open", onOpen);
-      socket.once("error", onError);
-      socket.once("close", onCloseBeforeOpen);
+      const unsubscribeConnect = transport.onConnect(onConnect);
     });
   }
 
-  private handleSocketMessage = (data: RawData): void => {
-    const messageText = rawDataToString(data);
-    const value = parseJsonValue(messageText);
-
+  private readonly handleTransportMessage = (value: unknown): void => {
     if (isControlRpcResponse(value)) {
       this.handleRpcResponse(value);
       return;
     }
-
     if (isControlEvent(value)) {
       this.handleHostEvent(value);
       return;
     }
-
-    this.reportUnknownControlMessage(value, messageText);
+    this.reportUnknownControlMessage(value);
   };
 
-  private handleSocketClose = (): void => {
+  private readonly handleTransportClose = (error?: Error): void => {
     void this.closeSocket(
-      new Error("Multiplexer control socket closed"),
+      error ?? new Error("Multiplexer control socket closed"),
       false,
     );
-  };
-
-  private handleSocketError = (error: Error): void => {
-    void this.closeSocket(error);
   };
 
   private handleRpcResponse(response: ControlRpcResponse): void {
@@ -356,7 +340,6 @@ export class MultiplexerDaemonClient {
     if (!pending) {
       return;
     }
-
     if (!isControlRpcResponse(response, pending.method)) {
       this.pendingRpc.delete(responseId);
       clearTimeout(pending.timer);
@@ -366,16 +349,13 @@ export class MultiplexerDaemonClient {
       return;
     }
 
-    const typedResponse = response as ControlRpcResponse;
     this.pendingRpc.delete(responseId);
     clearTimeout(pending.timer);
-
-    if (typedResponse.ok) {
-      pending.resolve(typedResponse.result);
-      return;
+    if (response.ok) {
+      pending.resolve(response.result);
+    } else {
+      pending.reject(createRpcError(response.error));
     }
-
-    pending.reject(createRpcError(typedResponse.error));
   }
 
   private async closeSocket(
@@ -383,64 +363,47 @@ export class MultiplexerDaemonClient {
     closeUnderlyingSocket: boolean = true,
     clearConnecting: boolean = true,
   ): Promise<void> {
-    const socket = this.controlSocket;
-    this.controlSocket = null;
+    const transport = this.controlTransport;
+    this.controlTransport = null;
+    this.registered = false;
     if (clearConnecting) {
       this.connecting = null;
     }
+    this.unsubscribeTransportMessage?.();
+    this.unsubscribeTransportClose?.();
+    this.unsubscribeTransportMessage = undefined;
+    this.unsubscribeTransportClose = undefined;
     this.rejectPending(error);
 
-    if (!socket) {
+    if (!transport) {
       return;
     }
-
     this.emitConnectionState({ state: "disconnected", error });
-
-    socket.off("message", this.handleSocketMessage);
-    socket.off("close", this.handleSocketClose);
-    socket.off("error", this.handleSocketError);
-
-    if (!closeUnderlyingSocket || socket.readyState === WebSocket.CLOSED) {
+    if (!closeUnderlyingSocket) {
       return;
     }
-
-    await new Promise<void>((resolve) => {
-      socket.once("close", () => resolve());
-      socket.close();
-    });
+    await transport.end();
   }
 
   private emitConnectionState(state: MultiplexerDaemonConnectionState): void {
-    for (const listener of Array.from(this.connectionListeners)) {
-      listener(state);
-    }
-  }
-
-  private isSocketOpen(): boolean {
-    return this.controlSocket?.readyState === WebSocket.OPEN;
+    this.connectionStateListener?.(state);
   }
 
   private createRpcId(): number {
     return this.nextRpcId++;
   }
 
-  private getRpcTimeout<M extends ControlRpcMethod>(
-    _method: M,
-    params: ControlRpcParams[M],
-  ): number {
+  private getRpcTimeout(params: unknown): number {
     const operationTimeout = getOperationTimeout(params);
-    if (operationTimeout === undefined) {
-      return this.rpcTimeout;
-    }
-
-    return Math.max(this.rpcTimeout, operationTimeout + RPC_TIMEOUT_BUFFER_MS);
+    return operationTimeout === undefined
+      ? this.rpcTimeout
+      : Math.max(this.rpcTimeout, operationTimeout + RPC_TIMEOUT_BUFFER_MS);
   }
 
   private createDebugInfo(): MultiplexerDebugInfo | undefined {
     if (!this.debugInfo) {
       return undefined;
     }
-
     return {
       ...this.debugInfo,
       processId: process.pid,
@@ -448,25 +411,21 @@ export class MultiplexerDaemonClient {
     };
   }
 
-  private createControlUrl(discovery: MultiplexerDiscoveryInfo): string {
-    return `ws://127.0.0.1:${discovery.controlPort}${this.controlPath}`;
-  }
-
-  private reportUnknownControlMessage(
-    value: unknown,
-    messageText: string,
-  ): void {
-    const messageKind = isRecord(value) ? value.kind : undefined;
-    const messageEvent = isRecord(value) ? value.event : undefined;
-    const messageId = isRecord(value) ? value.id : undefined;
+  private reportUnknownControlMessage(value: unknown): void {
+    const messageText = safeStringify(value);
     const categories = {
-      kind: typeof messageKind === "string" ? messageKind : undefined,
-      event: typeof messageEvent === "string" ? messageEvent : undefined,
-      id: typeof messageId === "number" ? messageId : undefined,
-      parseResult: value === null ? "invalid-json" : typeof value,
+      kind:
+        isRecord(value) && typeof value.kind === "string"
+          ? value.kind
+          : undefined,
+      event:
+        isRecord(value) && typeof value.event === "string"
+          ? value.event
+          : undefined,
+      id:
+        isRecord(value) && typeof value.id === "number" ? value.id : undefined,
       messagePreview: truncateMessage(messageText),
     };
-
     defaultLogger.warn(
       `Unknown multiplexer control message: ${JSON.stringify(categories)}`,
     );
@@ -477,13 +436,10 @@ function getOperationTimeout(params: unknown): number | undefined {
   if (!isRecord(params)) {
     return undefined;
   }
-
   const timeout = params.timeout;
-  if (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 0) {
-    return undefined;
-  }
-
-  return timeout;
+  return typeof timeout === "number" && Number.isFinite(timeout) && timeout >= 0
+    ? timeout
+    : undefined;
 }
 
 function createRpcError(error: ControlRpcError): Error {
@@ -492,26 +448,20 @@ function createRpcError(error: ControlRpcError): Error {
   return rpcError;
 }
 
-function rawDataToString(data: RawData): string {
-  if (typeof data === "string") {
-    return data;
-  }
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
 
-  if (Array.isArray(data)) {
-    return Buffer.concat(data).toString();
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch (_error) {
+    return String(value);
   }
-
-  if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString();
-  }
-
-  return data.toString();
 }
 
 function truncateMessage(message: string): string {
-  if (message.length <= UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT) {
-    return message;
-  }
-
-  return `${message.slice(0, UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT)}...`;
+  return message.length <= UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT
+    ? message
+    : `${message.slice(0, UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT)}...`;
 }

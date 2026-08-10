@@ -26,11 +26,7 @@ const writeFileAtomicModulePath = require.resolve("write-file-atomic", {
   paths: [connectorRoot],
 });
 const atomicFileModule = rewire(atomicFileModulePath);
-const {
-  removeFileIfExists,
-  writeFileAtomic,
-  writeJsonAtomic,
-} = atomicFileModule;
+const { writeFileAtomic, writeJsonAtomic } = atomicFileModule;
 const {
   FileLock,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/FileLock");
@@ -168,31 +164,6 @@ describe("multiplexer atomic file utilities", function () {
       fs.readdirSync(tempDir).filter((name) => name.endsWith(".tmp")),
       []
     );
-  });
-
-  it("removes files only when they exist", function () {
-    const filePath = path.join(tempDir, "daemon.json");
-
-    assert.strictEqual(removeFileIfExists(filePath), false);
-    fs.writeFileSync(filePath, "{}");
-    assert.strictEqual(removeFileIfExists(filePath), true);
-    assert.strictEqual(fs.existsSync(filePath), false);
-  });
-
-  it("rethrows non-ENOENT remove errors", function () {
-    const filePath = path.join(tempDir, "daemon.json");
-    const originalUnlinkSync = fs.unlinkSync;
-    fs.unlinkSync = function throwOnUnlink() {
-      const error = new Error("permission denied");
-      error.code = "EACCES";
-      throw error;
-    };
-
-    try {
-      assert.throws(() => removeFileIfExists(filePath), /permission denied/);
-    } finally {
-      fs.unlinkSync = originalUnlinkSync;
-    }
   });
 });
 
@@ -520,6 +491,28 @@ describe("multiplexer FileLock", function () {
     assert.strictEqual(fs.existsSync(lockPath), true);
 
     lock.release();
+  });
+
+  it("configures retries for transient recursive lock removal failures", function () {
+    const lockPath = path.join(tempDir, "try-retry.lock");
+    fs.mkdirSync(lockPath);
+    let removeOptions;
+
+    const rewiredFileLockModule = rewireDefaultFsImport(fileLockModulePath, {
+      rmSync(targetPath, options) {
+        removeOptions = options;
+        return fs.rmSync(targetPath, options);
+      },
+    });
+    const RewiredFileLock = rewiredFileLockModule.FileLock;
+
+    assert.strictEqual(new RewiredFileLock(lockPath).tryRemove(null), true);
+    assert.deepStrictEqual(removeOptions, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 10,
+    });
   });
 
   it("treats try remove failures as best effort", function () {

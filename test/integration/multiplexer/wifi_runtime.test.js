@@ -12,10 +12,10 @@ const {
   createCustomizedResponseEnvelope,
   createIntegrationContext,
   delay,
+  getUsableDiscovery,
   parseCustomizedEnvelope,
   platformTimeout,
   processExists,
-  readJsonFile,
   waitFor,
   waitForSocketMessage,
 } = require("./helpers/integration_harness");
@@ -464,8 +464,6 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
 
   it("keeps the daemon for connected Connectors, then idles despite a remaining WiFi runtime", async function () {
     context = createIntegrationContext("wifi-runtime-idle", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       multiplexerDaemonIdleTimeout: 150,
       enableWebSocket: true,
       websocketOption: {
@@ -484,7 +482,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
     );
     context.trackSocket(runtime.socket);
     const discovery = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+      () => getUsableDiscovery(context.discovery),
       2000
     );
 
@@ -504,8 +502,6 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
 
   async function startWebSocketConnector(name) {
     context = createIntegrationContext(name, {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       enableWebSocket: true,
       websocketOption: {
         port: 0,

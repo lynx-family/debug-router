@@ -25,8 +25,6 @@ const HIGH_PRESSURE_WEBSOCKET_MESSAGES = 500;
 const HIGH_PRESSURE_SETUP_BATCH_SIZE = 20;
 const HIGH_PRESSURE_TIMEOUT_MS = 10000;
 const HIGH_PRESSURE_RPC_TIMEOUT_MS = 30000;
-const HIGH_PRESSURE_STALE_TIMEOUT_MS = 10000;
-const RECOVERY_STALE_TIMEOUT = 200;
 
 describe("multiplexer integration stability, stress, and recovery", function () {
   this.timeout(120000);
@@ -42,36 +40,36 @@ describe("multiplexer integration stability, stress, and recovery", function () 
 
   it("keeps connector mirrors and RPC routing stable under repeated facade churn and parallel requests", async function () {
     context = createIntegrationContext("stability-facade-stress", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
-      staleTimeout: 500,
       state: createState({
         deviceCount: 2,
         clientCount: 4,
       }),
     });
 
-    const connectors = Array.from({ length: 5 }, () => context.createConnector());
+    const connectors = Array.from({ length: 5 }, () =>
+      context.createConnector()
+    );
     const deviceLists = await Promise.all(
-      connectors.map((connector) => connector.connectDevices(-1, null, true)),
+      connectors.map((connector) => connector.connectDevices(-1, null, true))
     );
     for (const devices of deviceLists) {
-      assert.deepStrictEqual(
-        devices.map((device) => device.serial).sort(),
-        ["device-1", "device-2"],
-      );
+      assert.deepStrictEqual(devices.map((device) => device.serial).sort(), [
+        "device-1",
+        "device-2",
+      ]);
     }
 
     await Promise.all(
       connectors.flatMap((connector) => [
         connector.connectUsbClients("device-1", -1, true, null),
         connector.connectUsbClients("device-2", -1, true, null),
-      ]),
+      ])
     );
     for (const connector of connectors) {
       assert.deepStrictEqual(
         Array.from(connector.usbClients.keys()).sort((a, b) => a - b),
-        [1, 2, 3, 4],
+        [1, 2, 3, 4]
       );
     }
 
@@ -86,8 +84,8 @@ describe("multiplexer integration stability, stress, and recovery", function () 
                 marker,
                 response: JSON.parse(response),
               }));
-          }),
-        ),
+          })
+        )
       );
 
       for (const { marker, response } of responses) {
@@ -112,7 +110,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         connectors[0].usbClients.has(5) &&
         connectors[2].usbClients.has(5) &&
         connectors[4].usbClients.has(5),
-      2000,
+      2000
     );
 
     const activeConnectors = [connectors[0], connectors[2], connectors[4]];
@@ -123,25 +121,19 @@ describe("multiplexer integration stability, stress, and recovery", function () 
           .sendClientMessage("Runtime.evaluate", {
             marker: `active-after-churn-${index}`,
           })
-          .then((response) => JSON.parse(response)),
-      ),
+          .then((response) => JSON.parse(response))
+      )
     );
     assert.deepStrictEqual(
       activeResponses.map((response) => response.result.params.marker),
-      [
-        "active-after-churn-0",
-        "active-after-churn-1",
-        "active-after-churn-2",
-      ],
+      ["active-after-churn-0", "active-after-churn-1", "active-after-churn-2"]
     );
     assert.strictEqual(startedDaemonPids().size, 1);
   });
 
   it("keeps WebSocket frontend routing isolated during repeated concurrent requests and frontend churn", async function () {
     context = createIntegrationContext("stability-websocket-stress", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
-      staleTimeout: 500,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -191,11 +183,11 @@ describe("multiplexer integration stability, stress, and recovery", function () 
       const responses = await Promise.all(waits);
       assert.deepStrictEqual(
         responses.map(({ response }) => response.id),
-        [7, 7, 7],
+        [7, 7, 7]
       );
       assert.deepStrictEqual(
         responses.map(({ response }) => response.result.params.marker),
-        frontends.map(({ app }) => `${app}-round-${round}`),
+        frontends.map(({ app }) => `${app}-round-${round}`)
       );
     }
 
@@ -205,7 +197,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         context
           .readLog()
           .some((entry) => entry.event === "client-send-message"),
-      2000,
+      2000
     );
 
     const replacement = await connectDriverWebSocket(url, {
@@ -224,20 +216,22 @@ describe("multiplexer integration stability, stress, and recovery", function () 
           parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
             ?.marker === `${app}-after-churn-${index}`
         );
-      }),
+      })
     );
     frontends.forEach(({ app, socket }, index) => {
-      socket.send(createCustomizedEnvelope(2, 9, `${app}-after-churn-${index}`));
+      socket.send(
+        createCustomizedEnvelope(2, 9, `${app}-after-churn-${index}`)
+      );
     });
 
     const messages = await Promise.all(waits);
     assert.deepStrictEqual(
       messages.map(
-        (message) => parseCustomizedEnvelope(message.text).cdp.result.params,
+        (message) => parseCustomizedEnvelope(message.text).cdp.result.params
       ),
       frontends.map(({ app }, index) => ({
         marker: `${app}-after-churn-${index}`,
-      })),
+      }))
     );
     assert.strictEqual(startedDaemonPids().size, 1);
   });
@@ -245,10 +239,8 @@ describe("multiplexer integration stability, stress, and recovery", function () 
   it("handles three-digit connector and WebSocket frontends with four-digit concurrent routed messages", async function () {
     this.timeout(180000);
     context = createIntegrationContext("stability-combined-high-pressure", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
       startupTimeout: HIGH_PRESSURE_TIMEOUT_MS,
-      staleTimeout: HIGH_PRESSURE_STALE_TIMEOUT_MS,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -267,26 +259,31 @@ describe("multiplexer integration stability, stress, and recovery", function () 
           enableWebSocket: true,
           rpcTimeout: HIGH_PRESSURE_RPC_TIMEOUT_MS,
           startupTimeout: HIGH_PRESSURE_TIMEOUT_MS,
-        }),
+        })
     );
-    await runInBatches(connectors, HIGH_PRESSURE_SETUP_BATCH_SIZE, (connector) =>
-      connector.connectDevices(-1, null, true),
+    await runInBatches(
+      connectors,
+      HIGH_PRESSURE_SETUP_BATCH_SIZE,
+      (connector) => connector.connectDevices(-1, null, true)
     );
-    await runInBatches(connectors, HIGH_PRESSURE_SETUP_BATCH_SIZE, (connector) =>
-      Promise.all([
-        connector.connectUsbClients("device-1", -1, true, null),
-        connector.connectUsbClients("device-2", -1, true, null),
-      ]),
+    await runInBatches(
+      connectors,
+      HIGH_PRESSURE_SETUP_BATCH_SIZE,
+      (connector) =>
+        Promise.all([
+          connector.connectUsbClients("device-1", -1, true, null),
+          connector.connectUsbClients("device-2", -1, true, null),
+        ])
     );
 
     for (const connector of connectors) {
-      assert.deepStrictEqual(
-        Array.from(connector.devices.keys()).sort(),
-        ["device-1", "device-2"],
-      );
+      assert.deepStrictEqual(Array.from(connector.devices.keys()).sort(), [
+        "device-1",
+        "device-2",
+      ]);
       assert.deepStrictEqual(
         Array.from(connector.usbClients.keys()).sort((a, b) => a - b),
-        [1, 2, 3, 4],
+        [1, 2, 3, 4]
       );
     }
 
@@ -295,7 +292,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
     const frontends = await runInBatches(
       Array.from(
         { length: HIGH_PRESSURE_WEBSOCKET_FRONTENDS },
-        (_unused, index) => index,
+        (_unused, index) => index
       ),
       HIGH_PRESSURE_SETUP_BATCH_SIZE,
       async (index) => {
@@ -307,13 +304,9 @@ describe("multiplexer integration stability, stress, and recovery", function () 
           app: `high-pressure-driver-${index}`,
           ...frontend,
         };
-      },
+      }
     );
-    await waitForClientIds(
-      frontends,
-      [1, 2, 3, 4],
-      HIGH_PRESSURE_TIMEOUT_MS,
-    );
+    await waitForClientIds(frontends, [1, 2, 3, 4], HIGH_PRESSURE_TIMEOUT_MS);
 
     const connectorRequests = Array.from(
       { length: HIGH_PRESSURE_CONNECTOR_MESSAGES },
@@ -328,7 +321,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
             marker,
             response: JSON.parse(response),
           }));
-      },
+      }
     );
 
     const websocketRequests = Array.from(
@@ -343,7 +336,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
             value?.event === "Customized" &&
             parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
               ?.marker === marker,
-          10000,
+          10000
         ).then((message) => ({
           marker,
           response: parseCustomizedEnvelope(message.text).cdp,
@@ -351,7 +344,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
 
         frontend.socket.send(createCustomizedEnvelope(clientId, 77, marker));
         return wait;
-      },
+      }
     );
 
     const [connectorResponses, websocketResponses] = await Promise.all([
@@ -361,14 +354,14 @@ describe("multiplexer integration stability, stress, and recovery", function () 
 
     assert.strictEqual(
       connectorResponses.length + websocketResponses.length,
-      HIGH_PRESSURE_CONNECTOR_MESSAGES + HIGH_PRESSURE_WEBSOCKET_MESSAGES,
+      HIGH_PRESSURE_CONNECTOR_MESSAGES + HIGH_PRESSURE_WEBSOCKET_MESSAGES
     );
     assert.deepStrictEqual(
       connectorResponses.map(({ marker, response }) => [
         marker,
         response.result.params.marker,
       ]),
-      connectorResponses.map(({ marker }) => [marker, marker]),
+      connectorResponses.map(({ marker }) => [marker, marker])
     );
     assert.deepStrictEqual(
       websocketResponses.map(({ marker, response }) => [
@@ -376,17 +369,15 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         response.id,
         response.result.params.marker,
       ]),
-      websocketResponses.map(({ marker }) => [marker, 77, marker]),
+      websocketResponses.map(({ marker }) => [marker, 77, marker])
     );
     assert.strictEqual(startedDaemonPids().size, 1);
   });
 
   it("recovers from daemon-side uncaught exceptions and continues serving concurrent connector traffic", async function () {
     context = createIntegrationContext("stability-exception-recovery", {
-      heartbeatInterval: 25,
       readyPollInterval: 10,
       replacementTimeout: 20,
-      staleTimeout: RECOVERY_STALE_TIMEOUT,
       state: {
         ...createState({
           deviceCount: 1,
@@ -402,11 +393,11 @@ describe("multiplexer integration stability, stress, and recovery", function () 
       "device-1",
       -1,
       true,
-      null,
+      null
     );
     const initialInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000,
+      3000
     );
 
     const pending = client.sendClientMessage("Runtime.evaluate", {
@@ -419,12 +410,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
 
     await assert.rejects(pending, /closed|socket|Multiplexer/i);
     await waitFor(() => !processExists(initialInfo.pid), 3000);
-    await waitFor(
-      () =>
-        !fs.existsSync(context.paths.discoveryPath) &&
-        !fs.existsSync(context.paths.daemonLockPath),
-      3000,
-    );
+    await waitFor(() => !fs.existsSync(context.paths.daemonLockPath), 3000);
     truncateCommandLog(context);
 
     assert(
@@ -433,9 +419,9 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         .some(
           (entry) =>
             entry.event === "daemon-uncaught-exception" &&
-            entry.message === "integration forced daemon exception",
+            entry.message === "integration forced daemon exception"
         ),
-      "daemon should log the forced uncaught exception before cleanup",
+      "daemon should log the forced uncaught exception before cleanup"
     );
 
     context.writeState(
@@ -443,13 +429,13 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         deviceCount: 1,
         clientCount: 3,
         firstClientId: 10,
-      }),
+      })
     );
 
     const recoveredDevices = await connector.connectDevices(-1, null, true);
     assert.deepStrictEqual(
       recoveredDevices.map((device) => device.serial),
-      ["device-1"],
+      ["device-1"]
     );
     const replacementInfo = await waitFor(() => {
       const info = getUsableDiscovery(context.discovery);
@@ -469,17 +455,17 @@ describe("multiplexer integration stability, stress, and recovery", function () 
       context.createConnector(),
     ];
     await Promise.all(
-      connectors.map((candidate) => candidate.connectDevices(-1, null, true)),
+      connectors.map((candidate) => candidate.connectDevices(-1, null, true))
     );
     await Promise.all(
       connectors.map((candidate) =>
-        candidate.connectUsbClients("device-1", -1, true, null),
-      ),
+        candidate.connectUsbClients("device-1", -1, true, null)
+      )
     );
     for (const candidate of connectors) {
       assert.deepStrictEqual(
         Array.from(candidate.usbClients.keys()).sort((a, b) => a - b),
-        [10, 11, 12],
+        [10, 11, 12]
       );
     }
 
@@ -490,8 +476,8 @@ describe("multiplexer integration stability, stress, and recovery", function () 
           return runtime
             .sendClientMessage("Runtime.evaluate", { marker })
             .then((response) => JSON.parse(response));
-        }),
-      ),
+        })
+      )
     );
     assert.deepStrictEqual(
       responses.map((response) => response.result.params.marker).sort(),
@@ -505,12 +491,12 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         "recovered-2-10",
         "recovered-2-11",
         "recovered-2-12",
-      ],
+      ]
     );
 
     assert.deepStrictEqual(
       Array.from(startedDaemonPids()).sort(),
-      [initialInfo.pid, replacementInfo.pid].sort(),
+      [initialInfo.pid, replacementInfo.pid].sort()
     );
   });
 
@@ -519,7 +505,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
       context
         .readLog()
         .filter((entry) => entry.event === "daemon-started")
-        .map((entry) => entry.pid),
+        .map((entry) => entry.pid)
     );
   }
 });
@@ -557,22 +543,20 @@ function createState({ deviceCount, clientCount, firstClientId = 1 }) {
   };
 }
 
-async function waitForClientIds(
-  frontends,
-  expectedIds,
-  timeout = 3000,
-) {
+async function waitForClientIds(frontends, expectedIds, timeout = 3000) {
   const expected = [...expectedIds].sort((first, second) => first - second);
   await waitFor(
     () =>
-      frontends.every((frontend) => arraysEqual(latestClientIds(frontend), expected)),
-    timeout,
+      frontends.every((frontend) =>
+        arraysEqual(latestClientIds(frontend), expected)
+      ),
+    timeout
   );
 }
 
 function latestClientIds(frontend) {
   const clientLists = frontend.messages.filter(
-    (message) => message?.event === "ClientList",
+    (message) => message?.event === "ClientList"
   );
   if (clientLists.length === 0) {
     return [];

@@ -98,7 +98,7 @@ export type MultiplexerHostOption = Omit<
 > & {
   enableWebSocket?: boolean;
   connectionTrace?: ConnectionTraceOptions;
-  controlPort?: number;
+  controlEndpoint: string;
   protocolVersion?: number;
   minSupportedProtocolVersion?: number;
   debugInfo?: MultiplexerDebugInfo;
@@ -252,7 +252,7 @@ export class MultiplexerHost
     });
   };
 
-  constructor(option: MultiplexerHostOption = {}) {
+  constructor(option: MultiplexerHostOption) {
     this.option = option;
     this.protocolVersion =
       option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION;
@@ -286,6 +286,9 @@ export class MultiplexerHost
 
     this.shutdownRequested = false;
     this.daemonStopReason = undefined;
+    if (!this.option.controlEndpoint) {
+      throw new Error("Multiplexer control endpoint is required");
+    }
     if (
       isMultiplexerHostStartOption(startOption) &&
       startOption.multiplexerDaemonIdleTimeout !== undefined
@@ -296,8 +299,9 @@ export class MultiplexerHost
 
     const controlServer = new MultiplexerControlServer({
       host: this,
-      controlPort: this.option.controlPort,
+      controlEndpoint: this.option.controlEndpoint,
       protocolVersion: this.protocolVersion,
+      minSupportedProtocolVersion: this.minSupportedProtocolVersion,
       ...(this.option.debugInfo ? { debugInfo: this.option.debugInfo } : {}),
       now: this.now,
     });
@@ -310,7 +314,7 @@ export class MultiplexerHost
       const debugInfo = this.createDebugInfo();
       this.connectionTraceRecorder?.recordDaemonStarted({
         pid: process.pid,
-        controlPort: controlServer.controlPort,
+        controlEndpoint: controlServer.controlEndpoint,
         protocolVersion: this.protocolVersion,
         minSupportedProtocolVersion: this.minSupportedProtocolVersion,
         ...(debugInfo ? { debugInfo } : {}),
@@ -396,10 +400,6 @@ export class MultiplexerHost
     if (stopErrors.length > 0) {
       throw createStopError(stopErrors);
     }
-  }
-
-  getControlPort(): number {
-    return this.controlServer?.controlPort ?? this.option.controlPort ?? 0;
   }
 
   setIdleTimeoutHandler(handler: () => void | Promise<void>): void {
@@ -1119,9 +1119,7 @@ export class MultiplexerHost
     this.publishClientSnapshot();
   }
 
-  private async startWSServer(
-    controlId: number,
-  ): Promise<WebSocketServerInfo> {
+  private async startWSServer(controlId: number): Promise<WebSocketServerInfo> {
     if (!this.option.enableWebSocket) {
       throw createControlError(
         "websocket-disabled",
@@ -1181,8 +1179,7 @@ export class MultiplexerHost
   }
 
   private async startWebSocketServerInternal(): Promise<WebSocketServerInfo> {
-    const port = this.option.websocketOption?.port ?? DEFAULT_DEV_SERVE_PORT;
-    const wssPort = await detectPort(port);
+    const wssPort = await detectPort(DEFAULT_DEV_SERVE_PORT);
     const wssHost = `${address()}:${wssPort}`;
     const info: WebSocketServerInfo = {
       port: wssPort,

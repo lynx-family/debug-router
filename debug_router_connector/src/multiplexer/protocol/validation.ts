@@ -7,12 +7,13 @@ import type {
   ControlRpcMethod,
   ControlRpcRequest,
   ControlRpcResponse,
+  MultiplexerHandshakeErrorResponse,
+  MultiplexerHealthRequest,
+  MultiplexerHealthResponse,
+  MultiplexerRegisterRequest,
+  MultiplexerRegisterResponse,
 } from "./control";
 import type { MultiplexerDebugInfo } from "./debuginfo";
-import type {
-  MultiplexerDiscoveryInfo,
-  MultiplexerHealthResponse,
-} from "./discovery";
 import type { ControlEvent } from "./event";
 import type {
   ClientSnapshot,
@@ -166,16 +167,12 @@ export function isSnapshot(value: unknown): value is Snapshot {
   );
 }
 
-export function isMultiplexerDiscoveryInfo(
+export function isMultiplexerHealthRequest(
   value: unknown,
-): value is MultiplexerDiscoveryInfo {
+): value is MultiplexerHealthRequest {
   return (
     isRecord(value) &&
-    isNumber(value.pid) &&
-    isNumber(value.protocolVersion) &&
-    isNumber(value.minSupportedProtocolVersion) &&
-    isNumber(value.controlPort) &&
-    isNumber(value.heartbeat) &&
+    value.kind === "health" &&
     isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
 }
@@ -185,10 +182,39 @@ export function isMultiplexerHealthResponse(
 ): value is MultiplexerHealthResponse {
   return (
     isRecord(value) &&
+    value.kind === "health-response" &&
     value.ok === true &&
-    isNumber(value.pid) &&
     isNumber(value.protocolVersion) &&
+    isNumber(value.minSupportedProtocolVersion) &&
     isOptional(value.debugInfo, isMultiplexerDebugInfo)
+  );
+}
+
+export function isMultiplexerHandshakeErrorResponse(
+  value: unknown,
+): value is MultiplexerHandshakeErrorResponse {
+  return (
+    isRecord(value) &&
+    value.kind === "handshake-error-response" &&
+    isControlRpcError(value.error)
+  );
+}
+
+export function isMultiplexerRegisterRequest(
+  value: unknown,
+): value is MultiplexerRegisterRequest {
+  return (
+    isRecord(value) &&
+    value.kind === "register" &&
+    isOptional(value.debugInfo, isMultiplexerDebugInfo)
+  );
+}
+
+export function isMultiplexerRegisterResponse(
+  value: unknown,
+): value is MultiplexerRegisterResponse {
+  return (
+    isRecord(value) && value.kind === "register-response" && value.ok === true
   );
 }
 

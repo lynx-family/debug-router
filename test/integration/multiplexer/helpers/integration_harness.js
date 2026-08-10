@@ -4,7 +4,7 @@
 
 const assert = require("assert");
 const fs = require("fs");
-const http = require("http");
+const net = require("net");
 const os = require("os");
 const path = require("path");
 const { WebSocket } = require(require.resolve("ws", {
@@ -24,9 +24,11 @@ const {
   MultiplexerDiscovery,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDiscovery");
 const {
-  MULTIPLEXER_CONTROL_PATH,
-  MULTIPLEXER_HEALTH_PATH,
-} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol/discovery");
+  MULTIPLEXER_PROTOCOL_VERSION,
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol");
+const {
+  MultiplexerControlTransport,
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/transport/MultiplexerControlTransport");
 const {
   createMultiplexerPaths,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/paths");
@@ -66,7 +68,7 @@ const DEFAULT_TEST_DAEMON_IDLE_TIMEOUT = 30000;
 
 function createIntegrationContext(name, option = {}) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-${name}-`)
+    path.join(getIpcTestTempDir(), `debug-router-${name}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
@@ -77,25 +79,26 @@ function createIntegrationContext(name, option = {}) {
   process.env.USERPROFILE = homeDir;
 
   const paths = createMultiplexerPaths({ rootDir });
+  const localProtocolVersion =
+    option.localProtocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION;
   fs.mkdirSync(paths.dataDir, { recursive: true });
   writeFakeState(paths, option.state ?? DEFAULT_STATE);
 
   const discovery = new MultiplexerDiscovery({
-    discoveryPath: paths.discoveryPath,
-    staleTimeout: option.staleTimeout ?? 1000,
-    localProtocolVersion: option.localProtocolVersion,
+    controlEndpoint: paths.controlEndpoint,
+    localProtocolVersion,
   });
+  discovery.daemonLockPathForTest = paths.daemonLockPath;
+  discovery.logPathForTest = getLogPath(paths);
 
   const manager = createManager({
     paths,
     discovery,
     startupTimeout:
       option.startupTimeout ?? platformTimeout(DEFAULT_STARTUP_TIMEOUT),
-    staleTimeout: option.staleTimeout ?? 1000,
     readyPollInterval: option.readyPollInterval ?? 25,
-    heartbeatInterval: option.heartbeatInterval ?? 50,
     replacementTimeout: option.replacementTimeout ?? 100,
-    localProtocolVersion: option.localProtocolVersion,
+    localProtocolVersion,
     minSupportedProtocolVersion: option.minSupportedProtocolVersion,
     debugInfo: option.debugInfo,
     legacyDriverDir,
@@ -122,11 +125,12 @@ function createIntegrationContext(name, option = {}) {
       const extraDiscovery =
         extra.discovery ??
         new MultiplexerDiscovery({
-          discoveryPath: paths.discoveryPath,
-          staleTimeout: extra.staleTimeout ?? option.staleTimeout ?? 1000,
+          controlEndpoint: paths.controlEndpoint,
           localProtocolVersion:
-            extra.localProtocolVersion ?? option.localProtocolVersion,
+            extra.localProtocolVersion ?? localProtocolVersion,
         });
+      extraDiscovery.daemonLockPathForTest = paths.daemonLockPath;
+      extraDiscovery.logPathForTest = getLogPath(paths);
       return createManager({
         paths,
         discovery: extraDiscovery,
@@ -134,15 +138,12 @@ function createIntegrationContext(name, option = {}) {
           extra.startupTimeout ??
           option.startupTimeout ??
           platformTimeout(DEFAULT_STARTUP_TIMEOUT),
-        staleTimeout: extra.staleTimeout ?? option.staleTimeout ?? 1000,
         readyPollInterval:
           extra.readyPollInterval ?? option.readyPollInterval ?? 25,
-        heartbeatInterval:
-          extra.heartbeatInterval ?? option.heartbeatInterval ?? 50,
         replacementTimeout:
           extra.replacementTimeout ?? option.replacementTimeout ?? 100,
         localProtocolVersion:
-          extra.localProtocolVersion ?? option.localProtocolVersion,
+          extra.localProtocolVersion ?? localProtocolVersion,
         minSupportedProtocolVersion:
           extra.minSupportedProtocolVersion ??
           option.minSupportedProtocolVersion,
@@ -160,7 +161,7 @@ function createIntegrationContext(name, option = {}) {
       const configuredDebugInfo = extra.debugInfo ?? option.debugInfo;
       const clientOption = {
         daemonManager: extra.manager ?? manager,
-        controlPath: extra.controlPath ?? MULTIPLEXER_CONTROL_PATH,
+        controlEndpoint: paths.controlEndpoint,
         rpcTimeout: extra.rpcTimeout ?? 1000,
       };
       if (configuredDebugInfo) {
@@ -194,10 +195,6 @@ function createIntegrationContext(name, option = {}) {
           extra.startupTimeout ??
           option.startupTimeout ??
           platformTimeout(DEFAULT_STARTUP_TIMEOUT),
-        multiplexerStaleTimeout:
-          extra.staleTimeout ?? option.staleTimeout ?? 1000,
-        multiplexerHeartbeatInterval:
-          extra.heartbeatInterval ?? option.heartbeatInterval ?? 50,
         multiplexerRpcTimeout: extra.rpcTimeout ?? 1000,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??
@@ -237,7 +234,7 @@ function createIntegrationContext(name, option = {}) {
         for (const client of clients.splice(0)) {
           await client.close().catch(() => {});
         }
-        await stopDiscoveredDaemon(paths.discoveryPath);
+        await stopLockedDaemon(paths.daemonLockPath);
         await stopLoggedDaemons(paths);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
@@ -247,22 +244,24 @@ function createIntegrationContext(name, option = {}) {
   };
 }
 
+function getIpcTestTempDir() {
+  return process.platform === "win32" ? os.tmpdir() : "/tmp";
+}
+
 function createManager(option) {
   return new MultiplexerDaemonManager({
     discovery: option.discovery,
+    controlEndpoint: option.paths.controlEndpoint,
     spawnLockPath: option.paths.spawnLockPath,
     daemonLockPath: option.paths.daemonLockPath,
     daemonEntry: fakeDaemonEntry,
     startupTimeout: option.startupTimeout,
-    staleTimeout: option.staleTimeout,
     readyPollInterval: option.readyPollInterval,
-    heartbeatInterval: option.heartbeatInterval,
     replacementTimeout: option.replacementTimeout,
     localProtocolVersion: option.localProtocolVersion,
     minSupportedProtocolVersion: option.minSupportedProtocolVersion,
     debugInfo: option.debugInfo,
     legacyDriverDir: option.legacyDriverDir,
-    controlPort: 0,
     multiplexerDaemonIdleTimeout: option.multiplexerDaemonIdleTimeout,
     enableWebSocket: option.enableWebSocket,
     websocketOption: option.websocketOption,
@@ -300,8 +299,8 @@ function readJsonLines(filePath) {
   }
 }
 
-async function stopDiscoveredDaemon(discoveryPath) {
-  const info = readJsonFile(discoveryPath, null);
+async function stopLockedDaemon(daemonLockPath) {
+  const info = readJsonFile(path.join(daemonLockPath, "owner.json"), null);
   if (info?.pid) {
     try {
       process.kill(info.pid, "SIGTERM");
@@ -313,8 +312,7 @@ async function stopDiscoveredDaemon(discoveryPath) {
       await waitFor(() => !processExists(info.pid), 1000).catch(() => {});
     });
     if (!processExists(info.pid)) {
-      fs.rmSync(discoveryPath, { force: true });
-      fs.rmSync(path.join(path.dirname(discoveryPath), "daemon.lock"), {
+      fs.rmSync(daemonLockPath, {
         recursive: true,
         force: true,
       });
@@ -396,35 +394,38 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getHealth(port) {
-  return new Promise((resolve, reject) => {
-    const request = http.get(
-      {
-        host: "127.0.0.1",
-        port,
-        path: MULTIPLEXER_HEALTH_PATH,
-        timeout: 1000,
-        agent: false,
-      },
-      (response) => {
-        let body = "";
-        response.setEncoding("utf8");
-        response.on("data", (chunk) => {
-          body += chunk;
-        });
-        response.on("end", () => {
-          resolve({
-            statusCode: response.statusCode,
-            body: JSON.parse(body),
-          });
-        });
-      }
+async function getHealth(controlEndpoint) {
+  const body = await new Promise((resolve, reject) => {
+    const transport = new MultiplexerControlTransport(
+      net.createConnection(controlEndpoint)
     );
-    request.on("timeout", () => {
-      request.destroy(new Error("health request timed out"));
+    let settled = false;
+
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribeConnect();
+      unsubscribeMessage();
+      unsubscribeClose();
+      void transport.end();
+      callback();
+    };
+    const unsubscribeMessage = transport.onMessage((message) => {
+      finish(() => resolve(message));
     });
-    request.on("error", reject);
+    const unsubscribeClose = transport.onClose((error) => {
+      finish(() => reject(error ?? new Error("Health connection closed")));
+    });
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error("Health probe timed out")));
+    }, 1000);
+
+    const unsubscribeConnect = transport.onConnect(() =>
+      transport.send({ kind: "health" })
+    );
   });
+  return { statusCode: 200, body };
 }
 
 function collectConnectorEvents(connector, event) {
@@ -643,27 +644,37 @@ async function connectRuntimeWebSocket(url, option = {}) {
   return { socket, id, messages };
 }
 
-function assertSamePid(infos) {
-  assert(infos.length > 0);
-  const pid = infos[0].pid;
-  for (const info of infos) {
-    assert.strictEqual(info.pid, pid);
-  }
-  return pid;
-}
-
 function getDiscoveryInfo(discovery) {
-  return discovery.validateDiscovery().info ?? null;
+  const owner = readJsonFile(
+    path.join(discovery.daemonLockPathForTest, "owner.json"),
+    null
+  );
+  if (!owner?.pid) return null;
+  const started = readJsonLines(discovery.logPathForTest)
+    .filter(
+      (entry) => entry.event === "daemon-started" && entry.pid === owner.pid
+    )
+    .at(-1);
+  return {
+    pid: owner.pid,
+    protocolVersion: started?.protocolVersion,
+    minSupportedProtocolVersion: started?.minSupportedProtocolVersion,
+    debugInfo: started?.debugInfo,
+    controlEndpoint: discovery.controlEndpoint,
+  };
 }
 
 function getUsableDiscovery(discovery) {
-  const validation = discovery.validateDiscovery();
-  return validation.status === "usable" ? validation.info : null;
+  return getDiscoveryInfo(discovery);
+}
+
+async function reconnectDaemonClient(client) {
+  await client.controlTransport?.end();
+  await client.connect();
 }
 
 module.exports = {
   DEFAULT_STATE,
-  assertSamePid,
   collectConnectorEvents,
   connectDriverWebSocket,
   connectRuntimeWebSocket,
@@ -678,6 +689,7 @@ module.exports = {
   platformTimeout,
   processExists,
   readJsonFile,
+  reconnectDaemonClient,
   waitFor,
   waitForSocketMessage,
 };

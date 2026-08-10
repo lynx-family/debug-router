@@ -8,10 +8,9 @@ import path from "path";
 export const DEBUG_ROUTER_CONNECTOR_DATA_DIR_NAME = ".DebugRouterConnector";
 export const MULTIPLEXER_DATA_DIR_NAME = "multiplexer";
 
-// Runtime artifacts shared by all connector processes on the same machine.
-export const MULTIPLEXER_DISCOVERY_FILE_NAME = "daemon.json";
 export const MULTIPLEXER_SPAWN_LOCK_NAME = "spawn.lock";
 export const MULTIPLEXER_DAEMON_LOCK_NAME = "daemon.lock";
+export const MULTIPLEXER_CONTROL_SOCKET_NAME = "control.sock";
 
 export type MultiplexerPathOptions = {
   // Overrides the base DebugRouter connector data directory.
@@ -23,7 +22,7 @@ export type MultiplexerPathOptions = {
 export type MultiplexerPaths = {
   rootDir: string;
   dataDir: string;
-  discoveryPath: string;
+  controlEndpoint: string;
   spawnLockPath: string;
   daemonLockPath: string;
 };
@@ -45,19 +44,24 @@ export function getMultiplexerDataDir(
   );
 }
 
-export function getMultiplexerDiscoveryPath(
-  options: MultiplexerPathOptions = {},
-): string {
-  return path.join(
-    getMultiplexerDataDir(options),
-    MULTIPLEXER_DISCOVERY_FILE_NAME,
-  );
-}
-
 export function getMultiplexerSpawnLockPath(
   options: MultiplexerPathOptions = {},
 ): string {
   return path.join(getMultiplexerDataDir(options), MULTIPLEXER_SPAWN_LOCK_NAME);
+}
+
+export function getMultiplexerControlEndpoint(
+  options: MultiplexerPathOptions = {},
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "win32") {
+    return `\\\\.\\pipe\\${getMultiplexerDataDir(options)}`;
+  }
+
+  return path.join(
+    getMultiplexerDataDir(options),
+    MULTIPLEXER_CONTROL_SOCKET_NAME,
+  );
 }
 
 export function getMultiplexerDaemonLockPath(
@@ -78,7 +82,7 @@ export function createMultiplexerPaths(
   return {
     rootDir,
     dataDir,
-    discoveryPath: path.join(dataDir, MULTIPLEXER_DISCOVERY_FILE_NAME),
+    controlEndpoint: getMultiplexerControlEndpoint({ dataDir }),
     spawnLockPath: path.join(dataDir, MULTIPLEXER_SPAWN_LOCK_NAME),
     daemonLockPath: path.join(dataDir, MULTIPLEXER_DAEMON_LOCK_NAME),
   };

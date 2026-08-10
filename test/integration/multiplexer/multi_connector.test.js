@@ -25,10 +25,7 @@ describe("multiplexer integration multi connector", function () {
   });
 
   it("shares one daemon across connector facades and keeps device/client mirrors consistent", async function () {
-    context = createIntegrationContext("multi-connector", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
-    });
+    context = createIntegrationContext("multi-connector", {});
 
     const first = context.createConnector();
     const second = context.createConnector();
@@ -37,11 +34,11 @@ describe("multiplexer integration multi connector", function () {
     const secondDevices = await second.connectDevices(-1, null, true);
     assert.deepStrictEqual(
       firstDevices.map((device) => device.serial),
-      ["device-1"],
+      ["device-1"]
     );
     assert.deepStrictEqual(
       secondDevices.map((device) => device.serial),
-      ["device-1"],
+      ["device-1"]
     );
 
     const [firstClients, secondClients] = await Promise.all([
@@ -50,11 +47,11 @@ describe("multiplexer integration multi connector", function () {
     ]);
     assert.deepStrictEqual(
       firstClients.map((client) => client.clientId()),
-      [1],
+      [1]
     );
     assert.deepStrictEqual(
       secondClients.map((client) => client.clientId()),
-      [1],
+      [1]
     );
     assert.strictEqual(first.usbClients.get(1), firstClients[0]);
     assert.strictEqual(second.usbClients.get(1), secondClients[0]);
@@ -64,16 +61,13 @@ describe("multiplexer integration multi connector", function () {
     const startedPids = new Set(
       log
         .filter((entry) => entry.event === "daemon-started")
-        .map((entry) => entry.pid),
+        .map((entry) => entry.pid)
     );
     assert.strictEqual(startedPids.size, 1);
   });
 
   it("broadcasts physical client and USB message events to every connected facade", async function () {
-    context = createIntegrationContext("multi-connector-events", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
-    });
+    context = createIntegrationContext("multi-connector-events", {});
 
     const first = context.createConnector();
     const second = context.createConnector();
@@ -100,15 +94,15 @@ describe("multiplexer integration multi connector", function () {
 
     await waitFor(
       () => first.usbClients.has(2) && second.usbClients.has(2),
-      2000,
+      2000
     );
     assert.deepStrictEqual(
       firstConnected.map((client) => client.clientId()),
-      [2],
+      [2]
     );
     assert.deepStrictEqual(
       secondConnected.map((client) => client.clientId()),
-      [2],
+      [2]
     );
 
     const notification = JSON.stringify({
@@ -132,7 +126,7 @@ describe("multiplexer integration multi connector", function () {
 
     await waitFor(
       () => firstMessages.length === 1 && secondMessages.length === 1,
-      2000,
+      2000
     );
     assert.strictEqual(firstMessages[0].id, 2);
     assert.strictEqual(secondMessages[0].id, 2);
@@ -140,19 +134,16 @@ describe("multiplexer integration multi connector", function () {
     assert.strictEqual(secondMessages[0].message, notification);
     assert.deepStrictEqual(
       parseCustomizedEnvelope(firstMessages[0].message).cdp.params,
-      { marker: "broadcast" },
+      { marker: "broadcast" }
     );
     assert.deepStrictEqual(
       parseCustomizedEnvelope(secondMessages[0].message).cdp.params,
-      { marker: "broadcast" },
+      { marker: "broadcast" }
     );
   });
 
   it("keeps RPC responses isolated between connector facades", async function () {
-    context = createIntegrationContext("multi-connector-rpc", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
-    });
+    context = createIntegrationContext("multi-connector-rpc", {});
 
     const first = context.createConnector();
     const second = context.createConnector();
@@ -164,13 +155,13 @@ describe("multiplexer integration multi connector", function () {
       "device-1",
       -1,
       true,
-      null,
+      null
     );
     const [secondClient] = await second.connectUsbClients(
       "device-1",
       -1,
       true,
-      null,
+      null
     );
 
     const [firstResponse, secondResponse] = await Promise.all([
@@ -235,13 +226,12 @@ describe("multiplexer integration multi connector", function () {
             entry.event === "client-send-message" &&
             entry.id === 1 &&
             entry.message.data?.data?.message?.method ===
-              "Runtime.getProperties",
+              "Runtime.getProperties"
         ) &&
         log.some((entry) => entry.event === "client-close" && entry.id === 1) &&
         log.some(
           (entry) =>
-            entry.event === "device-start-watch" &&
-            entry.serial === "device-1",
+            entry.event === "device-start-watch" && entry.serial === "device-1"
         )
       );
     }, 2000);

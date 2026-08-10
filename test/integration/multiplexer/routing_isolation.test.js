@@ -31,8 +31,6 @@ describe("multiplexer integration routing isolation", function () {
 
   it("routes duplicate WebSocket request ids back only to the originating frontend", async function () {
     context = createIntegrationContext("routing-websocket", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -111,8 +109,6 @@ describe("multiplexer integration routing isolation", function () {
 
   it("keeps control and WebSocket routes separate when they use the same original request id", async function () {
     context = createIntegrationContext("routing-control-websocket", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -203,8 +199,6 @@ describe("multiplexer integration routing isolation", function () {
 
   it("routes duplicate control request ids back only to the originating control connection", async function () {
     context = createIntegrationContext("routing-control-control", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       enableWebSocket: false,
     });
 
@@ -288,8 +282,6 @@ describe("multiplexer integration routing isolation", function () {
 
   it("isolates simultaneous routes from multiple connectors and multiple WebSocket frontends", async function () {
     context = createIntegrationContext("routing-many-frontends", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -402,8 +394,6 @@ describe("multiplexer integration routing isolation", function () {
 
   it("keeps many frontends current when they connect before SDK clients and churn with connectors", async function () {
     context = createIntegrationContext("routing-frontend-churn", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -584,8 +574,6 @@ describe("multiplexer integration routing isolation", function () {
 
   it("keeps 10+ control and WebSocket frontends isolated through seeded SDK churn", async function () {
     context = createIntegrationContext("routing-large-random-churn", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -835,8 +823,6 @@ describe("multiplexer integration routing isolation", function () {
 
   it("drops unknown response ids but broadcasts notifications to control clients", async function () {
     context = createIntegrationContext("routing-unknown", {
-      heartbeatInterval: 25,
-      staleTimeout: 500,
       enableWebSocket: false,
     });
 

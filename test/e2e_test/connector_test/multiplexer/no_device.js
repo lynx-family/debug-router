@@ -16,36 +16,30 @@ const {
 const {
   MultiplexerDiscovery,
 } = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/client/MultiplexerDiscovery");
+const {
+  createMultiplexerPaths,
+} = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
 
 const fakeDaemonEntry = path.resolve(
   __dirname,
   "../../../integration/multiplexer/fixtures/fake_daemon_entry.js"
 );
 
-const DATA_DIR_NAME = "multiplexer";
 const STATE_FILE_NAME = "fake_physical_state.json";
 const COMMAND_FILE_NAME = "fake_physical_commands.jsonl";
 const LOG_FILE_NAME = "fake_daemon_log.jsonl";
-const PACKAGE_ENTRY_STALE_TIMEOUT = 2000;
 
 function logStep(message) {
   console.log(`[multiplexer-no-device-e2e] ${message}`);
 }
 
 function createPaths(rootDir) {
-  const dataDir = path.join(rootDir, DATA_DIR_NAME);
-  return {
-    rootDir,
-    dataDir,
-    discoveryPath: path.join(dataDir, "daemon.json"),
-    spawnLockPath: path.join(dataDir, "spawn.lock"),
-    daemonLockPath: path.join(dataDir, "daemon.lock"),
-  };
+  return createMultiplexerPaths({ rootDir });
 }
 
 function createContext(name, state, option = {}) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-e2e-${name}-`)
+    path.join(getIpcTestTempDir(), `debug-router-e2e-${name}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
@@ -86,8 +80,6 @@ function createContext(name, state, option = {}) {
         multiplexerLegacyDriverDir: legacyDriverDir,
         multiplexerDaemonEntry: fakeDaemonEntry,
         multiplexerStartupTimeout: extra.startupTimeout ?? 3000,
-        multiplexerStaleTimeout:
-          extra.staleTimeout ?? PACKAGE_ENTRY_STALE_TIMEOUT,
         multiplexerRpcTimeout: extra.rpcTimeout ?? 1200,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??
@@ -111,7 +103,7 @@ function createContext(name, state, option = {}) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(paths.discoveryPath);
+        await stopDaemon(paths.daemonLockPath);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
         if (hadOriginalHome) {
@@ -122,6 +114,10 @@ function createContext(name, state, option = {}) {
       }
     },
   };
+}
+
+function getIpcTestTempDir() {
+  return process.platform === "win32" ? os.tmpdir() : "/tmp";
 }
 
 function defaultState() {
@@ -181,18 +177,21 @@ async function runEmptyDaemonFlow() {
     );
     assert.deepStrictEqual(connector.getAllUsbClients(), []);
 
-    const discovery = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+    const daemon = await waitFor(
+      () => readDaemonOwner(context.paths.daemonLockPath),
       2000,
-      "daemon discovery"
+      "daemon lock owner"
     );
-    daemonPid = discovery.pid;
+    daemonPid = daemon.pid;
     assert(processExists(daemonPid), "daemon should be alive while connected");
+    assert.strictEqual(
+      fs.existsSync(path.join(context.paths.dataDir, "daemon.json")),
+      false
+    );
 
     await connector.close();
     await waitFor(
       () =>
-        !fs.existsSync(context.paths.discoveryPath) &&
         !fs.existsSync(context.paths.daemonLockPath) &&
         !processExists(daemonPid),
       2500,
@@ -237,13 +236,13 @@ async function runSharedDaemonMirrorFlow() {
       ["device-1"]
     );
 
-    const discovery = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+    const daemon = await waitFor(
+      () => readDaemonOwner(context.paths.daemonLockPath),
       3000,
-      "shared daemon discovery"
+      "shared daemon lock owner"
     );
-    daemonPid = discovery?.pid;
-    assert(daemonPid, "expected daemon pid in discovery");
+    daemonPid = daemon?.pid;
+    assert(daemonPid, "expected daemon pid in daemon.lock");
 
     const [firstClients, secondClients] = await Promise.all([
       first.connectUsbClients("device-1", -1, true, null),
@@ -347,7 +346,6 @@ async function runSharedDaemonMirrorFlow() {
     await Promise.all([first.close(), second.close()]);
     await waitFor(
       () =>
-        !fs.existsSync(context.paths.discoveryPath) &&
         !fs.existsSync(context.paths.daemonLockPath) &&
         !processExists(daemonPid),
       2500,
@@ -399,14 +397,14 @@ async function runLegacyPreemptionFlow() {
       "initial legacy watch all clients"
     );
 
-    const discovery = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+    const daemon = await waitFor(
+      () => readDaemonOwner(context.paths.daemonLockPath),
       3000,
-      "legacy preemption daemon discovery"
+      "legacy preemption daemon lock owner"
     );
-    assert(processExists(discovery.pid), "daemon should be alive");
+    assert(processExists(daemon.pid), "daemon should be alive");
     await waitFor(
-      () => readOwnerPid(context.legacyOwnerPath) === discovery.pid,
+      () => readOwnerPid(context.legacyOwnerPath) === daemon.pid,
       3000,
       "daemon owns legacy owner file"
     );
@@ -475,7 +473,7 @@ async function runLegacyPreemptionFlow() {
       3000,
       "daemon reacquires legacy owner"
     );
-    assert.strictEqual(readOwnerPid(context.legacyOwnerPath), discovery.pid);
+    assert.strictEqual(readOwnerPid(context.legacyOwnerPath), daemon.pid);
 
     const devices = await connector.connectDevices(-1, null, true);
     const clients = await connector.connectUsbClients(
@@ -513,7 +511,6 @@ async function runWebSocketMirrorRecoveryFlow() {
       },
       rpcTimeout: 3000,
       startupTimeout: 5000,
-      staleTimeout: 80,
     });
     const disconnectedDevices = [];
     const disconnectedClients = [];
@@ -532,12 +529,12 @@ async function runWebSocketMirrorRecoveryFlow() {
     );
     await connector.startWSServer();
 
-    const discovery = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+    const daemon = await waitFor(
+      () => readDaemonOwner(context.paths.daemonLockPath),
       2000,
-      "websocket recovery discovery"
+      "websocket recovery daemon lock owner"
     );
-    initialPid = discovery.pid;
+    initialPid = daemon.pid;
     assert(connector.wssPort > 0, "websocket port should be assigned");
     assert.deepStrictEqual(connector.wss, {
       wssPath: `ws://${connector.wssHost}/mdevices/page/android`,
@@ -565,7 +562,7 @@ async function runWebSocketMirrorRecoveryFlow() {
 
     const replacement = await waitFor(
       () => {
-        const next = readJsonFile(context.paths.discoveryPath, null);
+        const next = readDaemonOwner(context.paths.daemonLockPath);
         if (
           next?.pid &&
           next.pid !== initialPid &&
@@ -615,7 +612,7 @@ async function runCompatibilityUpgradeFlow() {
       "v1 daemon replaced"
     );
 
-    await v1.client.reconnect();
+    await reconnectDaemonClient(v1.client);
     await connectRuntime(v1.client);
     await connectRuntime(v2.client);
 
@@ -631,11 +628,11 @@ async function runCompatibilityUpgradeFlow() {
     );
 
     await assert.rejects(
-      () => v1.client.reconnect(),
+      () => reconnectDaemonClient(v1.client),
       /requires debug-router-connector protocol 2 or newer/i
     );
-    await v2.client.reconnect();
-    await v3.client.reconnect();
+    await reconnectDaemonClient(v2.client);
+    await reconnectDaemonClient(v3.client);
     await connectRuntime(v2.client);
     await connectRuntime(v3.client);
 
@@ -646,7 +643,6 @@ async function runCompatibilityUpgradeFlow() {
     ]);
     await waitFor(
       () =>
-        !fs.existsSync(context.paths.discoveryPath) &&
         !fs.existsSync(context.paths.daemonLockPath) &&
         !processExists(daemonV3.pid),
       2500,
@@ -674,20 +670,18 @@ function createVersionedControl(
   minSupportedVersion
 ) {
   const discovery = new MultiplexerDiscovery({
-    discoveryPath: context.paths.discoveryPath,
-    staleTimeout: 500,
+    controlEndpoint: context.paths.controlEndpoint,
     localProtocolVersion: protocolVersion,
   });
   const manager = new MultiplexerDaemonManager({
     discovery,
+    controlEndpoint: context.paths.controlEndpoint,
     spawnLockPath: context.paths.spawnLockPath,
     daemonLockPath: context.paths.daemonLockPath,
     daemonEntry: fakeDaemonEntry,
     startupTimeout: 3000,
-    staleTimeout: 500,
     readyPollInterval: 10,
     replacementTimeout: 50,
-    heartbeatInterval: 25,
     localProtocolVersion: protocolVersion,
     minSupportedProtocolVersion: minSupportedVersion,
     debugInfo: {
@@ -698,6 +692,7 @@ function createVersionedControl(
   });
   const client = new MultiplexerDaemonClient({
     daemonManager: manager,
+    controlEndpoint: context.paths.controlEndpoint,
     rpcTimeout: 2000,
     debugInfo: {
       protocolVersion,
@@ -732,9 +727,31 @@ async function connectRuntime(client) {
 
 async function waitForDiscoveryProtocol(context, protocolVersion) {
   return waitFor(
-    () => {
-      const info = readJsonFile(context.paths.discoveryPath, null);
-      return info?.protocolVersion === protocolVersion ? info : null;
+    async () => {
+      const owner = readDaemonOwner(context.paths.daemonLockPath);
+      if (!owner) {
+        return null;
+      }
+      const result = await new MultiplexerDiscovery({
+        controlEndpoint: context.paths.controlEndpoint,
+        localProtocolVersion: protocolVersion,
+      }).probeHealth();
+      if (
+        !("daemonProtocolVersion" in result) ||
+        result.daemonProtocolVersion !== protocolVersion
+      ) {
+        return null;
+      }
+      const started = context
+        .readLog()
+        .filter(
+          (entry) =>
+            entry.event === "daemon-started" &&
+            entry.pid === owner.pid &&
+            entry.protocolVersion === protocolVersion
+        )
+        .at(-1);
+      return started ? { pid: owner.pid, ...started } : null;
     },
     3000,
     `daemon protocol ${protocolVersion}`
@@ -750,23 +767,27 @@ function parseCustomizedEnvelope(message) {
   };
 }
 
-async function stopDaemon(discoveryPath) {
-  const discovery = readJsonFile(discoveryPath, null);
-  if (!discovery?.pid) {
+async function stopDaemon(daemonLockPath) {
+  const owner = readDaemonOwner(daemonLockPath);
+  if (!owner?.pid) {
     return;
   }
   try {
-    process.kill(discovery.pid, "SIGTERM");
+    process.kill(owner.pid, "SIGTERM");
   } catch (_error) {}
   await waitFor(
-    () => !processExists(discovery.pid) || !fs.existsSync(discoveryPath),
+    () => !processExists(owner.pid) || !fs.existsSync(daemonLockPath),
     1000,
     "daemon termination"
   ).catch(() => {
     try {
-      process.kill(discovery.pid, "SIGKILL");
+      process.kill(owner.pid, "SIGKILL");
     } catch (_error) {}
   });
+}
+
+function readDaemonOwner(daemonLockPath) {
+  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
 }
 
 function readJsonFile(filePath, fallback) {
@@ -831,6 +852,11 @@ async function waitFor(predicate, timeout, label, interval = 25) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function reconnectDaemonClient(client) {
+  await client.controlTransport?.end();
+  await client.connect();
 }
 
 async function main() {

@@ -3,129 +3,78 @@
 // LICENSE file in the root directory of this source tree.
 
 const assert = require("assert");
-const { EventEmitter } = require("events");
 
 const {
   MultiplexerControlConnection,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerControlConnection");
 
-const WS_OPEN = 1;
-const WS_CLOSING = 2;
-const WS_CLOSED = 3;
-
-function nextTick() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
-class FakeSocket extends EventEmitter {
-  constructor(readyState = WS_OPEN) {
-    super();
-    this.readyState = readyState;
+class FakeTransport {
+  constructor() {
+    this.writable = true;
+    this.closed = false;
     this.sent = [];
-    this.closeCalls = 0;
+    this.messageListeners = new Set();
+    this.closeListeners = new Set();
   }
-
-  send(data) {
-    this.sent.push(data);
+  send(value) {
+    if (this.sendError) throw this.sendError;
+    this.sent.push(value);
   }
-
-  close() {
-    this.closeCalls++;
-    this.readyState = WS_CLOSED;
-    this.emit("close");
+  onMessage(listener) {
+    this.messageListeners.add(listener);
+    return () => this.messageListeners.delete(listener);
+  }
+  onClose(listener) {
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
+  }
+  emitMessage(value) {
+    for (const listener of [...this.messageListeners]) listener(value);
+  }
+  emitClose(error) {
+    this.closed = true;
+    this.writable = false;
+    for (const listener of [...this.closeListeners]) listener(error);
+  }
+  async end() {
+    this.emitClose();
+  }
+  destroy() {
+    this.emitClose();
   }
 }
 
-function createRpcRequest(overrides = {}) {
-  return {
-    kind: "rpc",
-    id: 1,
-    method: "sendMessageWithoutReply",
-    params: {
-      target: "web",
-      clientId: -1,
-      message: "hello",
-    },
-    ...overrides,
-  };
+function request(id = 1) {
+  return { kind: "rpc", id, method: "startWSServer", params: {} };
 }
 
 function createConnection(overrides = {}) {
+  const transport = overrides.transport ?? new FakeTransport();
   const messages = [];
-  const closed = [];
-  const socket = overrides.socket ?? new FakeSocket();
+  const closes = [];
   const connection = new MultiplexerControlConnection({
-    controlId: overrides.controlId ?? 11,
-    socket,
+    controlId: 7,
+    transport,
     onMessage:
       overrides.onMessage ??
-      ((controlId, message) => {
-        messages.push([controlId, message]);
+      ((id, message) => {
+        messages.push([id, message]);
       }),
-    onClose: overrides.onClose ?? ((controlId) => closed.push(controlId)),
+    onClose: (id) => closes.push(id),
+    createDebugInfo: overrides.createDebugInfo,
   });
-
-  return {
-    socket,
-    connection,
-    messages,
-    closed,
-  };
-}
-
-function parseSent(socket, index = 0) {
-  return JSON.parse(socket.sent[index]);
+  return { connection, transport, messages, closes };
 }
 
 describe("MultiplexerControlConnection", function () {
-  it("dispatches valid RPC messages from socket data", function () {
-    const { socket, messages } = createConnection();
-    const request = createRpcRequest({ id: 12 });
-
-    socket.emit("message", JSON.stringify(request));
-
-    assert.deepStrictEqual(messages, [[11, request]]);
-  });
-
-  it("parses RPC messages from buffer arrays", function () {
-    const { socket, messages } = createConnection();
-    const request = createRpcRequest({ id: 13 });
-
-    socket.emit("message", [Buffer.from(JSON.stringify(request))]);
-
-    assert.deepStrictEqual(messages, [[11, request]]);
-  });
-
-  it("closes and unregisters a socket error without letting it escape", function () {
-    const { socket, connection, closed } = createConnection();
-    const error = new Error("unhandled control socket error");
-
-    assert.doesNotThrow(() => socket.emit("error", error));
-
-    assert.strictEqual(connection.closed, true);
-    assert.deepStrictEqual(closed, [11]);
-    assert.strictEqual(socket.closeCalls, 1);
-    assert.strictEqual(socket.listenerCount("message"), 0);
-    assert.strictEqual(socket.listenerCount("close"), 0);
-    assert.strictEqual(socket.listenerCount("error"), 0);
-  });
-
-  it("sends invalid message errors using the incoming numeric id when present", function () {
-    const { socket } = createConnection();
-
-    socket.emit(
-      "message",
-      JSON.stringify({
-        kind: "rpc",
-        id: 14,
-        method: "missing-method",
-        params: {},
-      })
-    );
-
-    assert.deepStrictEqual(parseSent(socket), {
+  it("dispatches valid RPCs and rejects invalid messages", function () {
+    const { transport, messages } = createConnection();
+    transport.emitMessage(request(3));
+    transport.emitMessage({ id: 4, nope: true });
+    assert.deepStrictEqual(messages, [[7, request(3)]]);
+    assert.deepStrictEqual(transport.sent[0], {
       kind: "rpc-response",
-      id: 14,
+      id: 4,
       ok: false,
       error: {
         code: "invalid-control-message",
@@ -134,191 +83,60 @@ describe("MultiplexerControlConnection", function () {
     });
   });
 
-  it("sends invalid message errors with the fallback id for non-json data", function () {
-    const { socket } = createConnection();
-    const bytes = Uint8Array.from(Buffer.from("{bad-json"));
-
-    socket.emit("message", bytes.buffer);
-
-    assert.deepStrictEqual(parseSent(socket), {
-      kind: "rpc-response",
-      id: -1,
-      ok: false,
-      error: {
-        code: "invalid-control-message",
-        message: "Invalid multiplexer control message",
-      },
+  it("sends results, errors, events, and optional debug info", function () {
+    const { connection, transport } = createConnection({
+      createDebugInfo: () => ({ processId: 10 }),
     });
-  });
-
-  it("sends responses and errors when the socket is open", function () {
-    const { socket, connection } = createConnection();
-
-    connection.sendResponse(21, { ok: true });
-    connection.sendError(22, { code: "failed", message: "failed message" });
-
-    assert.deepStrictEqual(parseSent(socket, 0), {
+    connection.sendResponse(1, undefined);
+    connection.sendError(2, { code: "failed", message: "no" });
+    connection.send({ kind: "event", event: "snapshot", data: {} });
+    assert.deepStrictEqual(transport.sent[0], {
       kind: "rpc-response",
-      id: 21,
+      id: 1,
       ok: true,
-      result: { ok: true },
+      result: {},
+      debugInfo: { processId: 10 },
     });
-    assert.deepStrictEqual(parseSent(socket, 1), {
-      kind: "rpc-response",
-      id: 22,
-      ok: false,
-      error: {
-        code: "failed",
-        message: "failed message",
-      },
-    });
+    assert.strictEqual(transport.sent.length, 3);
   });
 
-  it("filters events while unsubscribed but still sends RPC responses", function () {
-    const { socket, connection } = createConnection();
-    const event = {
-      kind: "event",
-      event: "client-message",
-      data: { source: "usb-runtime", id: 1, message: "hello" },
-    };
-
+  it("filters events while unsubscribed but keeps RPC responses", function () {
+    const { connection, transport } = createConnection();
     connection.unsubscribe();
-    connection.send(event);
-    connection.sendResponse(23, undefined);
-    connection.subscribe();
-    connection.send(event);
+    connection.send({ kind: "event", event: "snapshot", data: {} });
+    connection.sendResponse(1, {});
+    assert.strictEqual(transport.sent.length, 1);
+    assert.strictEqual(transport.sent[0].kind, "rpc-response");
+  });
 
-    assert.deepStrictEqual(
-      socket.sent.map((item) => JSON.parse(item)),
-      [
-        {
-          kind: "rpc-response",
-          id: 23,
-          ok: true,
-          result: {},
-        },
-        event,
-      ]
+  it("converts sync and async dispatch failures into RPC errors", async function () {
+    const sync = createConnection({
+      onMessage() {
+        throw new Error("sync failed");
+      },
+    });
+    sync.transport.emitMessage(request(1));
+    assert.strictEqual(sync.transport.sent[0].error.message, "sync failed");
+
+    const asyncFailure = createConnection({
+      onMessage: async () => {
+        throw new Error("async failed");
+      },
+    });
+    asyncFailure.transport.emitMessage(request(2));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(
+      asyncFailure.transport.sent[0].error.message,
+      "async failed"
     );
   });
 
-  it("does not send when the socket is closed or closing", function () {
-    const closedSocket = new FakeSocket(WS_CLOSED);
-    const closingSocket = new FakeSocket(WS_CLOSING);
-    const closed = createConnection({ socket: closedSocket }).connection;
-    const closing = createConnection({ socket: closingSocket }).connection;
-
-    closed.sendResponse(24, undefined);
-    closing.sendResponse(25, undefined);
-
-    assert.deepStrictEqual(closedSocket.sent, []);
-    assert.deepStrictEqual(closingSocket.sent, []);
-  });
-
-  it("converts synchronous dispatch errors into RPC errors", function () {
-    const { socket, connection } = createConnection({
-      onMessage() {
-        throw new Error("sync dispatch failed");
-      },
-    });
-
-    connection.handleMessage(createRpcRequest({ id: 30 }));
-
-    assert.deepStrictEqual(parseSent(socket), {
-      kind: "rpc-response",
-      id: 30,
-      ok: false,
-      error: {
-        code: "control-message-dispatch-failed",
-        message: "sync dispatch failed",
-      },
-    });
-  });
-
-  it("converts asynchronous dispatch errors into RPC errors", async function () {
-    const { socket, connection } = createConnection({
-      async onMessage() {
-        throw new Error("async dispatch failed");
-      },
-    });
-
-    connection.handleMessage(createRpcRequest({ id: 31 }));
-    await nextTick();
-
-    assert.deepStrictEqual(parseSent(socket), {
-      kind: "rpc-response",
-      id: 31,
-      ok: false,
-      error: {
-        code: "control-message-dispatch-failed",
-        message: "async dispatch failed",
-      },
-    });
-  });
-
-  it("uses a generic dispatch error message for non-error rejections", async function () {
-    const { socket, connection } = createConnection({
-      onMessage() {
-        return Promise.reject("bad value");
-      },
-    });
-
-    connection.handleMessage(createRpcRequest({ id: 32 }));
-    await nextTick();
-
-    assert.deepStrictEqual(parseSent(socket), {
-      kind: "rpc-response",
-      id: 32,
-      ok: false,
-      error: {
-        code: "control-message-dispatch-failed",
-        message: "Failed to dispatch multiplexer control message",
-      },
-    });
-  });
-
-  it("ignores direct messages after the connection is closed", function () {
-    const { connection, messages } = createConnection();
-
-    connection.close();
-    connection.handleMessage(createRpcRequest({ id: 33 }));
-
-    assert.deepStrictEqual(messages, []);
-  });
-
-  it("closes open sockets, unregisters once, and removes socket listeners", function () {
-    const { socket, connection, closed } = createConnection();
-
-    connection.close();
-    connection.close();
-    socket.emit("message", JSON.stringify(createRpcRequest({ id: 40 })));
-
+  it("closes idempotently and unregisters once", async function () {
+    const { connection, transport, closes } = createConnection();
+    await connection.close();
+    connection.handleClose();
+    transport.emitClose();
+    assert.deepStrictEqual(closes, [7]);
     assert.strictEqual(connection.closed, true);
-    assert.deepStrictEqual(closed, [11]);
-    assert.strictEqual(socket.closeCalls, 1);
-    assert.strictEqual(socket.listenerCount("message"), 0);
-    assert.strictEqual(socket.listenerCount("close"), 0);
-    assert.strictEqual(socket.listenerCount("error"), 0);
-  });
-
-  it("marks closed sockets as closed without closing them again", function () {
-    const socket = new FakeSocket(WS_CLOSED);
-    const { connection, closed } = createConnection({ socket });
-
-    connection.close();
-
-    assert.strictEqual(connection.closed, true);
-    assert.deepStrictEqual(closed, [11]);
-    assert.strictEqual(socket.closeCalls, 0);
-  });
-
-  it("handles remote close idempotently", function () {
-    const { socket, connection, closed } = createConnection();
-
-    socket.emit("close");
-    socket.emit("close");
-
-    assert.strictEqual(connection.closed, true);
-    assert.deepStrictEqual(closed, [11]);
   });
 });

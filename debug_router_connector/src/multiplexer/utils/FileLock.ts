@@ -6,6 +6,9 @@ import fs from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
 
+const FILE_LOCK_REMOVE_MAX_RETRIES = 3;
+const FILE_LOCK_REMOVE_RETRY_DELAY_MS = 10;
+
 export type FileLockOwner = {
   pid: number;
   createdAt: number;
@@ -158,7 +161,12 @@ export class FileLock {
 
       // Best-effort removal: compare owners first to reduce the risk of
       // accidentally deleting a lock held by someone else.
-      fs.rmSync(this.lockPath, { recursive: true, force: true });
+      fs.rmSync(this.lockPath, {
+        recursive: true,
+        force: true,
+        maxRetries: FILE_LOCK_REMOVE_MAX_RETRIES,
+        retryDelay: FILE_LOCK_REMOVE_RETRY_DELAY_MS,
+      });
       return true;
     } catch (_error) {
       return false;

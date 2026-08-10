@@ -13,6 +13,9 @@ const {
   MultiOpenStatus,
   WebSocketClient,
 } = require("@lynx-js/debug-router-connector");
+const {
+  createMultiplexerPaths,
+} = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
 
 const fakeDaemonEntry = path.resolve(
   __dirname,
@@ -157,13 +160,13 @@ async function runOwnershipPreemptionCase() {
       2000,
       "ownership facade mirrors before preemption"
     );
-    const discovery = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+    const daemon = await waitFor(
+      () => readDaemonOwner(context.paths.daemonLockPath),
       3000,
-      "ownership daemon discovery"
+      "ownership daemon lock owner"
     );
     await waitFor(
-      () => readOwnerPid(context.legacyOwnerPath) === discovery.pid,
+      () => readOwnerPid(context.legacyOwnerPath) === daemon.pid,
       3000,
       "ownership daemon claims legacy owner"
     );
@@ -712,16 +715,16 @@ async function runDaemonLivenessCase() {
       { app: "wifi-phone-liveness" }
     );
     context.trackSocket(runtime.socket);
-    const discovery = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+    const daemon = await waitFor(
+      () => readDaemonOwner(context.paths.daemonLockPath),
       2000,
-      "daemon discovery"
+      "daemon lock owner"
     );
 
     await first.close();
     await delay(350);
     assert.strictEqual(
-      processExists(discovery.pid),
+      processExists(daemon.pid),
       true,
       "the remaining websocket Connector should keep the daemon alive"
     );
@@ -734,7 +737,7 @@ async function runDaemonLivenessCase() {
       "last websocket Connector closes the WiFi runtime"
     );
     await waitFor(
-      () => !processExists(discovery.pid),
+      () => !processExists(daemon.pid),
       2000,
       "daemon exits after the last websocket Connector closes"
     );
@@ -745,7 +748,7 @@ async function runDaemonLivenessCase() {
 
 function createContext(name, idleTimeout = 30000) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-e2e-wifi-${name}-`)
+    path.join(getIpcTestTempDir(), `debug-router-e2e-wifi-${name}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
@@ -755,11 +758,8 @@ function createContext(name, idleTimeout = 30000) {
   fs.mkdirSync(homeDir, { recursive: true });
   process.env.HOME = homeDir;
 
-  const paths = {
-    discoveryPath: path.join(rootDir, "multiplexer", "daemon.json"),
-    daemonLockPath: path.join(rootDir, "multiplexer", "daemon.lock"),
-    statePath: path.join(rootDir, "multiplexer", "fake_physical_state.json"),
-  };
+  const paths = createMultiplexerPaths({ rootDir });
+  paths.statePath = path.join(paths.dataDir, "fake_physical_state.json");
   fs.mkdirSync(path.dirname(paths.statePath), { recursive: true });
   fs.writeFileSync(
     paths.statePath,
@@ -785,7 +785,6 @@ function createContext(name, idleTimeout = 30000) {
         multiplexerLegacyDriverDir: legacyDriverDir,
         multiplexerDaemonEntry: fakeDaemonEntry,
         multiplexerStartupTimeout: 3000,
-        multiplexerStaleTimeout: 1000,
         multiplexerRpcTimeout: 1200,
         multiplexerDaemonIdleTimeout: idleTimeout,
       });
@@ -808,7 +807,7 @@ function createContext(name, idleTimeout = 30000) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(paths.discoveryPath);
+        await stopDaemon(paths.daemonLockPath);
         if (process.env.DEBUG_ROUTER_E2E_KEEP_TEMP === "1") {
           console.error(
             `[multiplexer-wifi-runtime-e2e] kept diagnostics at ${rootDir}`
@@ -825,6 +824,10 @@ function createContext(name, idleTimeout = 30000) {
       }
     },
   };
+}
+
+function getIpcTestTempDir() {
+  return process.platform === "win32" ? os.tmpdir() : "/tmp";
 }
 
 async function connectWebSocketClient(url, type, info) {
@@ -992,23 +995,27 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function stopDaemon(discoveryPath) {
-  const discovery = readJsonFile(discoveryPath, null);
-  if (!discovery?.pid || !processExists(discovery.pid)) {
+async function stopDaemon(daemonLockPath) {
+  const owner = readDaemonOwner(daemonLockPath);
+  if (!owner?.pid || !processExists(owner.pid)) {
     return;
   }
   try {
-    process.kill(discovery.pid, "SIGTERM");
+    process.kill(owner.pid, "SIGTERM");
   } catch (_error) {}
   await waitFor(
-    () => !processExists(discovery.pid),
+    () => !processExists(owner.pid),
     1000,
     "daemon termination"
   ).catch(() => {
     try {
-      process.kill(discovery.pid, "SIGKILL");
+      process.kill(owner.pid, "SIGKILL");
     } catch (_error) {}
   });
+}
+
+function readDaemonOwner(daemonLockPath) {
+  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
 }
 
 function readJsonFile(filePath, fallback) {

@@ -4,209 +4,170 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const net = require("net");
 const os = require("os");
 const path = require("path");
 
 const {
   MultiplexerDiscovery,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDiscovery");
+const {
+  MultiplexerControlServer,
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerControlServer");
 
-function createTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-discovery-"));
+function createTempContext() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-health-"));
+  return { dir, endpoint: path.join(dir, "control.sock") };
 }
 
-function createInfo(overrides = {}) {
-  return {
-    pid: 100,
-    protocolVersion: 1,
-    minSupportedProtocolVersion: 1,
-    controlPort: 9000,
-    heartbeat: 1000,
-    debugInfo: {
-      daemonVersion: "0.0.1",
-      processId: 100,
-      timestamp: 1000,
-    },
-    ...overrides,
-  };
+function createHost() {
+  return { handleControlRpc() {} };
 }
 
-function writeJson(filePath, value) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(value));
-}
-
-function getReusableDiscovery(discovery) {
-  const validation = discovery.validateDiscovery();
-  return validation.status === "usable" ? validation.info : null;
+function frame(value) {
+  const payload = Buffer.from(JSON.stringify(value));
+  const result = Buffer.alloc(4 + payload.length);
+  result.writeUInt32BE(payload.length, 0);
+  payload.copy(result, 4);
+  return result;
 }
 
 describe("MultiplexerDiscovery", function () {
-  let tempDir;
-  let discoveryPath;
-  let now;
-  let discovery;
+  const contexts = [];
+  const servers = [];
 
-  beforeEach(function () {
-    tempDir = createTempDir();
-    discoveryPath = path.join(tempDir, "daemon.json");
-    now = 1000;
-    discovery = new MultiplexerDiscovery({
-      discoveryPath,
-      localProtocolVersion: 1,
-      staleTimeout: 500,
-      now: () => now,
-    });
+  afterEach(async function () {
+    await Promise.all(servers.splice(0).map((server) => server.stop()));
+    for (const context of contexts.splice(0)) {
+      fs.rmSync(context.dir, { recursive: true, force: true });
+    }
   });
 
-  afterEach(function () {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  it("returns missing for absent discovery", function () {
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "unusable",
-      reason: "missing",
-    });
-    assert.strictEqual(getReusableDiscovery(discovery), null);
-  });
-
-  it("returns invalid-json for malformed discovery", function () {
-    fs.writeFileSync(discoveryPath, "{bad");
-
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "unusable",
-      reason: "invalid-json",
-    });
-  });
-
-  it("returns invalid-shape for non-object and incomplete object values", function () {
-    fs.writeFileSync(discoveryPath, "null");
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "unusable",
-      reason: "invalid-shape",
-    });
-
-    writeJson(discoveryPath, {
-      pid: 100,
+  async function startServer(option = {}) {
+    const context = createTempContext();
+    contexts.push(context);
+    const server = new MultiplexerControlServer({
+      host: createHost(),
+      controlEndpoint: context.endpoint,
       protocolVersion: 1,
-      heartbeat: 1000,
+      minSupportedProtocolVersion: 1,
+      ...option,
     });
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "unusable",
-      reason: "invalid-shape",
+    servers.push(server);
+    await server.start();
+    return context;
+  }
+
+  it("returns usable for the same version", async function () {
+    const context = await startServer({
+      protocolVersion: 1,
+      minSupportedProtocolVersion: 1,
     });
+    const discovery = new MultiplexerDiscovery({
+      controlEndpoint: context.endpoint,
+      localProtocolVersion: 1,
+    });
+
+    const result = await discovery.probeHealth();
+    assert.strictEqual(result.status, "usable");
+    assert.strictEqual(result.reason, "same-version");
   });
 
-  it("returns missing-protocol-version before generic shape errors", function () {
-    writeJson(discoveryPath, {
-      pid: 100,
-      controlPort: 9000,
-      heartbeat: 1000,
-    });
-
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "unusable",
-      reason: "missing-protocol-version",
-    });
-  });
-
-  it("returns invalid-shape when minSupportedProtocolVersion is missing", function () {
-    const info = createInfo();
-    delete info.minSupportedProtocolVersion;
-    writeJson(discoveryPath, info);
-
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "unusable",
-      reason: "invalid-shape",
-    });
-  });
-
-  it("returns stale for old heartbeat and includes the stale info", function () {
-    now = 2000;
-    const staleInfo = createInfo({ heartbeat: 1000 });
-    writeJson(discoveryPath, staleInfo);
-
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "unusable",
-      reason: "stale",
-      info: staleInfo,
-    });
-    assert.strictEqual(discovery.isFresh(staleInfo), false);
-  });
-
-  it("accepts the same protocol version as usable", function () {
-    const info = createInfo();
-    writeJson(discoveryPath, info);
-
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "usable",
-      info,
-      compatibility: {
-        status: "compatible",
-        reason: "same-version",
-        daemonProtocolVersion: 1,
-        connectorProtocolVersion: 1,
-      },
-    });
-    assert.deepStrictEqual(getReusableDiscovery(discovery), info);
-  });
-
-  it("accepts a newer daemon protocol as compatible", function () {
-    const info = createInfo({
+  it("accepts a newer compatible daemon", async function () {
+    const context = await startServer({
       protocolVersion: 2,
       minSupportedProtocolVersion: 1,
     });
-    writeJson(discoveryPath, info);
-
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "usable",
-      info,
-      compatibility: {
-        status: "compatible",
-        reason: "daemon-newer-compatible",
-        daemonProtocolVersion: 2,
-        connectorProtocolVersion: 1,
-      },
-    });
+    const result = await new MultiplexerDiscovery({
+      controlEndpoint: context.endpoint,
+      localProtocolVersion: 1,
+    }).probeHealth();
+    assert.strictEqual(result.status, "usable");
+    assert.strictEqual(result.reason, "daemon-newer-compatible");
   });
 
-  it("rejects a newer daemon when connector protocol is too old", function () {
-    const info = createInfo({
+  it("requires replacement for an older daemon", async function () {
+    const context = await startServer({ protocolVersion: 0 });
+    const result = await new MultiplexerDiscovery({
+      controlEndpoint: context.endpoint,
+      localProtocolVersion: 1,
+    }).probeHealth();
+    assert.strictEqual(result.status, "replace-required");
+  });
+
+  it("rejects a connector below the daemon minimum", async function () {
+    const context = await startServer({
       protocolVersion: 2,
       minSupportedProtocolVersion: 2,
     });
-    writeJson(discoveryPath, info);
-
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "unusable",
-      reason: "connector-protocol-too-old",
-      info,
-      compatibility: {
-        status: "incompatible",
-        reason: "connector-older-than-daemon-min-supported",
-        daemonProtocolVersion: 2,
-        daemonMinSupportedProtocolVersion: 2,
-        connectorProtocolVersion: 1,
-      },
-    });
-    assert.strictEqual(getReusableDiscovery(discovery), null);
+    const result = await new MultiplexerDiscovery({
+      controlEndpoint: context.endpoint,
+      localProtocolVersion: 1,
+    }).probeHealth();
+    assert.strictEqual(result.status, "unusable");
+    assert.strictEqual(result.reason, "connector-protocol-too-old");
   });
 
-  it("requires replacement for an older daemon protocol", function () {
-    const info = createInfo({ protocolVersion: 0 });
-    writeJson(discoveryPath, info);
+  it("reports unreachable and timeout endpoints", async function () {
+    const context = createTempContext();
+    contexts.push(context);
+    const unreachable = await new MultiplexerDiscovery({
+      controlEndpoint: context.endpoint,
+      localProtocolVersion: 1,
+      healthCheckTimeout: 20,
+    }).probeHealth();
+    assert.strictEqual(unreachable.reason, "unreachable");
 
-    assert.deepStrictEqual(discovery.validateDiscovery(), {
-      status: "replace-required",
-      info,
-      compatibility: {
-        status: "replace-required",
-        reason: "daemon-older-than-connector",
-        daemonProtocolVersion: 0,
-        connectorProtocolVersion: 1,
-      },
+    const rawSockets = new Set();
+    const rawServer = net.createServer((socket) => {
+      rawSockets.add(socket);
+      socket.on("close", () => rawSockets.delete(socket));
     });
-    assert.strictEqual(getReusableDiscovery(discovery), null);
+    await new Promise((resolve) => rawServer.listen(context.endpoint, resolve));
+    const timeout = await new MultiplexerDiscovery({
+      controlEndpoint: context.endpoint,
+      localProtocolVersion: 1,
+      healthCheckTimeout: 20,
+    }).probeHealth();
+    assert.strictEqual(timeout.reason, "timeout");
+    for (const socket of rawSockets) socket.destroy();
+    await new Promise((resolve) => rawServer.close(resolve));
+  });
+
+  it("reports invalid response and invalid frames", async function () {
+    const invalidResponseContext = createTempContext();
+    contexts.push(invalidResponseContext);
+    const invalidResponseServer = net.createServer((socket) => {
+      socket.once("data", () => socket.end(frame({ kind: "unexpected" })));
+    });
+    await new Promise((resolve) =>
+      invalidResponseServer.listen(invalidResponseContext.endpoint, resolve)
+    );
+    const invalidResponse = await new MultiplexerDiscovery({
+      controlEndpoint: invalidResponseContext.endpoint,
+      localProtocolVersion: 1,
+    }).probeHealth();
+    assert.strictEqual(invalidResponse.reason, "invalid-response");
+    await new Promise((resolve) => invalidResponseServer.close(resolve));
+
+    const invalidFrameContext = createTempContext();
+    contexts.push(invalidFrameContext);
+    const invalidFrameServer = net.createServer((socket) => {
+      socket.once("data", () => {
+        const bad = Buffer.alloc(5);
+        bad.writeUInt32BE(2, 0);
+        bad[4] = "{".charCodeAt(0);
+        socket.end(bad);
+      });
+    });
+    await new Promise((resolve) =>
+      invalidFrameServer.listen(invalidFrameContext.endpoint, resolve)
+    );
+    const invalidFrame = await new MultiplexerDiscovery({
+      controlEndpoint: invalidFrameContext.endpoint,
+      localProtocolVersion: 1,
+    }).probeHealth();
+    assert.strictEqual(invalidFrame.reason, "invalid-frame");
+    await new Promise((resolve) => invalidFrameServer.close(resolve));
   });
 });

@@ -10,7 +10,6 @@ import {
 } from "../protocol";
 import { defaultLogger } from "../../utils/logger";
 import {
-  DEFAULT_MULTIPLEXER_HEARTBEAT_INTERVAL,
   MultiplexerDaemon,
   MultiplexerDaemonHost,
   MultiplexerDaemonOption,
@@ -24,12 +23,10 @@ import { MultiplexerHost } from "./MultiplexerHost";
 const ENTRY_CLEANUP_TIMEOUT = 3000;
 
 export type MultiplexerDaemonEntryOption = {
-  discoveryPath: string;
+  controlEndpoint: string;
   daemonLockPath: string;
   protocolVersion: number;
   minSupportedProtocolVersion: number;
-  controlPort: number;
-  heartbeatInterval: number;
   debugInfo?: MultiplexerDebugInfo;
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
@@ -50,18 +47,14 @@ type EntryArgKey =
 type RawEntryArgs = Partial<Record<EntryArgKey, string | true>>;
 
 const OPTION_ALIASES: Record<string, EntryArgKey> = {
-  "discovery-path": "discoveryPath",
-  discoveryPath: "discoveryPath",
+  "control-endpoint": "controlEndpoint",
+  controlEndpoint: "controlEndpoint",
   "daemon-lock-path": "daemonLockPath",
   daemonLockPath: "daemonLockPath",
   "protocol-version": "protocolVersion",
   protocolVersion: "protocolVersion",
   "min-supported-protocol-version": "minSupportedProtocolVersion",
   minSupportedProtocolVersion: "minSupportedProtocolVersion",
-  "control-port": "controlPort",
-  controlPort: "controlPort",
-  "heartbeat-interval": "heartbeatInterval",
-  heartbeatInterval: "heartbeatInterval",
   "debug-info": "debugInfo",
   debugInfo: "debugInfo",
   "legacy-driver-dir": "legacyDriverDir",
@@ -89,7 +82,7 @@ export async function startMultiplexerDaemonEntry(
   registerProcessCleanup(daemon);
   await daemon.start();
   defaultLogger.info(
-    `Multiplexer daemon started with discovery ${entryOption.discoveryPath}`,
+    `Multiplexer daemon started with control endpoint ${entryOption.controlEndpoint}`,
   );
 
   return daemon;
@@ -113,12 +106,7 @@ export function createMultiplexerDaemon(
     process.exit(stopError ? 1 : 0);
   };
   const daemonOption: MultiplexerDaemonOption = {
-    discoveryPath: entryOption.discoveryPath,
     daemonLockPath: entryOption.daemonLockPath,
-    protocolVersion: entryOption.protocolVersion,
-    minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
-    ...(entryOption.debugInfo ? { debugInfo: entryOption.debugInfo } : {}),
-    heartbeatInterval: entryOption.heartbeatInterval,
     host,
     onIdleTimeout: (stopError) => {
       exitAfterHostRequestedStop("idle", stopError);
@@ -138,7 +126,7 @@ export function createMultiplexerDaemon(
 
 export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   const rawArgs = parseRawArgs(argv);
-  const discoveryPath = getRequiredString(rawArgs, "discoveryPath");
+  const controlEndpoint = getRequiredString(rawArgs, "controlEndpoint");
   const daemonLockPath = getRequiredString(rawArgs, "daemonLockPath");
   const enableWebSocket = getOptionalBoolean(rawArgs, "enableWebSocket");
   const connectionTrace = parseConnectionTraceOption(rawArgs);
@@ -147,7 +135,7 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   const debugInfo = parseDebugInfo(rawArgs);
 
   const option: MultiplexerDaemonEntryOption = {
-    discoveryPath,
+    controlEndpoint,
     daemonLockPath,
     protocolVersion: getOptionalNumber(
       rawArgs,
@@ -158,12 +146,6 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
       rawArgs,
       "minSupportedProtocolVersion",
       MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
-    ),
-    controlPort: getOptionalNumber(rawArgs, "controlPort", 0),
-    heartbeatInterval: getOptionalNumber(
-      rawArgs,
-      "heartbeatInterval",
-      DEFAULT_MULTIPLEXER_HEARTBEAT_INTERVAL,
     ),
   };
   if (debugInfo !== undefined) {
@@ -201,7 +183,7 @@ function createEntryHost(
   const reportService = new DriverReportServiceImpl();
   setDriverReportService(reportService);
   const hostOption = {
-    controlPort: entryOption.controlPort,
+    controlEndpoint: entryOption.controlEndpoint,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
     ...(entryOption.debugInfo ? { debugInfo: entryOption.debugInfo } : {}),
@@ -528,10 +510,7 @@ function parseConnectionTraceOption(
   }
 
   const option = parsed as Record<string, unknown>;
-  if (
-    option.enabled !== undefined &&
-    typeof option.enabled !== "boolean"
-  ) {
+  if (option.enabled !== undefined && typeof option.enabled !== "boolean") {
     throw new Error(
       "Invalid multiplexer daemon option connectionTrace.enabled: expected boolean",
     );

@@ -9,6 +9,9 @@ const {
   DebugRouterConnector,
   MultiOpenStatus,
 } = require("@lynx-js/debug-router-connector");
+const {
+  createMultiplexerPaths,
+} = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
 
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
@@ -18,8 +21,7 @@ const DEFAULT_CLIENT_TIMEOUT = 10000;
 const DEFAULT_IDLE_TIMEOUT = 500;
 const LEGACY_PREEMPTION_TIMEOUT = 12000;
 const E2E_CDP_PING_METHOD = "ConnectorRealDeviceE2E.CDP.Ping";
-const E2E_CDP_NOTIFICATION_METHOD =
-  "ConnectorRealDeviceE2E.CDP.Notification";
+const E2E_CDP_NOTIFICATION_METHOD = "ConnectorRealDeviceE2E.CDP.Notification";
 
 function parseArgs(argv) {
   const args = {
@@ -146,18 +148,12 @@ function logStep(message) {
 }
 
 function createPaths(rootDir) {
-  const dataDir = path.join(rootDir, "multiplexer");
-  return {
-    rootDir,
-    dataDir,
-    discoveryPath: path.join(dataDir, "daemon.json"),
-    daemonLockPath: path.join(dataDir, "daemon.lock"),
-  };
+  return createMultiplexerPaths({ rootDir });
 }
 
 function createContext(platform, args, option = {}) {
   const rootDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `debug-router-real-${platform}-`)
+    path.join(getIpcTestTempDir(), `debug-router-real-${platform}-`)
   );
   const homeDir = path.join(rootDir, "home");
   const legacyDriverDir = path.join(homeDir, ".DebugRouterConnector");
@@ -222,7 +218,7 @@ function createContext(platform, args, option = {}) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(paths.discoveryPath);
+        await stopDaemon(paths.daemonLockPath);
         await delay(500);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
@@ -234,6 +230,10 @@ function createContext(platform, args, option = {}) {
       }
     },
   };
+}
+
+function getIpcTestTempDir() {
+  return process.platform === "win32" ? os.tmpdir() : "/tmp";
 }
 
 async function runPlatformScenario(platform, args, scenarioOption = {}) {
@@ -333,24 +333,20 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
     );
 
     const daemonInfo = await waitFor(
-      () => readJsonFile(context.paths.discoveryPath, null),
+      () => readDaemonOwner(context.paths.daemonLockPath),
       3000,
-      `${platform} daemon discovery`
+      `${platform} daemon lock owner`
     );
     logStep(
-      `${platform} daemon pid=${daemonInfo.pid} controlPort=${
-        daemonInfo.controlPort
+      `${platform} daemon pid=${daemonInfo.pid} endpoint=${
+        context.paths.controlEndpoint
       } device=${firstDevice.serial} client=${firstClient.clientId()}`
     );
 
     if (args.requireMessageRoundtrip) {
       await assertMessageRoundtrip(platform, args, firstClient, secondClient);
       if (platform === "android") {
-        await assertUsbNotificationOnce(
-          args,
-          firstClient,
-          secondClient
-        );
+        await assertUsbNotificationOnce(args, firstClient, secondClient);
       }
     }
 
@@ -388,9 +384,7 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
 
     await Promise.all([first.close(), second.close()]);
     await waitFor(
-      () =>
-        !fs.existsSync(context.paths.discoveryPath) &&
-        !fs.existsSync(context.paths.daemonLockPath),
+      () => !fs.existsSync(context.paths.daemonLockPath),
       5000,
       `${platform} daemon idle cleanup`
     );
@@ -762,9 +756,7 @@ async function assertUsbNotificationOnce(args, firstClient, secondClient) {
     );
     assert.strictEqual(response.result?.ok, true);
     await waitFor(
-      () =>
-        firstNotifications.length >= 1 &&
-        secondNotifications.length >= 1,
+      () => firstNotifications.length >= 1 && secondNotifications.length >= 1,
       args.clientTimeout,
       "Android real USB notification reaches both connector mirrors"
     );
@@ -978,11 +970,11 @@ async function assertDaemonRecovery(
 
   const newInfo = await waitFor(
     () => {
-      const info = readJsonFile(context.paths.discoveryPath, null);
+      const info = readDaemonOwner(context.paths.daemonLockPath);
       return info && info.pid !== oldPid ? info : null;
     },
     5000,
-    `${platform} replacement daemon discovery`
+    `${platform} replacement daemon lock owner`
   );
   assert.notStrictEqual(newInfo.pid, oldPid);
   logStep(`${platform} recovered daemon pid=${newInfo.pid}`);
@@ -1113,28 +1105,32 @@ function withTimeout(promise, timeout, label) {
   });
 }
 
-async function stopDaemon(discoveryPath) {
-  const discovery = readJsonFile(discoveryPath, null);
-  if (!discovery?.pid) {
+async function stopDaemon(daemonLockPath) {
+  const owner = readDaemonOwner(daemonLockPath);
+  if (!owner?.pid) {
     return;
   }
   try {
-    process.kill(discovery.pid, "SIGTERM");
+    process.kill(owner.pid, "SIGTERM");
   } catch (_error) {}
   await waitFor(
-    () => !processExists(discovery.pid),
+    () => !processExists(owner.pid),
     1000,
     "daemon termination"
   ).catch(() => {
     try {
-      process.kill(discovery.pid, "SIGKILL");
+      process.kill(owner.pid, "SIGKILL");
     } catch (_error) {}
   });
   await waitFor(
-    () => !processExists(discovery.pid),
+    () => !processExists(owner.pid),
     1000,
     "daemon force termination"
   ).catch(() => {});
+}
+
+function readDaemonOwner(daemonLockPath) {
+  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
 }
 
 function readJsonFile(filePath, fallback) {
@@ -1253,11 +1249,11 @@ function listInterferingMultiplexerDaemons() {
         return;
       }
 
-      const defaultDiscoveryPath = path.join(
+      const defaultDaemonLockPath = path.join(
         process.env.HOME || os.homedir(),
         ".DebugRouterConnector",
         "multiplexer",
-        "daemon.json"
+        "daemon.lock"
       );
       const targets = stdout
         .split(/\n/)
@@ -1281,9 +1277,9 @@ function listInterferingMultiplexerDaemons() {
           }
           return (
             entry.command.includes(
-              `--discovery-path ${defaultDiscoveryPath}`
+              `--daemon-lock-path ${defaultDaemonLockPath}`
             ) ||
-            /\/T\/debug-router-real-[^/]+\/multiplexer\/daemon\.json/.test(
+            /\/T\/debug-router-real-[^/]+\/multiplexer\/daemon\.lock/.test(
               entry.command
             )
           );

@@ -12,8 +12,11 @@ const {
   isControlRpcRequest,
   isControlRpcResponse,
   isDeviceSnapshot,
-  isMultiplexerDiscoveryInfo,
+  isMultiplexerHealthRequest,
   isMultiplexerHealthResponse,
+  isMultiplexerHandshakeErrorResponse,
+  isMultiplexerRegisterRequest,
+  isMultiplexerRegisterResponse,
   isNumberArray,
   isSnapshot,
   isStringArray,
@@ -290,14 +293,10 @@ describe("multiplexer protocol validation", function () {
     );
   });
 
-  it("validates discovery and health DTOs without token", function () {
+  it("validates Health and Register DTOs without PID or versioned requests", function () {
     assert.strictEqual(
-      isMultiplexerDiscoveryInfo({
-        pid: 123,
-        protocolVersion: 1,
-        minSupportedProtocolVersion: 1,
-        controlPort: 10000,
-        heartbeat: Date.now(),
+      isMultiplexerHealthRequest({
+        kind: "health",
         debugInfo: {
           daemonVersion: "0.0.1",
           processId: 123,
@@ -307,50 +306,16 @@ describe("multiplexer protocol validation", function () {
       }),
       true
     );
-
     assert.strictEqual(
-      isMultiplexerDiscoveryInfo({
-        pid: 123,
-        protocolVersion: 1,
-        minSupportedProtocolVersion: 1,
-        heartbeat: Date.now(),
-      }),
-      false
-    );
-    assert.strictEqual(
-      isMultiplexerDiscoveryInfo({
-        pid: 123,
-        protocolVersion: 1,
-        controlPort: 10000,
-        heartbeat: Date.now(),
-      }),
-      false
-    );
-    assert.strictEqual(
-      isMultiplexerDiscoveryInfo({
-        pid: 123,
-        protocolVersion: 1,
-        minSupportedProtocolVersion: 1,
-        controlPort: "10000",
-        heartbeat: Date.now(),
-      }),
-      false
-    );
-    assert.strictEqual(
-      isMultiplexerDiscoveryInfo({
-        pid: 123,
-        protocolVersion: 1,
-        minSupportedProtocolVersion: "1",
-        controlPort: 10000,
-        heartbeat: Date.now(),
-      }),
+      isMultiplexerHealthRequest({ kind: "health", debugInfo: "bad" }),
       false
     );
     assert.strictEqual(
       isMultiplexerHealthResponse({
+        kind: "health-response",
         ok: true,
-        pid: 123,
         protocolVersion: 1,
+        minSupportedProtocolVersion: 1,
         debugInfo: {
           daemonVersion: "0.0.1",
           processId: 123,
@@ -361,9 +326,39 @@ describe("multiplexer protocol validation", function () {
     );
     assert.strictEqual(
       isMultiplexerHealthResponse({
+        kind: "health-response",
         ok: false,
-        pid: 123,
         protocolVersion: 1,
+        minSupportedProtocolVersion: 1,
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerRegisterRequest({ kind: "register" }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerRegisterResponse({ kind: "register-response", ok: true }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerRegisterResponse({
+        kind: "register-response",
+        ok: false,
+        error: { code: "bad", message: "bad register" },
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerHandshakeErrorResponse({
+        kind: "handshake-error-response",
+        error: { code: "bad", message: "bad handshake" },
+      }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerHandshakeErrorResponse({
+        kind: "handshake-error-response",
       }),
       false
     );
@@ -411,10 +406,22 @@ describe("multiplexer protocol validation", function () {
           message: createCustomizedRequestMessage(),
         },
       ],
-      ["sendMessageWithoutReply", { target: "app", clientId: 1, message: null }],
-      ["sendMessageWithoutReply", { target: "app", clientId: 1, message: undefined }],
-      ["sendMessageWithoutReply", { target: "web", clientId: -1, message: "broadcast" }],
-      ["sendMessageWithoutReply", { target: "web", clientId: 2, message: "targeted" }],
+      [
+        "sendMessageWithoutReply",
+        { target: "app", clientId: 1, message: null },
+      ],
+      [
+        "sendMessageWithoutReply",
+        { target: "app", clientId: 1, message: undefined },
+      ],
+      [
+        "sendMessageWithoutReply",
+        { target: "web", clientId: -1, message: "broadcast" },
+      ],
+      [
+        "sendMessageWithoutReply",
+        { target: "web", clientId: 2, message: "targeted" },
+      ],
       [
         "sendMessageWithoutReply",
         { target: "web", clientId: -1, message: { event: "broadcast" } },
