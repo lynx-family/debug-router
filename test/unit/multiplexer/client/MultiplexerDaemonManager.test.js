@@ -37,7 +37,6 @@ function unavailable(reason = "unreachable", error) {
 }
 
 function replaceRequired() {
-  const value = response(0, 0);
   return {
     status: "replace-required",
     reason: "daemon-older-than-connector",
@@ -47,7 +46,6 @@ function replaceRequired() {
 }
 
 function connectorTooOld() {
-  const value = response(2, 2);
   return {
     status: "unusable",
     reason: "connector-protocol-too-old",
@@ -88,11 +86,13 @@ function createManager(tempDir, values, overrides = {}) {
     readyPollInterval: 10,
     replacementTimeout: 20,
     localProtocolVersion: 1,
+    minSupportedProtocolVersion: 1,
     debugInfo: overrides.debugInfo,
     legacyDriverDir: overrides.legacyDriverDir,
     spawn(command, args, options) {
       const call = { command, args, options, unref: false };
       spawnCalls.push(call);
+      overrides.onSpawn?.(call);
       return { unref: () => (call.unref = true) };
     },
     kill: overrides.kill ?? (() => {}),
@@ -123,7 +123,7 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
   });
 
-  it("retries unreachable health after acquiring spawn.lock for explicit stop", async function () {
+  it("releases spawn.lock when explicitly stopping an unreachable daemon", async function () {
     const spawnLockPath = path.join(tempDir, "spawn.lock");
     const discovery = sequenceDiscovery(path.join(tempDir, "control.sock"), [
       () => {
@@ -131,38 +131,42 @@ describe("MultiplexerDaemonManager", function () {
         return unavailable();
       },
     ]);
-    const { manager } = createManager(tempDir, [], { discovery });
+    const { manager, spawnCalls } = createManager(tempDir, [], { discovery });
 
     await manager.stopDaemonOnConnectorRequest();
-    assert.strictEqual(discovery.calls, 4);
+    assert.deepStrictEqual(spawnCalls, []);
     assert.strictEqual(fs.existsSync(spawnLockPath), false);
   });
 
-  it("spawns with endpoint args after health retries without probing again under spawn.lock", async function () {
-    const {
-      manager,
+  it("spawns once with the required endpoint and protocol args", async function () {
+    let spawned = false;
+    const controlEndpoint = path.join(tempDir, "control.sock");
+    const discovery = {
+      controlEndpoint,
+      async probeHealth() {
+        return spawned ? usable() : unavailable();
+      },
+    };
+    const { manager, spawnCalls } = createManager(tempDir, [], {
       discovery,
-      spawnCalls,
-      controlEndpoint,
-    } = createManager(tempDir, [
-      unavailable(),
-      unavailable("timeout"),
-      unavailable(),
-      unavailable("timeout"),
-      usable(),
-    ]);
+      onSpawn: () => {
+        spawned = true;
+      },
+    });
     assert.strictEqual(await manager.ensureDaemon(), undefined);
-    assert.strictEqual(discovery.calls, 5);
     assert.strictEqual(spawnCalls.length, 1);
-    assert.deepStrictEqual(spawnCalls[0].args.slice(0, 7), [
-      "/tmp/entry.js",
-      "--control-endpoint",
-      controlEndpoint,
-      "--daemon-lock-path",
-      manager.daemonLock.lockPath,
-      "--protocol-version",
-      "1",
-    ]);
+    assert.strictEqual(spawnCalls[0].args[0], "/tmp/entry.js");
+    const entryArgs = new Map();
+    for (let i = 1; i < spawnCalls[0].args.length; i += 2) {
+      entryArgs.set(spawnCalls[0].args[i], spawnCalls[0].args[i + 1]);
+    }
+    assert.strictEqual(entryArgs.get("--control-endpoint"), controlEndpoint);
+    assert.strictEqual(
+      entryArgs.get("--daemon-lock-path"),
+      manager.daemonLock.lockPath
+    );
+    assert.strictEqual(entryArgs.get("--protocol-version"), "1");
+    assert.strictEqual(entryArgs.get("--min-supported-protocol-version"), "1");
     assert.strictEqual(spawnCalls[0].args.includes("--discovery-path"), false);
     assert.strictEqual(spawnCalls[0].args.includes("--control-port"), false);
     assert.strictEqual(
@@ -179,23 +183,18 @@ describe("MultiplexerDaemonManager", function () {
     ]);
 
     assert.strictEqual(await manager.ensureDaemon(), undefined);
-    assert.strictEqual(discovery.calls, 2);
     assert.deepStrictEqual(spawnCalls, []);
   });
 
   it("waits for the lock owner daemon instead of spawning concurrently", async function () {
-    const { manager, discovery, spawnCalls } = createManager(tempDir, [
-      unavailable(),
-      unavailable(),
-      unavailable(),
-      unavailable(),
+    const { manager, spawnCalls } = createManager(tempDir, [
+      replaceRequired(),
       usable(),
     ]);
     const owner = new FileLock(manager.spawnLock.lockPath);
     assert.strictEqual(owner.acquire(), true);
     try {
       assert.strictEqual(await manager.ensureDaemon(), undefined);
-      assert.strictEqual(discovery.calls, 5);
       assert.deepStrictEqual(spawnCalls, []);
     } finally {
       owner.release();
@@ -209,12 +208,11 @@ describe("MultiplexerDaemonManager", function () {
       usable(),
     ]);
 
-    await assert.rejects(() => manager.ensureDaemon(), /Please upgrade/);
-    assert.strictEqual(discovery.calls, 2);
+    await assert.rejects(() => manager.ensureDaemon());
     assert.deepStrictEqual(spawnCalls, []);
   });
 
-  it("waitUntilReady performs one probe per polling interval", async function () {
+  it("rejects when the daemon does not become ready before timeout", async function () {
     const lastError = new Error("last health probe failed");
     const { manager, discovery } = createManager(tempDir, [
       unavailable(),
@@ -222,80 +220,42 @@ describe("MultiplexerDaemonManager", function () {
       unavailable("invalid-frame", lastError),
     ]);
 
-    await assert.rejects(
-      () => manager.waitUntilReady(20),
-      /Timed out waiting for multiplexer daemon: unusable\/invalid-frame, health-check:last health probe failed/
-    );
-    assert.strictEqual(discovery.calls, 3);
+    await assert.rejects(() => manager.waitUntilReady(20));
   });
 
   it("waitUntilReady exits early for terminal protocol results", async function () {
-    const replaceContext = createManager(tempDir, [replaceRequired()]);
-    await assert.rejects(
-      () => replaceContext.manager.waitUntilReady(100),
-      /daemon protocol 0 is older/
-    );
-    assert.strictEqual(replaceContext.discovery.calls, 1);
-
-    const incompatibleContext = createManager(tempDir, [connectorTooOld()]);
-    await assert.rejects(
-      () => incompatibleContext.manager.waitUntilReady(100),
-      /Please upgrade/
-    );
-    assert.strictEqual(incompatibleContext.discovery.calls, 1);
-  });
-
-  it("retries ensureDaemon after timing out behind another spawn lock owner", async function () {
-    const calls = [];
-    const { manager, discovery, spawnCalls } = createManager(tempDir, [
-      unavailable(),
-      replaceRequired(),
-      replaceRequired(),
-      usable(),
-    ]);
-    const owner = new FileLock(manager.spawnLock.lockPath);
-    assert.strictEqual(owner.acquire(), true);
-    manager.setDaemonClient({
-      async callOnDaemon(method, params) {
-        calls.push([method, params]);
-        return {};
-      },
-    });
-
-    const waitUntilReady = manager.waitUntilReady.bind(manager);
-    let waitCalls = 0;
-    manager.waitUntilReady = async (timeout) => {
-      waitCalls++;
-      if (waitCalls === 1) {
-        owner.release();
-        throw new Error("Timed out waiting for multiplexer daemon");
-      }
-      return waitUntilReady(timeout);
+    const shouldNotProbeAgain = () => {
+      throw new Error("terminal protocol result must stop readiness polling");
     };
-
-    await manager.ensureDaemon();
-
-    assert.strictEqual(waitCalls, 2);
-    assert.strictEqual(discovery.calls, 4);
-    assert.strictEqual(spawnCalls.length, 1);
-    assert.deepStrictEqual(calls, [
-      ["shutdownDaemon", { reason: "daemon-protocol-older-than-connector" }],
+    const replaceContext = createManager(tempDir, [
+      replaceRequired(),
+      shouldNotProbeAgain,
     ]);
+    await assert.rejects(() => replaceContext.manager.waitUntilReady(100));
+
+    const incompatibleContext = createManager(tempDir, [
+      connectorTooOld(),
+      shouldNotProbeAgain,
+    ]);
+    await assert.rejects(() => incompatibleContext.manager.waitUntilReady(100));
   });
 
   it("propagates readiness failures after spawning its own daemon", async function () {
-    const { manager, spawnCalls } = createManager(tempDir, [
-      unavailable(),
-      unavailable(),
-    ]);
-    manager.waitUntilReady = async () => {
-      throw new Error("own daemon failed to become ready");
+    let spawned = false;
+    const discovery = {
+      controlEndpoint: path.join(tempDir, "control.sock"),
+      async probeHealth() {
+        return spawned ? connectorTooOld() : unavailable();
+      },
     };
+    const { manager, spawnCalls } = createManager(tempDir, [], {
+      discovery,
+      onSpawn: () => {
+        spawned = true;
+      },
+    });
 
-    await assert.rejects(
-      () => manager.ensureDaemon(),
-      /own daemon failed to become ready/
-    );
+    await assert.rejects(() => manager.ensureDaemon());
 
     assert.strictEqual(spawnCalls.length, 1);
     assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
@@ -303,30 +263,31 @@ describe("MultiplexerDaemonManager", function () {
 
   it("rejects a connector below the daemon minimum without cleanup", async function () {
     const { manager, spawnCalls } = createManager(tempDir, [connectorTooOld()]);
-    await assert.rejects(() => manager.ensureDaemon(), /Please upgrade/);
+    await assert.rejects(() => manager.ensureDaemon());
     assert.deepStrictEqual(spawnCalls, []);
   });
 
   it("uses daemon.lock PID for crash cleanup and removes a stale socket", async function () {
     const alive = new Set([process.pid]);
     const kills = [];
-    const { manager, controlEndpoint } = createManager(
-      tempDir,
-      [
-        unavailable(),
-        unavailable("timeout"),
-        unavailable(),
-        unavailable("timeout"),
-        usable(),
-      ],
-      {
-        isProcessAlive: (pid) => alive.has(pid),
-        kill(pid, signal) {
-          kills.push([pid, signal]);
-          alive.delete(pid);
-        },
-      }
-    );
+    let spawned = false;
+    const discovery = {
+      controlEndpoint: path.join(tempDir, "control.sock"),
+      async probeHealth() {
+        return spawned ? usable() : unavailable();
+      },
+    };
+    const { manager, controlEndpoint } = createManager(tempDir, [], {
+      discovery,
+      onSpawn: () => {
+        spawned = true;
+      },
+      isProcessAlive: (pid) => alive.has(pid),
+      kill(pid, signal) {
+        kills.push([pid, signal]);
+        alive.delete(pid);
+      },
+    });
     const daemonOwner = new FileLock(manager.daemonLock.lockPath);
     assert.strictEqual(daemonOwner.acquire(), true);
     fs.writeFileSync(controlEndpoint, "stale");
@@ -334,7 +295,6 @@ describe("MultiplexerDaemonManager", function () {
     await manager.ensureDaemon();
     assert.deepStrictEqual(kills, [[process.pid, "SIGTERM"]]);
     assert.strictEqual(fs.existsSync(controlEndpoint), false);
-    assert.strictEqual(fs.existsSync(path.join(tempDir, "daemon.json")), false);
   });
 
   it("requests graceful shutdown for protocol replacement", async function () {

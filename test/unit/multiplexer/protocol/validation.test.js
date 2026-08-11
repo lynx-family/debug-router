@@ -297,6 +297,12 @@ describe("multiplexer protocol validation", function () {
     assert.strictEqual(
       isMultiplexerHealthRequest({
         kind: "health",
+      }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerHealthRequest({
+        kind: "health",
         debugInfo: {
           daemonVersion: "0.0.1",
           processId: 123,
@@ -323,6 +329,23 @@ describe("multiplexer protocol validation", function () {
         },
       }),
       true
+    );
+    assert.strictEqual(
+      isMultiplexerHealthResponse({
+        kind: "health-response",
+        ok: true,
+        protocolVersion: 1,
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerHealthResponse({
+        kind: "health-response",
+        ok: true,
+        protocolVersion: 1,
+        minSupportedProtocolVersion: "1",
+      }),
+      false
     );
     assert.strictEqual(
       isMultiplexerHealthResponse({

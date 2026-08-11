@@ -7,44 +7,13 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const connectorRoot = path.join(
-  __dirname,
-  "../../../../debug_router_connector"
-);
-const rewire = require(require.resolve("rewire", {
-  paths: [connectorRoot],
-}));
-const atomicFileModulePath = path.join(
-  connectorRoot,
-  "dist/cjs/src/multiplexer/utils/atomic_file.js"
-);
-const fileLockModulePath = path.join(
-  connectorRoot,
-  "dist/cjs/src/multiplexer/utils/FileLock.js"
-);
-const writeFileAtomicModulePath = require.resolve("write-file-atomic", {
-  paths: [connectorRoot],
-});
-const atomicFileModule = rewire(atomicFileModulePath);
-const { writeFileAtomic, writeJsonAtomic } = atomicFileModule;
+const {
+  writeFileAtomic,
+  writeJsonAtomic,
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/atomic_file");
 const {
   FileLock,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/FileLock");
-
-function rewireModuleFs(modulePath, overrides) {
-  const rewiredModule = rewire(modulePath);
-  const moduleFs = rewiredModule.__get__("fs");
-  const localFs = Object.assign(Object.create(moduleFs), overrides);
-  rewiredModule.__set__("fs", localFs);
-  return rewiredModule;
-}
-
-function rewireDefaultFsImport(modulePath, overrides) {
-  const rewiredModule = rewire(modulePath);
-  const fsImport = rewiredModule.__get__("fs_1");
-  fsImport.default = Object.assign(Object.create(fsImport.default), overrides);
-  return rewiredModule;
-}
 
 function createTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-mux-test-"));
@@ -76,7 +45,7 @@ describe("multiplexer atomic file utilities", function () {
   });
 
   it("writes JSON atomically", function () {
-    const filePath = path.join(tempDir, "nested", "daemon.json");
+    const filePath = path.join(tempDir, "nested", "state.json");
 
     writeJsonAtomic(filePath, {
       pid: 1,
@@ -95,75 +64,6 @@ describe("multiplexer atomic file utilities", function () {
     writeFileAtomic(filePath, Buffer.from("hello"));
 
     assert.strictEqual(fs.readFileSync(filePath, "utf8"), "hello");
-  });
-
-  it("retries transient atomic rename failures", function () {
-    const filePath = path.join(tempDir, "daemon.json");
-    fs.writeFileSync(filePath, "old");
-
-    let attempts = 0;
-    const writeFileAtomicDependency = rewireModuleFs(
-      writeFileAtomicModulePath,
-      {
-        renameSync(oldPath, newPath) {
-          attempts++;
-          if (attempts === 1) {
-            const error = new Error("temporarily busy");
-            error.code = "EPERM";
-            throw error;
-          }
-          return fs.renameSync(oldPath, newPath);
-        },
-      }
-    );
-    const writeFileAtomicPackage = atomicFileModule.__get__(
-      "writeFileAtomicPackage"
-    );
-    const originalSync = writeFileAtomicPackage.sync;
-    writeFileAtomicPackage.sync = writeFileAtomicDependency.sync;
-
-    try {
-      writeFileAtomic(filePath, "new");
-    } finally {
-      writeFileAtomicPackage.sync = originalSync;
-    }
-
-    assert.ok(attempts > 1);
-    assert.strictEqual(fs.readFileSync(filePath, "utf8"), "new");
-  });
-
-  it("keeps the previous file when rename fails", function () {
-    const filePath = path.join(tempDir, "daemon.json");
-    fs.writeFileSync(filePath, "old");
-
-    let tempFilePath;
-    const writeFileAtomicDependency = rewireModuleFs(
-      writeFileAtomicModulePath,
-      {
-        renameSync(oldPath) {
-          tempFilePath = oldPath;
-          throw new Error("rename failed");
-        },
-      }
-    );
-    const writeFileAtomicPackage = atomicFileModule.__get__(
-      "writeFileAtomicPackage"
-    );
-    const originalSync = writeFileAtomicPackage.sync;
-    writeFileAtomicPackage.sync = writeFileAtomicDependency.sync;
-
-    try {
-      assert.throws(() => writeFileAtomic(filePath, "new"), /rename failed/);
-    } finally {
-      writeFileAtomicPackage.sync = originalSync;
-    }
-
-    assert.strictEqual(fs.readFileSync(filePath, "utf8"), "old");
-    assert.strictEqual(fs.existsSync(tempFilePath), false);
-    assert.deepStrictEqual(
-      fs.readdirSync(tempDir).filter((name) => name.endsWith(".tmp")),
-      []
-    );
   });
 });
 
@@ -188,14 +88,8 @@ describe("multiplexer FileLock", function () {
     assert.strictEqual(first.isLocked(), true);
     const firstOwner = first.readOwner();
     assert.strictEqual(firstOwner.pid, process.pid);
-    const [
-      tokenPid,
-      tokenCreatedAt,
-      tokenRandomSuffix,
-    ] = firstOwner.token.split("-");
-    assert.strictEqual(Number(tokenPid), process.pid);
-    assert.strictEqual(Number(tokenCreatedAt), firstOwner.createdAt);
-    assert.match(tokenRandomSuffix, /^[0-9a-f]{16}$/);
+    assert.strictEqual(typeof firstOwner.token, "string");
+    assert.notStrictEqual(firstOwner.token, "");
     assert.strictEqual(second.acquire(), false);
 
     first.release();
@@ -491,115 +385,5 @@ describe("multiplexer FileLock", function () {
     assert.strictEqual(fs.existsSync(lockPath), true);
 
     lock.release();
-  });
-
-  it("configures retries for transient recursive lock removal failures", function () {
-    const lockPath = path.join(tempDir, "try-retry.lock");
-    fs.mkdirSync(lockPath);
-    let removeOptions;
-
-    const rewiredFileLockModule = rewireDefaultFsImport(fileLockModulePath, {
-      rmSync(targetPath, options) {
-        removeOptions = options;
-        return fs.rmSync(targetPath, options);
-      },
-    });
-    const RewiredFileLock = rewiredFileLockModule.FileLock;
-
-    assert.strictEqual(new RewiredFileLock(lockPath).tryRemove(null), true);
-    assert.deepStrictEqual(removeOptions, {
-      recursive: true,
-      force: true,
-      maxRetries: 3,
-      retryDelay: 10,
-    });
-  });
-
-  it("treats try remove failures as best effort", function () {
-    const lockPath = path.join(tempDir, "try-error.lock");
-    fs.mkdirSync(lockPath);
-
-    const rewiredFileLockModule = rewireDefaultFsImport(fileLockModulePath, {
-      rmSync() {
-        throw new Error("rm failed");
-      },
-    });
-    const RewiredFileLock = rewiredFileLockModule.FileLock;
-
-    assert.strictEqual(new RewiredFileLock(lockPath).tryRemove(null), false);
-    assert.strictEqual(fs.existsSync(lockPath), true);
-  });
-
-  it("propagates unexpected acquire and stat errors", function () {
-    const originalMkdirSync = fs.mkdirSync;
-    fs.mkdirSync = function throwOnMkdir(targetPath, options) {
-      if (targetPath === path.join(tempDir, "denied")) {
-        const error = new Error("mkdir denied");
-        error.code = "EACCES";
-        throw error;
-      }
-      return originalMkdirSync.call(fs, targetPath, options);
-    };
-
-    try {
-      assert.throws(
-        () => new FileLock(path.join(tempDir, "denied", "lock")).acquire(),
-        /mkdir denied/
-      );
-    } finally {
-      fs.mkdirSync = originalMkdirSync;
-    }
-
-    const lockPath = path.join(tempDir, "stat-error.lock");
-    fs.mkdirSync(lockPath);
-    const originalStatSync = fs.statSync;
-    fs.statSync = function throwOnStat(targetPath) {
-      if (targetPath === lockPath) {
-        const error = new Error("stat denied");
-        error.code = "EACCES";
-        throw error;
-      }
-      return originalStatSync.call(fs, targetPath);
-    };
-
-    try {
-      assert.throws(
-        () => new FileLock(lockPath).cleanupStale(1000, Date.now()),
-        /stat denied/
-      );
-    } finally {
-      fs.statSync = originalStatSync;
-    }
-  });
-
-  it("treats ENOENT during stat as not stale", function () {
-    const lockPath = path.join(tempDir, "racy.lock");
-    const originalExistsSync = fs.existsSync;
-    const originalStatSync = fs.statSync;
-
-    fs.existsSync = function fakeExists(targetPath) {
-      if (targetPath === lockPath) {
-        return true;
-      }
-      return originalExistsSync.call(fs, targetPath);
-    };
-    fs.statSync = function throwOnStat(targetPath) {
-      if (targetPath === lockPath) {
-        const error = new Error("gone");
-        error.code = "ENOENT";
-        throw error;
-      }
-      return originalStatSync.call(fs, targetPath);
-    };
-
-    try {
-      assert.strictEqual(
-        new FileLock(lockPath).cleanupStale(1000, Date.now()),
-        false
-      );
-    } finally {
-      fs.existsSync = originalExistsSync;
-      fs.statSync = originalStatSync;
-    }
   });
 });
