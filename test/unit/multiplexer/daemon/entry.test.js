@@ -65,8 +65,6 @@ function createOption(tempDir, overrides = {}) {
   return {
     controlEndpoint:
       overrides.controlEndpoint ?? path.join(tempDir, "control.sock"),
-    daemonLockPath:
-      overrides.daemonLockPath ?? path.join(tempDir, "daemon.lock"),
     protocolVersion: overrides.protocolVersion ?? 1,
     minSupportedProtocolVersion: overrides.minSupportedProtocolVersion ?? 1,
     ...overrides,
@@ -102,19 +100,20 @@ describe("multiplexer daemon entry", function () {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("parses fixed endpoint options and protocol defaults", function () {
+  it("parses required daemon options", function () {
     assert.deepStrictEqual(
       parseEntryOption([
         "--control-endpoint",
         "/tmp/control.sock",
-        "--daemon-lock-path",
-        "/tmp/daemon.lock",
+        "--protocol-version",
+        "1",
+        "--min-supported-protocol-version",
+        "1",
         "--debug-info",
         '{"daemonVersion":"1.2.3"}',
       ]),
       {
         controlEndpoint: "/tmp/control.sock",
-        daemonLockPath: "/tmp/daemon.lock",
         protocolVersion: 1,
         minSupportedProtocolVersion: 1,
         debugInfo: { daemonVersion: "1.2.3" },
@@ -122,23 +121,31 @@ describe("multiplexer daemon entry", function () {
     );
   });
 
-  it("parses camelCase, equals-style, and optional daemon settings", function () {
+  it("parses optional daemon settings", function () {
     const option = parseEntryOption([
-      "--controlEndpoint=/tmp/control.sock",
-      "--daemonLockPath=/tmp/daemon.lock",
-      "--protocolVersion=2",
-      "--minSupportedProtocolVersion=2",
-      "--legacyDriverDir=/tmp/legacy",
-      "--multiplexerDaemonIdleTimeout=50",
-      "--enableWebSocket=true",
-      "--websocketPort=9444",
-      "--websocketRoomId=room",
-      '--connectionTrace={"enabled":true,"output":"/tmp/trace"}',
-      '--physicalConnectorOption={"enableAndroid":true}',
+      "--control-endpoint",
+      "/tmp/control.sock",
+      "--protocol-version",
+      "2",
+      "--min-supported-protocol-version",
+      "2",
+      "--legacy-driver-dir",
+      "/tmp/legacy",
+      "--multiplexer-daemon-idle-timeout",
+      "50",
+      "--enable-websocket",
+      "true",
+      "--websocket-port",
+      "9444",
+      "--websocket-room-id",
+      "room",
+      "--connection-trace",
+      '{"enabled":true,"output":"/tmp/trace"}',
+      "--physical-connector-option",
+      '{"enableAndroid":true}',
     ]);
     assert.deepStrictEqual(option, {
       controlEndpoint: "/tmp/control.sock",
-      daemonLockPath: "/tmp/daemon.lock",
       protocolVersion: 2,
       minSupportedProtocolVersion: 2,
       legacyDriverDir: "/tmp/legacy",
@@ -150,46 +157,54 @@ describe("multiplexer daemon entry", function () {
     });
   });
 
-  it("rejects removed discovery/port/heartbeat args and missing endpoint", function () {
+  it("rejects removed discovery/data-dir/lock args and missing endpoint", function () {
     assert.throws(
-      () =>
-        parseEntryOption([
-          "--discovery-path=/tmp/daemon.json",
-          "--daemon-lock-path=/tmp/daemon.lock",
-        ]),
+      () => parseEntryOption(["--discovery-path", "/tmp/daemon.json"]),
       /Unknown multiplexer daemon option: discovery-path/
     );
     assert.throws(
       () =>
         parseEntryOption([
-          "--control-endpoint=/tmp/control.sock",
-          "--daemon-lock-path=/tmp/daemon.lock",
-          "--control-port=9000",
+          "--control-endpoint",
+          "/tmp/control.sock",
+          "--daemon-lock-path",
+          "/tmp/daemon.lock",
         ]),
-      /Unknown multiplexer daemon option: control-port/
+      /Unknown multiplexer daemon option: daemon-lock-path/
     );
     assert.throws(
-      () => parseEntryOption(["--daemon-lock-path=/tmp/daemon.lock"]),
+      () =>
+        parseEntryOption([
+          "--control-endpoint",
+          "/tmp/control.sock",
+          "--data-dir",
+          "/tmp/multiplexer",
+        ]),
+      /Unknown multiplexer daemon option: data-dir/
+    );
+    assert.throws(
+      () => parseEntryOption([]),
       /Missing required multiplexer daemon option: controlEndpoint/
     );
   });
 
-  it("rejects malformed JSON and invalid scalar options", function () {
+  it("rejects unsupported argument forms and malformed JSON", function () {
     const base = [
-      "--control-endpoint=/tmp/control.sock",
-      "--daemon-lock-path=/tmp/daemon.lock",
+      "--control-endpoint",
+      "/tmp/control.sock",
+      "--protocol-version",
+      "1",
+      "--min-supported-protocol-version",
+      "1",
     ];
+    assert.throws(() => parseEntryOption([...base, "--debug-info", "{"]));
     assert.throws(
-      () => parseEntryOption([...base, "--debug-info={"]),
-      /Invalid multiplexer daemon option debugInfo/
+      () => parseEntryOption([...base, "--enable-websocket"]),
+      /Missing value for multiplexer daemon option: enable-websocket/
     );
     assert.throws(
-      () => parseEntryOption([...base, "--enable-websocket=maybe"]),
-      /Invalid multiplexer daemon option enableWebSocket/
-    );
-    assert.throws(
-      () => parseEntryOption([...base, "--protocol-version=bad"]),
-      /Invalid multiplexer daemon option protocolVersion/
+      () => parseEntryOption(["--control-endpoint=/tmp/control.sock"]),
+      /Unknown multiplexer daemon option: control-endpoint=\/tmp\/control.sock/
     );
   });
 
@@ -210,11 +225,14 @@ describe("multiplexer daemon entry", function () {
         minSupportedProtocolVersion: 2,
         debugInfo: { daemonVersion: "3" },
         enableWebSocket: true,
-        enableAndroid: true,
+        physicalConnectorOption: { enableAndroid: true },
       });
       assert(getDriverReportService() instanceof DriverReportServiceImpl);
       await daemon.start();
-      assert.strictEqual(fs.existsSync(option.daemonLockPath), true);
+      assert.strictEqual(
+        fs.existsSync(path.join(tempDir, "daemon.lock")),
+        false
+      );
       assert.strictEqual(
         fs.existsSync(path.join(tempDir, "daemon.json")),
         false
@@ -233,8 +251,10 @@ describe("multiplexer daemon entry", function () {
       const daemon = await startMultiplexerDaemonEntry([
         "--control-endpoint",
         option.controlEndpoint,
-        "--daemon-lock-path",
-        option.daemonLockPath,
+        "--protocol-version",
+        String(option.protocolVersion),
+        "--min-supported-protocol-version",
+        String(option.minSupportedProtocolVersion),
       ]);
       assert.strictEqual(FakeEntryHost.instances[0].startCalls.length, 1);
       assert.deepStrictEqual(
@@ -259,7 +279,7 @@ describe("multiplexer daemon entry", function () {
     }
   });
 
-  it("cleans daemon.lock when Host start fails", async function () {
+  it("propagates Host start failures without creating daemon.lock", async function () {
     const restoreHost = replaceEntryHostCtor();
     const processOnce = stubProcessOnce();
     FakeEntryHost.startError = new Error("entry host failed");
@@ -270,12 +290,17 @@ describe("multiplexer daemon entry", function () {
           startMultiplexerDaemonEntry([
             "--control-endpoint",
             option.controlEndpoint,
-            "--daemon-lock-path",
-            option.daemonLockPath,
+            "--protocol-version",
+            String(option.protocolVersion),
+            "--min-supported-protocol-version",
+            String(option.minSupportedProtocolVersion),
           ]),
         /entry host failed/
       );
-      assert.strictEqual(fs.existsSync(option.daemonLockPath), false);
+      assert.strictEqual(
+        fs.existsSync(path.join(tempDir, "daemon.lock")),
+        false
+      );
     } finally {
       processOnce.restore();
       restoreHost();

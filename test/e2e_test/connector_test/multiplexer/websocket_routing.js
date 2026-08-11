@@ -8,6 +8,7 @@ const { DebugRouterConnector } = require("@lynx-js/debug-router-connector");
 const {
   createMultiplexerPaths,
 } = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
+const { findDaemonProcess, stopDaemonProcesses } = require("./daemon_process");
 
 const fakeDaemonEntry = path.resolve(
   __dirname,
@@ -128,7 +129,7 @@ function createContext(name, state = defaultState()) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(paths.daemonLockPath);
+        await stopDaemonProcesses(paths.daemonProcessName);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
         if (hadOriginalHome) {
@@ -196,12 +197,12 @@ async function runWebSocketRoutingFlow() {
     assert(connector.wssPort > 0, "websocket port should be assigned");
 
     const daemon = await waitFor(
-      () => readDaemonOwner(context.paths.daemonLockPath),
+      () => findDaemonProcess(context.paths.daemonProcessName),
       3000,
-      "websocket daemon lock owner"
+      "websocket daemon process"
     );
     daemonPid = daemon?.pid;
-    assert(daemonPid, "expected daemon pid in daemon.lock");
+    assert(daemonPid, "expected daemon pid from process lookup");
 
     const url = `ws://127.0.0.1:${connector.wssPort}/mdevices/page/android`;
     const first = await connectDriverWebSocket(url, { app: "driver-a" });
@@ -268,9 +269,7 @@ async function runWebSocketRoutingFlow() {
     second.socket.close();
     await connector.close();
     await waitFor(
-      () =>
-        !fs.existsSync(context.paths.daemonLockPath) &&
-        !processExists(daemonPid),
+      () => !processExists(daemonPid),
       2500,
       "websocket daemon idle cleanup"
     );
@@ -704,37 +703,6 @@ function waitForSocketMessage(socket, predicate, timeout = 2000) {
     socket.on("message", onMessage);
     socket.on("close", onClose);
   });
-}
-
-async function stopDaemon(daemonLockPath) {
-  const owner = readDaemonOwner(daemonLockPath);
-  if (!owner?.pid) {
-    return;
-  }
-  try {
-    process.kill(owner.pid, "SIGTERM");
-  } catch (_error) {}
-  await waitFor(
-    () => !processExists(owner.pid) || !fs.existsSync(daemonLockPath),
-    1000,
-    "daemon termination"
-  ).catch(() => {
-    try {
-      process.kill(owner.pid, "SIGKILL");
-    } catch (_error) {}
-  });
-}
-
-function readDaemonOwner(daemonLockPath) {
-  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
-}
-
-function readJsonFile(filePath, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (_error) {
-    return fallback;
-  }
 }
 
 function readJsonLines(filePath) {

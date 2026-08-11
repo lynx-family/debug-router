@@ -88,7 +88,6 @@ function createIntegrationContext(name, option = {}) {
     controlEndpoint: paths.controlEndpoint,
     localProtocolVersion,
   });
-  discovery.daemonLockPathForTest = paths.daemonLockPath;
   discovery.logPathForTest = getLogPath(paths);
 
   const manager = createManager({
@@ -129,7 +128,6 @@ function createIntegrationContext(name, option = {}) {
           localProtocolVersion:
             extra.localProtocolVersion ?? localProtocolVersion,
         });
-      extraDiscovery.daemonLockPathForTest = paths.daemonLockPath;
       extraDiscovery.logPathForTest = getLogPath(paths);
       return createManager({
         paths,
@@ -234,7 +232,7 @@ function createIntegrationContext(name, option = {}) {
         for (const client of clients.splice(0)) {
           await client.close().catch(() => {});
         }
-        await stopLockedDaemon(paths.daemonLockPath);
+        await manager.stopDaemonOnConnectorRequest().catch(() => {});
         await stopLoggedDaemons(paths);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
@@ -251,9 +249,9 @@ function getIpcTestTempDir() {
 function createManager(option) {
   return new MultiplexerDaemonManager({
     discovery: option.discovery,
+    daemonProcessName: option.paths.daemonProcessName,
     controlEndpoint: option.paths.controlEndpoint,
     spawnLockPath: option.paths.spawnLockPath,
-    daemonLockPath: option.paths.daemonLockPath,
     daemonEntry: fakeDaemonEntry,
     startupTimeout: option.startupTimeout,
     readyPollInterval: option.readyPollInterval,
@@ -299,32 +297,13 @@ function readJsonLines(filePath) {
   }
 }
 
-async function stopLockedDaemon(daemonLockPath) {
-  const info = readJsonFile(path.join(daemonLockPath, "owner.json"), null);
-  if (info?.pid) {
-    try {
-      process.kill(info.pid, "SIGTERM");
-    } catch (_error) {}
-    await waitFor(() => !processExists(info.pid), 1000).catch(async () => {
-      try {
-        process.kill(info.pid, "SIGKILL");
-      } catch (_error) {}
-      await waitFor(() => !processExists(info.pid), 1000).catch(() => {});
-    });
-    if (!processExists(info.pid)) {
-      fs.rmSync(daemonLockPath, {
-        recursive: true,
-        force: true,
-      });
-    }
-  }
-}
-
 async function stopLoggedDaemons(paths) {
   const pids = [
     ...new Set(
       readJsonLines(getLogPath(paths))
-        .filter((entry) => entry.event === "daemon-started")
+        .filter((entry) =>
+          ["daemon-entry-start", "daemon-started"].includes(entry.event)
+        )
         .map((entry) => entry.pid)
         .filter((pid) => Number.isInteger(pid) && pid > 0)
         .reverse()
@@ -645,18 +624,13 @@ async function connectRuntimeWebSocket(url, option = {}) {
 }
 
 function getDiscoveryInfo(discovery) {
-  const owner = readJsonFile(
-    path.join(discovery.daemonLockPathForTest, "owner.json"),
-    null
-  );
-  if (!owner?.pid) return null;
   const started = readJsonLines(discovery.logPathForTest)
-    .filter(
-      (entry) => entry.event === "daemon-started" && entry.pid === owner.pid
-    )
+    .filter((entry) => entry.event === "daemon-started")
+    .filter((entry) => processExists(entry.pid))
     .at(-1);
+  if (!started) return null;
   return {
-    pid: owner.pid,
+    pid: started.pid,
     protocolVersion: started?.protocolVersion,
     minSupportedProtocolVersion: started?.minSupportedProtocolVersion,
     debugInfo: started?.debugInfo,

@@ -178,9 +178,9 @@ export class DebugRouterConnector {
     });
     const daemonManager = new MultiplexerDaemonManager({
       discovery,
+      daemonProcessName: paths.daemonProcessName,
       controlEndpoint: paths.controlEndpoint,
       spawnLockPath: paths.spawnLockPath,
-      daemonLockPath: paths.daemonLockPath,
       daemonEntry: option.multiplexerDaemonEntry ?? resolveDaemonEntryPath(),
       startupTimeout:
         option.multiplexerStartupTimeout ?? DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT,

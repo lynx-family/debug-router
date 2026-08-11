@@ -203,7 +203,10 @@ describe("multiplexer integration routing isolation", function () {
     });
 
     const controlA = context.createClient({ rpcTimeout: 1500 });
-    const controlB = context.createClient({ rpcTimeout: 1500 });
+    const controlB = context.createClient({
+      manager: context.createManager(),
+      rpcTimeout: 1500,
+    });
     const eventsA = [];
     const eventsB = [];
     controlA.subscribe((event) => eventsA.push(event));

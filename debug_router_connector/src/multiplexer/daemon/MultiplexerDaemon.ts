@@ -2,17 +2,14 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { FileLock } from "../utils/FileLock";
-
-export type MultiplexerDaemonHost = {
-  start: (option?: unknown) => void | Promise<void>;
-  stop: () => void | Promise<void>;
-  setIdleTimeoutHandler?: (handler: () => void | Promise<void>) => void;
-  setShutdownHandler?: (handler: () => void | Promise<void>) => void;
-};
+export interface MultiplexerDaemonHost {
+  start(option?: unknown): void | Promise<void>;
+  stop(): void | Promise<void>;
+  setIdleTimeoutHandler?(handler: () => void | Promise<void>): void;
+  setShutdownHandler?(handler: () => void | Promise<void>): void;
+}
 
 export type MultiplexerDaemonOption = {
-  daemonLockPath: string;
   host: MultiplexerDaemonHost;
   hostOption?: unknown;
   onIdleTimeout?: (stopError?: unknown) => void | Promise<void>;
@@ -20,7 +17,6 @@ export type MultiplexerDaemonOption = {
 };
 
 export class MultiplexerDaemon {
-  daemonLock: FileLock;
   host: MultiplexerDaemonHost;
 
   private readonly option: MultiplexerDaemonOption;
@@ -29,7 +25,6 @@ export class MultiplexerDaemon {
 
   constructor(option: MultiplexerDaemonOption) {
     this.option = option;
-    this.daemonLock = new FileLock(option.daemonLockPath);
     this.host = option.host;
   }
 
@@ -38,7 +33,6 @@ export class MultiplexerDaemon {
       return;
     }
 
-    this.holdDaemonLock();
     try {
       await this.startHost();
       this.started = true;
@@ -56,23 +50,10 @@ export class MultiplexerDaemon {
       hostStopError = error;
     }
 
-    this.releaseDaemonLock();
     this.started = false;
     if (hostStopError) {
       throw hostStopError;
     }
-  }
-
-  holdDaemonLock(): void {
-    if (!this.daemonLock.acquire()) {
-      throw new Error(
-        `Failed to acquire multiplexer daemon lock: ${this.daemonLock.lockPath}`,
-      );
-    }
-  }
-
-  releaseDaemonLock(): void {
-    this.daemonLock.release();
   }
 
   private async startHost(): Promise<void> {

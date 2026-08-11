@@ -787,16 +787,9 @@ describe("multiplexer integration control net reliability", function () {
           await connector.connectUsbClients("device-1", -1, true, null);
         }
       } catch (error) {
-        error.message += `; connector=${index}, daemonLog=${JSON.stringify(
-          context.readLog()
-        )}, daemonLock=${
-          fs.existsSync(context.paths.daemonLockPath)
-            ? fs.readFileSync(
-                path.join(context.paths.daemonLockPath, "owner.json"),
-                "utf8"
-              )
-            : "missing"
-        }`;
+        error.message += `; connector=${index}, daemonProcessName=${
+          context.paths.daemonProcessName
+        }, daemonLog=${JSON.stringify(context.readLog())}`;
         throw error;
       }
     }

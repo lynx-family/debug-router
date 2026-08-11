@@ -11,7 +11,9 @@ const {
 } = require("@lynx-js/debug-router-connector");
 const {
   createMultiplexerPaths,
+  MULTIPLEXER_DAEMON_PROCESS_NAME_SUFFIX,
 } = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
+const { findDaemonProcess, stopDaemonProcesses } = require("./daemon_process");
 
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
@@ -218,7 +220,7 @@ function createContext(platform, args, option = {}) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(paths.daemonLockPath);
+        await stopDaemonProcesses(paths.daemonProcessName);
         await delay(500);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
@@ -333,9 +335,9 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
     );
 
     const daemonInfo = await waitFor(
-      () => readDaemonOwner(context.paths.daemonLockPath),
+      () => findDaemonProcess(context.paths.daemonProcessName),
       3000,
-      `${platform} daemon lock owner`
+      `${platform} daemon process`
     );
     logStep(
       `${platform} daemon pid=${daemonInfo.pid} endpoint=${
@@ -382,9 +384,12 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
       );
     }
 
+    const closingDaemon = await findDaemonProcess(
+      context.paths.daemonProcessName
+    );
     await Promise.all([first.close(), second.close()]);
     await waitFor(
-      () => !fs.existsSync(context.paths.daemonLockPath),
+      () => !closingDaemon || !processExists(closingDaemon.pid),
       5000,
       `${platform} daemon idle cleanup`
     );
@@ -969,8 +974,8 @@ async function assertDaemonRecovery(
   assert(client, `${platform} client should be rediscovered after recovery`);
 
   const newInfo = await waitFor(
-    () => {
-      const info = readDaemonOwner(context.paths.daemonLockPath);
+    async () => {
+      const info = await findDaemonProcess(context.paths.daemonProcessName);
       return info && info.pid !== oldPid ? info : null;
     },
     5000,
@@ -1105,42 +1110,6 @@ function withTimeout(promise, timeout, label) {
   });
 }
 
-async function stopDaemon(daemonLockPath) {
-  const owner = readDaemonOwner(daemonLockPath);
-  if (!owner?.pid) {
-    return;
-  }
-  try {
-    process.kill(owner.pid, "SIGTERM");
-  } catch (_error) {}
-  await waitFor(
-    () => !processExists(owner.pid),
-    1000,
-    "daemon termination"
-  ).catch(() => {
-    try {
-      process.kill(owner.pid, "SIGKILL");
-    } catch (_error) {}
-  });
-  await waitFor(
-    () => !processExists(owner.pid),
-    1000,
-    "daemon force termination"
-  ).catch(() => {});
-}
-
-function readDaemonOwner(daemonLockPath) {
-  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
-}
-
-function readJsonFile(filePath, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (_error) {
-    return fallback;
-  }
-}
-
 function readOwnerPid(filePath) {
   try {
     return Number(fs.readFileSync(filePath, "utf8").trim());
@@ -1249,12 +1218,6 @@ function listInterferingMultiplexerDaemons() {
         return;
       }
 
-      const defaultDaemonLockPath = path.join(
-        process.env.HOME || os.homedir(),
-        ".DebugRouterConnector",
-        "multiplexer",
-        "daemon.lock"
-      );
       const targets = stdout
         .split(/\n/)
         .map((line) => {
@@ -1272,17 +1235,7 @@ function listInterferingMultiplexerDaemons() {
           if (entry.pid === process.pid) {
             return false;
           }
-          if (!entry.command.includes("/multiplexer/daemon/entry.js")) {
-            return false;
-          }
-          return (
-            entry.command.includes(
-              `--daemon-lock-path ${defaultDaemonLockPath}`
-            ) ||
-            /\/T\/debug-router-real-[^/]+\/multiplexer\/daemon\.lock/.test(
-              entry.command
-            )
-          );
+          return entry.command.includes(MULTIPLEXER_DAEMON_PROCESS_NAME_SUFFIX);
         });
       resolve(targets);
     });

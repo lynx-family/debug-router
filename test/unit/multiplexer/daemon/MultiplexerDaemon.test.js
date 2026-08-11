@@ -35,21 +35,18 @@ function createHost(overrides = {}) {
 
 describe("MultiplexerDaemon", function () {
   let tempDir;
-  let daemonLockPath;
 
   beforeEach(function () {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-daemon-"));
-    daemonLockPath = path.join(tempDir, "daemon.lock");
   });
 
   afterEach(function () {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("holds daemon.lock, starts once, and never creates daemon.json", async function () {
+  it("starts once without creating daemon.lock or daemon.json", async function () {
     const host = createHost();
     const daemon = new MultiplexerDaemon({
-      daemonLockPath,
       host,
       hostOption: { idle: 10 },
     });
@@ -57,34 +54,30 @@ describe("MultiplexerDaemon", function () {
     await daemon.start();
     assert.strictEqual(host.startCalls, 1);
     assert.deepStrictEqual(host.startOption, { idle: 10 });
-    const owner = daemon.daemonLock.readOwner();
-    assert.strictEqual(owner.pid, process.pid);
+    assert.strictEqual(fs.existsSync(path.join(tempDir, "daemon.lock")), false);
     assert.strictEqual(fs.existsSync(path.join(tempDir, "daemon.json")), false);
     await daemon.stop();
-    assert.strictEqual(fs.existsSync(daemonLockPath), false);
   });
 
-  it("releases daemon.lock when host start fails", async function () {
+  it("stops cleanly when host start fails", async function () {
     const host = createHost({
       start() {
         throw new Error("start failed");
       },
     });
-    const daemon = new MultiplexerDaemon({ daemonLockPath, host });
+    const daemon = new MultiplexerDaemon({ host });
     await assert.rejects(() => daemon.start(), /start failed/);
-    assert.strictEqual(fs.existsSync(daemonLockPath), false);
   });
 
-  it("releases daemon.lock and rethrows host stop failures", async function () {
+  it("rethrows host stop failures", async function () {
     const host = createHost({
       stop() {
         throw new Error("stop failed");
       },
     });
-    const daemon = new MultiplexerDaemon({ daemonLockPath, host });
+    const daemon = new MultiplexerDaemon({ host });
     await daemon.start();
     await assert.rejects(() => daemon.stop(), /stop failed/);
-    assert.strictEqual(fs.existsSync(daemonLockPath), false);
   });
 
   it("stops for idle and shutdown callbacks", async function () {
@@ -92,7 +85,6 @@ describe("MultiplexerDaemon", function () {
       const host = createHost();
       const calls = [];
       const daemon = new MultiplexerDaemon({
-        daemonLockPath,
         host,
         onIdleTimeout: (error) => calls.push(["idle", error]),
         onShutdownRequest: (error) => calls.push(["shutdown", error]),

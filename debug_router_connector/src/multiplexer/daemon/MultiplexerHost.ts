@@ -28,8 +28,6 @@ import {
   ControlRpcParams,
   ControlRpcRequest,
   DeviceSnapshot,
-  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
-  MULTIPLEXER_PROTOCOL_VERSION,
   MultiplexerDebugInfo,
   Snapshot,
   WebSocketClientSnapshot,
@@ -92,15 +90,12 @@ type WebSocketControllerLike = {
   close(): void;
 };
 
-export type MultiplexerHostOption = Omit<
-  PhysicalConnectorOption,
-  "traceRecorder"
-> & {
+export type MultiplexerHostOption = {
   enableWebSocket?: boolean;
   connectionTrace?: ConnectionTraceOptions;
   controlEndpoint: string;
-  protocolVersion?: number;
-  minSupportedProtocolVersion?: number;
+  protocolVersion: number;
+  minSupportedProtocolVersion: number;
   debugInfo?: MultiplexerDebugInfo;
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
@@ -109,6 +104,7 @@ export type MultiplexerHostOption = Omit<
     port?: number;
     roomId?: string;
   };
+  physicalConnectorOption?: PhysicalConnectorOption;
 
   // only used for tests or embedding
   physicalConnector?: PhysicalConnector;
@@ -254,11 +250,8 @@ export class MultiplexerHost
 
   constructor(option: MultiplexerHostOption) {
     this.option = option;
-    this.protocolVersion =
-      option.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION;
-    this.minSupportedProtocolVersion =
-      option.minSupportedProtocolVersion ??
-      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
+    this.protocolVersion = option.protocolVersion;
+    this.minSupportedProtocolVersion = option.minSupportedProtocolVersion;
     this.now = option.now ?? Date.now;
     this.pendingRoutes = new PendingRouteTable({
       now: this.now,
@@ -993,7 +986,7 @@ export class MultiplexerHost
     generation: number = this.physicalDiscoveryGeneration,
   ): Promise<void> {
     this.assertPhysicalDiscoveryCurrent(generation);
-    if (this.option.manualConnect) {
+    if (this.option.physicalConnectorOption?.manualConnect) {
       return;
     }
 
@@ -1383,7 +1376,7 @@ export class MultiplexerHost
     const PhysicalConnectorCtor =
       this.option.PhysicalConnectorCtor ?? PhysicalConnector;
     return new PhysicalConnectorCtor({
-      ...this.option,
+      ...this.option.physicalConnectorOption,
       traceRecorder: this.connectionTraceRecorder,
     });
   }

@@ -25,6 +25,10 @@ const {
 const {
   isControlEvent,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol/validation");
+const {
+  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
+  MULTIPLEXER_PROTOCOL_VERSION,
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol");
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -509,12 +513,17 @@ function createHost(options = {}) {
   const physical = options.physical ?? new FakePhysicalConnector(options);
   const host = new MultiplexerHost({
     physicalConnector: physical,
-    protocolVersion: options.protocolVersion,
-    minSupportedProtocolVersion: options.minSupportedProtocolVersion,
+    protocolVersion:
+      options.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
+    minSupportedProtocolVersion:
+      options.minSupportedProtocolVersion ??
+      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
     debugInfo: options.debugInfo,
     controlEndpoint:
       options.controlEndpoint ?? "/tmp/debug-router-host-control.sock",
-    manualConnect: options.manualConnect,
+    physicalConnectorOption: {
+      manualConnect: options.manualConnect,
+    },
     enableWebSocket: options.enableWebSocket,
     websocketOption: options.websocketOption,
     connectionTrace: options.connectionTrace,
@@ -700,20 +709,24 @@ describe("MultiplexerHost", function () {
 
     const host = new MultiplexerHost({
       PhysicalConnectorCtor,
+      controlEndpoint: "/tmp/debug-router-host-control.sock",
       protocolVersion: 3,
-      manualConnect: true,
+      minSupportedProtocolVersion: 2,
       connectionTrace: {
         enabled: true,
         output: { write() {} },
       },
-      traceRecorder: callerRecorder,
+      physicalConnectorOption: {
+        manualConnect: true,
+        traceRecorder: callerRecorder,
+      },
     });
     const snapshot = host.createSnapshot();
     const controlServer = attachControlServer(host);
 
     assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0].protocolVersion, 3);
     assert.strictEqual(calls[0].manualConnect, true);
+    assert.strictEqual("protocolVersion" in calls[0], false);
     assert.ok(calls[0].traceRecorder);
     assert.notStrictEqual(calls[0].traceRecorder, callerRecorder);
     assert.strictEqual(calls[0].traceRecorder, host.connectionTraceRecorder);

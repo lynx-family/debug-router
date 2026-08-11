@@ -16,7 +16,9 @@ const {
 } = require("@lynx-js/debug-router-connector");
 const {
   createMultiplexerPaths,
+  MULTIPLEXER_DAEMON_PROCESS_NAME_SUFFIX,
 } = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
+const { findDaemonProcess, stopDaemonProcesses } = require("./daemon_process");
 
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
@@ -382,9 +384,9 @@ async function runPlatformStressScenario(platform, args) {
     await refreshAndAssertState(context, state, args, report, "warmup");
 
     const daemonInfo = await waitFor(
-      () => readDaemonOwner(context.paths.daemonLockPath),
+      () => findDaemonProcess(context.paths.daemonProcessName),
       5000,
-      `${platform} daemon lock owner`
+      `${platform} daemon process`
     );
     report.daemon.initialPid = daemonInfo.pid;
     report.daemon.finalPid = daemonInfo.pid;
@@ -648,7 +650,7 @@ async function refreshAndAssertState(context, state, args, report, label) {
     await assertFrontendClientLists(state, args, label);
   }
 
-  const daemon = readDaemonOwner(context.paths.daemonLockPath);
+  const daemon = await findDaemonProcess(context.paths.daemonProcessName);
   if (!daemon?.pid || !processExists(daemon.pid)) {
     throw new StressError("daemon_exited", `${label}: daemon is not alive`);
   }
@@ -989,14 +991,14 @@ async function runRecoveryProbe(context, state, args, report) {
   }
 
   const newInfo = await waitFor(
-    () => {
-      const info = readDaemonOwner(context.paths.daemonLockPath);
+    async () => {
+      const info = await findDaemonProcess(context.paths.daemonProcessName);
       return info?.pid && info.pid !== oldPid && processExists(info.pid)
         ? info
         : null;
     },
     10000,
-    `${state.platform} replacement daemon lock owner`
+    `${state.platform} replacement daemon process`
   );
   report.daemon.recoveryCount++;
   state.lastDaemonPid = newInfo.pid;
@@ -1115,7 +1117,9 @@ async function cleanupContext(context, state, args, report) {
   }
   try {
     await context.cleanup();
-    const daemonAfterClose = readDaemonOwner(context.paths.daemonLockPath);
+    const daemonAfterClose = await findDaemonProcess(
+      context.paths.daemonProcessName
+    );
     if (daemonAfterClose?.pid) {
       observedPids.add(daemonAfterClose.pid);
     }
@@ -1123,15 +1127,14 @@ async function cleanupContext(context, state, args, report) {
     let cleanupError = null;
     if (observedPids.size > 0 || daemonAfterClose?.pid) {
       await waitFor(
-        () => {
-          const daemon = readDaemonOwner(context.paths.daemonLockPath);
+        async () => {
+          const daemon = await findDaemonProcess(
+            context.paths.daemonProcessName
+          );
           if (daemon?.pid) {
             observedPids.add(daemon.pid);
           }
-          return (
-            Array.from(observedPids).every((pid) => !processExists(pid)) &&
-            !fs.existsSync(context.paths.daemonLockPath)
-          );
+          return Array.from(observedPids).every((pid) => !processExists(pid));
         },
         args.multiplexerDaemonIdleTimeout + 5000,
         "daemon idle cleanup",
@@ -1141,10 +1144,10 @@ async function cleanupContext(context, state, args, report) {
       });
     }
 
-    const daemon = readDaemonOwner(context.paths.daemonLockPath);
+    const daemon = await findDaemonProcess(context.paths.daemonProcessName);
     if (daemon?.pid) {
       observedPids.add(daemon.pid);
-      await stopDaemon(context.paths.daemonLockPath);
+      await stopDaemonProcesses(context.paths.daemonProcessName);
     }
     for (const pid of observedPids) {
       if (processExists(pid)) {
@@ -2025,42 +2028,6 @@ function withTimeout(promise, timeout, label) {
   });
 }
 
-async function stopDaemon(daemonLockPath) {
-  const owner = readDaemonOwner(daemonLockPath);
-  if (!owner?.pid) {
-    return;
-  }
-  try {
-    process.kill(owner.pid, "SIGTERM");
-  } catch (_error) {}
-  await waitFor(
-    () => !processExists(owner.pid),
-    1000,
-    "daemon termination"
-  ).catch(() => {
-    try {
-      process.kill(owner.pid, "SIGKILL");
-    } catch (_error) {}
-  });
-  await waitFor(
-    () => !processExists(owner.pid),
-    1000,
-    "daemon force termination"
-  ).catch(() => {});
-}
-
-function readDaemonOwner(daemonLockPath) {
-  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
-}
-
-function readJsonFile(filePath, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (_error) {
-    return fallback;
-  }
-}
-
 function readOwnerPid(filePath) {
   try {
     return Number(fs.readFileSync(filePath, "utf8").trim());
@@ -2196,12 +2163,6 @@ function listInterferingMultiplexerDaemons() {
         return;
       }
 
-      const defaultDaemonLockPath = path.join(
-        process.env.HOME || os.homedir(),
-        ".DebugRouterConnector",
-        "multiplexer",
-        "daemon.lock"
-      );
       const targets = stdout
         .split(/\n/)
         .map((line) => {
@@ -2219,17 +2180,7 @@ function listInterferingMultiplexerDaemons() {
           if (entry.pid === process.pid) {
             return false;
           }
-          if (!entry.command.includes("/multiplexer/daemon/entry.js")) {
-            return false;
-          }
-          return (
-            entry.command.includes(
-              `--daemon-lock-path ${defaultDaemonLockPath}`
-            ) ||
-            /\/T\/debug-router-real(?:-stress)?-[^/]+\/multiplexer\/daemon\.lock/.test(
-              entry.command
-            )
-          );
+          return entry.command.includes(MULTIPLEXER_DAEMON_PROCESS_NAME_SUFFIX);
         });
       resolve(targets);
     });

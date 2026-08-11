@@ -114,13 +114,6 @@ describe("multiplexer integration reconnect and snapshot", function () {
       ],
     });
 
-    await waitFor(() => {
-      const stat = fs.existsSync(context.paths.daemonLockPath)
-        ? fs.statSync(context.paths.daemonLockPath)
-        : null;
-      return !stat || Date.now() - stat.mtimeMs > 100;
-    }, 3000);
-
     await reconnectDaemonClient(client);
     const nextInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
@@ -137,12 +130,6 @@ describe("multiplexer integration reconnect and snapshot", function () {
       true,
       "new daemon process should be alive after reconnect"
     );
-    assert.strictEqual(
-      fs.existsSync(context.paths.daemonLockPath),
-      true,
-      "new daemon should recreate daemon.lock"
-    );
-
     const devices = await client.call("connectDevices", {
       timeout: -1,
       serial: null,

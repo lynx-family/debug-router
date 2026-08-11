@@ -161,15 +161,13 @@ Default directory:
   control.sock       # Unix-like only; Windows uses a named pipe
   spawn.lock/
     owner.json
-  daemon.lock/
-    owner.json
 ```
 
 `multiplexerRootDir` or `multiplexerDataDir` can override the path, mainly for tests, isolated runs, or special packaging scenarios.
 
 The control endpoint is derived directly from the data directory. Unix-like platforms use `<dataDir>/control.sock`; Windows uses `\\.\pipe\<dataDir>` without hashing or path normalization. Custom Windows data directories are a debug/embedding responsibility and must already be valid for the intended named-pipe environment.
 
-`spawn.lock` serializes daemon replacement, cleanup, and startup and is held only during the manager's ensure window. `daemon.lock` is held by the daemon and records its owner pid for crash cleanup. Process identity is not part of normal health or control messages. There is no discovery file, heartbeat file, control port, or instance token.
+`spawn.lock` serializes daemon replacement, cleanup, and startup and is held only during the manager's ensure window. The daemon does not hold a runtime lock. Instead, Manager gives every spawned daemon an `argv0` marker derived from `dataDir`, then locates stale daemon pids through `find-process` when cleanup is required. Process identity is not part of normal health or control messages. There is no discovery file, heartbeat file, control port, daemon lock, or instance token.
 
 ## 5. Public `DebugRouterConnector` Facade
 
@@ -200,6 +198,8 @@ When the daemon control socket disconnects, the facade clears local mirrors, rej
 
 When `DebugRouterConnector` forwards some behavior to the daemon, it calls `MultiplexerDaemonClient.call()`. `MultiplexerDaemonClient.call()` validates the complete RPC request before connecting; `connect()` then obtains an available daemon through `MultiplexerDaemonManager.ensureDaemon()`.
 
+`MultiplexerDaemonClient.connect()` owns connection idempotency through its in-flight `connecting` Promise. Manager does not keep a second `ensureDaemon()` Promise; one production facade constructs one DaemonClient and one Manager, while different facades coordinate daemon startup through `spawn.lock`.
+
 `MultiplexerDiscovery.probeHealth()` opens the fixed endpoint, sends a framed `{ kind: "health" }` first message, validates the framed `health-response`, and compares protocol versions. A normal health response contains only `kind`, `ok`, `protocolVersion`, and `minSupportedProtocolVersion`; optional `debugInfo` remains diagnostic and is not used for cleanup or feature detection.
 
 Current default protocol constants:
@@ -212,9 +212,9 @@ MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION = 1
 `MultiplexerDaemonManager` handles validation results as follows:
 
 - `usable`: reuse immediately.
-- `replace-required`: acquire `spawn.lock`, first request graceful shutdown through `shutdownDaemon`; if the daemon does not exit, try SIGTERM/SIGKILL; then clean `daemon.lock` and the stale Unix socket and start a new daemon.
+- `replace-required`: acquire `spawn.lock`, locate the marked daemon process, and request graceful shutdown through `shutdownDaemon`; if that same process does not exit, try SIGTERM/SIGKILL; then clean the stale Unix socket and start a new daemon.
 - connector protocol too old: throw an upgrade error. Do not clean up or kill the newer daemon.
-- `unreachable`, `timeout`, `invalid-frame`, or `invalid-response`: acquire `spawn.lock`, stop the pid recorded by `daemon.lock` if still alive, clean the lock and Unix socket, and spawn.
+- `unreachable`, `timeout`, `invalid-frame`, or `invalid-response`: acquire `spawn.lock`, locate the first process carrying the current data directory's daemon marker, stop it when still alive, clean the Unix socket, and spawn.
 
 The initial health check is followed by up to three delayed retries for all four transient/unusable health outcomes. `usable`, `replace-required`, and connector-too-old return immediately. In the normal ensure path, once `spawn.lock` is acquired, the manager does not probe again; the window after the initial probe is deliberately kept simple.
 
@@ -232,7 +232,9 @@ healthCheckTimeout = 500ms
 spawnLockStaleTimeout = startupTimeout + replacementTimeout + 1000ms
 ```
 
-Spawn uses the current Node executable to start `multiplexer/daemon/entry.js` as a detached child with `stdio: "ignore"`, then calls `unref()`. Required startup arguments are the control endpoint, daemon lock path, protocol version, and minimum supported protocol version. Legacy driver dir, idle timeout, WebSocket config, connection trace, daemon-side `PhysicalConnectorOption`, and serialized `debugInfo` are forwarded only when configured.
+Spawn uses the current Node executable to start `multiplexer/daemon/entry.js` as a detached child with `stdio: "ignore"`, then calls `unref()`. The path layer derives `daemonProcessName` from `dataDir`: `/` becomes `-`, dots and other non-alphanumeric/non-hyphen characters are removed, leading and trailing hyphens are trimmed, and `-muxDaemon` is appended as a short suffix. Facade passes this generated name to Manager; Manager does not accept `dataDir`, and neither value is forwarded to the daemon entry. Required startup arguments are the control endpoint, protocol version, and minimum supported protocol version. Legacy driver dir, idle timeout, WebSocket config, connection trace, daemon-side `PhysicalConnectorOption`, and serialized `debugInfo` are forwarded only when configured.
+
+Manager calls `find-process@2.0.0` directly by the sanitized process name with `{ strict: false, skipSelf: true, logLevel: "warn" }`. Non-strict matching is required because Windows applies `argv0` to the process command line rather than the native process name. Manager expects one matching daemon: no match becomes `-1`; multiple matches are reported through `defaultLogger.error`, and only the first pid is used. Cleanup first tries SIGTERM and then SIGKILL after the replacement timeout.
 
 ## 7. Daemon Process and Host
 
@@ -240,15 +242,13 @@ Spawn uses the current Node executable to start `multiplexer/daemon/entry.js` as
 
 `MultiplexerDaemon.start()` flow:
 
-1. Acquire `daemon.lock`.
-2. Start `MultiplexerHost`.
-3. Host starts the fixed `node:net` control endpoint.
+1. Start `MultiplexerHost`.
+2. Host starts the fixed `node:net` control endpoint.
 
 `MultiplexerDaemon.stop()` flow:
 
 1. Stop Host and all provisional/registered control transports.
 2. Remove the Unix socket file; Windows named pipes disappear with the server/process.
-3. Release `daemon.lock`.
 
 `MultiplexerHost` is the core daemon object. It is responsible for:
 
@@ -798,7 +798,7 @@ If `multiplexerDaemonIdleTimeout` is negative, non-finite, or not configured in 
 
 ### 13.3 Daemon Replacement/Yield
 
-When a connector finds an outdated or unhealthy daemon that must be replaced, Manager first requests graceful daemon shutdown through the `shutdownDaemon` RPC. Host calls its shutdown handler, and the daemon runs `stop()` to clean the daemon lock, local control server/socket, WebSocket server, and physical connector. Manager only tries SIGTERM/SIGKILL if the daemon does not exit in time. If health is unavailable, the cleanup pid comes from `daemon.lock/owner.json`.
+When a connector finds an outdated or unhealthy daemon that must be replaced, Manager first finds the pid carrying the current data directory's daemon marker, then requests graceful daemon shutdown through the `shutdownDaemon` RPC. If no pid was found, Manager reports an error through `defaultLogger` and returns from graceful cleanup after the request. Otherwise Host calls its shutdown handler, and the daemon runs `stop()` to clean the local control server/socket, WebSocket server, and physical connector. Manager waits for that same pid and only tries SIGTERM/SIGKILL if it remains alive; it does not query the process list again. If health is unavailable, the same marker lookup supplies the cleanup pid without relying on a daemon-owned file.
 
 ### 13.4 Unknown Response ID
 
@@ -844,7 +844,7 @@ Protocol compatibility rules:
 2. `connectDevices()` triggers `daemonClient.connect()`.
 3. Health probe cannot reach the fixed endpoint, so Manager acquires `spawn.lock`.
 4. Manager spawns detached daemon entry.
-5. Daemon acquires `daemon.lock` and starts Host/control server at the fixed endpoint.
+5. Daemon starts Host/control server at the fixed endpoint without holding a runtime lock.
 6. Connector sends `register`, receives `register-response`, and then receives the initial `snapshot`.
 7. Facade uses the `connectDevices` RPC to ask Host to start physical device discovery.
 

@@ -24,7 +24,7 @@ describe("multiplexer integration daemon lifecycle", function () {
     context = undefined;
   });
 
-  it("spawns a daemon, serves framed IPC Health, and creates no daemon.json", async function () {
+  it("spawns a daemon, serves framed IPC Health, and creates no discovery files", async function () {
     context = createIntegrationContext("daemon-lifecycle", {
       debugInfo: { daemonVersion: "integration-test-daemon" },
     });
@@ -32,7 +32,10 @@ describe("multiplexer integration daemon lifecycle", function () {
     const info = await waitFor(() => getUsableDiscovery(context.discovery));
 
     assert(processExists(info.pid));
-    assert.strictEqual(fs.existsSync(context.paths.daemonLockPath), true);
+    assert.strictEqual(
+      fs.existsSync(path.join(context.paths.dataDir, "daemon.lock")),
+      false
+    );
     assert.strictEqual(
       fs.existsSync(path.join(context.paths.dataDir, "daemon.json")),
       false
@@ -61,7 +64,6 @@ describe("multiplexer integration daemon lifecycle", function () {
 
     process.kill(info.pid, "SIGTERM");
     await waitFor(() => !processExists(info.pid), 2000);
-    await waitFor(() => !fs.existsSync(context.paths.daemonLockPath), 2000);
     if (process.platform !== "win32") {
       await waitFor(() => !fs.existsSync(context.paths.controlEndpoint), 2000);
     }
@@ -74,7 +76,7 @@ describe("multiplexer integration daemon lifecycle", function () {
     await context.manager.ensureDaemon();
     const info = await waitFor(() => getUsableDiscovery(context.discovery));
     assert(processExists(info.pid));
-    await waitFor(() => !fs.existsSync(context.paths.daemonLockPath), 2000);
+    await waitFor(() => !processExists(info.pid), 2000);
     assert.strictEqual(
       fs.existsSync(path.join(context.paths.dataDir, "daemon.json")),
       false
@@ -90,7 +92,6 @@ describe("multiplexer integration daemon lifecycle", function () {
     const info = await waitFor(() => getUsableDiscovery(context.discovery));
     await connector.close();
     await waitFor(() => !processExists(info.pid), 2000);
-    await waitFor(() => !fs.existsSync(context.paths.daemonLockPath), 2000);
   });
 
   it("isolates one control socket error from the daemon and other controls", async function () {

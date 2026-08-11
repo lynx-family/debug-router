@@ -14,6 +14,7 @@ const { DebugRouterConnector } = require("@lynx-js/debug-router-connector");
 const {
   createMultiplexerPaths,
 } = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
+const { stopDaemonProcesses } = require("./daemon_process");
 
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
@@ -453,7 +454,7 @@ function createContext(name, args) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(paths.daemonLockPath);
+        await stopDaemonProcesses(paths.daemonProcessName);
         if (process.env.DEBUG_ROUTER_KEEP_E2E_TMP === "1") {
           logStep(`preserving temporary files at ${rootDir}`);
         } else {
@@ -818,44 +819,6 @@ function execFile(command, args, timeout) {
       reject(new Error(`timeout:${timeout} exec:${command} ${args.join(" ")}`));
     }, timeout);
   });
-}
-
-async function stopDaemon(daemonLockPath) {
-  const owner = readJsonFile(path.join(daemonLockPath, "owner.json"), null);
-  if (!owner?.pid) {
-    return;
-  }
-  try {
-    process.kill(owner.pid, "SIGTERM");
-  } catch (_error) {
-    return;
-  }
-  await waitFor(
-    () => !processExists(owner.pid),
-    1500,
-    "real WiFi daemon termination"
-  ).catch(() => {
-    try {
-      process.kill(owner.pid, "SIGKILL");
-    } catch (_error) {}
-  });
-}
-
-function processExists(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (_error) {
-    return false;
-  }
-}
-
-function readJsonFile(filePath, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (_error) {
-    return fallback;
-  }
 }
 
 function parseJson(value) {

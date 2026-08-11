@@ -3,7 +3,9 @@
 // LICENSE file in the root directory of this source tree.
 
 import { spawn as spawnChildProcess, SpawnOptions } from "child_process";
+import findProcess from "find-process";
 import fs from "fs";
+import { defaultLogger } from "../../utils/logger";
 import { FileLock } from "../utils/FileLock";
 import {
   MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
@@ -48,9 +50,9 @@ type MultiplexerDaemonControlClient = {
 export type MultiplexerDaemonManagerOption = {
   // Required daemon lifecycle dependencies.
   discovery: MultiplexerDiscovery;
+  daemonProcessName: string;
   controlEndpoint: string;
   spawnLockPath: string;
-  daemonLockPath: string;
   daemonEntry: string;
 
   // Optional manager tuning with constructor defaults.
@@ -76,6 +78,7 @@ export type MultiplexerDaemonManagerOption = {
 
   // only used for testing
   spawn?: MultiplexerDaemonSpawn;
+  processFinder?: typeof findProcess;
   kill?: (pid: number, signal: NodeJS.Signals) => void;
   isProcessAlive?: (pid: number) => boolean;
   sleep?: (duration: number) => Promise<void>;
@@ -84,9 +87,9 @@ export type MultiplexerDaemonManagerOption = {
 
 export class MultiplexerDaemonManager {
   readonly discovery: MultiplexerDiscovery;
+  readonly daemonProcessName: string;
   readonly controlEndpoint: string;
   readonly spawnLock: FileLock;
-  readonly daemonLock: FileLock;
   readonly daemonEntry: string;
   readonly startupTimeout: number;
   readonly localProtocolVersion: number;
@@ -106,6 +109,7 @@ export class MultiplexerDaemonManager {
   private readonly replacementTimeout: number;
   private readonly spawnLockStaleTimeout: number;
   private readonly spawnProcess: MultiplexerDaemonSpawn;
+  private readonly processFinder: typeof findProcess;
   private readonly killProcess: (pid: number, signal: NodeJS.Signals) => void;
   private readonly isProcessAlive: (pid: number) => boolean;
   private readonly sleepFor: (duration: number) => Promise<void>;
@@ -115,9 +119,9 @@ export class MultiplexerDaemonManager {
 
   constructor(option: MultiplexerDaemonManagerOption) {
     this.discovery = option.discovery;
+    this.daemonProcessName = option.daemonProcessName;
     this.controlEndpoint = option.controlEndpoint;
     this.spawnLock = new FileLock(option.spawnLockPath);
-    this.daemonLock = new FileLock(option.daemonLockPath);
     this.daemonEntry = option.daemonEntry;
     this.startupTimeout =
       option.startupTimeout ?? DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT;
@@ -143,6 +147,7 @@ export class MultiplexerDaemonManager {
       this.replacementTimeout +
       DEFAULT_MULTIPLEXER_SPAWN_LOCK_STALE_BUFFER;
     this.spawnProcess = option.spawn ?? spawnChildProcess;
+    this.processFinder = option.processFinder ?? findProcess;
     this.killProcess = option.kill ?? process.kill;
     this.isProcessAlive = option.isProcessAlive ?? isProcessAlive;
     this.sleepFor = option.sleep ?? defaultSleep;
@@ -232,7 +237,12 @@ export class MultiplexerDaemonManager {
     const child = this.spawnProcess(
       process.execPath,
       [this.daemonEntry, ...this.createDaemonEntryArgs()],
-      { detached: true, stdio: "ignore", windowsHide: true },
+      {
+        argv0: this.daemonProcessName,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      },
     );
     child.unref();
   }
@@ -270,14 +280,20 @@ export class MultiplexerDaemonManager {
   async tryGracefullyStopDaemon(
     reason: MultiplexerDaemonReplaceReason,
   ): Promise<void> {
-    const owner = this.daemonLock.readOwner();
+    const daemonPid = await this.findDaemonProcessId();
     const requested = await this.sendDaemonShutdownRpc(reason);
 
-    if (owner && requested) {
-      await this.waitUntilProcessExits(owner.pid, this.replacementTimeout);
+    if (daemonPid === -1) {
+      defaultLogger.error(
+        `Failed to find multiplexer daemon process during trying graceful shutdown: ${this.daemonProcessName}`,
+      );
+      return;
     }
-    if (owner && this.isProcessAlive(owner.pid)) {
-      await this.forceStopDaemonProcess(owner.pid);
+    if (requested) {
+      await this.waitUntilProcessExits(daemonPid, this.replacementTimeout);
+    }
+    if (this.isProcessAlive(daemonPid)) {
+      await this.forceStopDaemonProcess(daemonPid);
     }
     this.removeDaemonArtifacts();
   }
@@ -322,11 +338,27 @@ export class MultiplexerDaemonManager {
   }
 
   private async forceStopDaemon(): Promise<void> {
-    const owner = this.daemonLock.readOwner();
-    if (owner && this.isProcessAlive(owner.pid)) {
-      await this.forceStopDaemonProcess(owner.pid);
+    const daemonPid = await this.findDaemonProcessId();
+    if (daemonPid !== -1 && this.isProcessAlive(daemonPid)) {
+      await this.forceStopDaemonProcess(daemonPid);
     }
     this.removeDaemonArtifacts();
+  }
+
+  private async findDaemonProcessId(): Promise<number> {
+    const processes = await this.processFinder("name", this.daemonProcessName, {
+      strict: false,
+      skipSelf: true,
+      logLevel: "warn",
+    });
+    if (processes.length > 1) {
+      defaultLogger.error(
+        `Found multiple multiplexer daemon processes for ${
+          this.daemonProcessName
+        }: ${processes.map((daemonProcess) => daemonProcess.pid).join(", ")}`,
+      );
+    }
+    return processes.length === 0 ? -1 : processes[0].pid;
   }
 
   private tryKillProcess(pid: number, signal: NodeJS.Signals): unknown {
@@ -406,7 +438,6 @@ export class MultiplexerDaemonManager {
   }
 
   private removeDaemonArtifacts(): void {
-    this.daemonLock.cleanup();
     if (process.platform !== "win32") {
       try {
         fs.rmSync(this.controlEndpoint, { force: true });
@@ -420,8 +451,6 @@ export class MultiplexerDaemonManager {
     const args = [
       "--control-endpoint",
       this.controlEndpoint,
-      "--daemon-lock-path",
-      this.daemonLock.lockPath,
       "--protocol-version",
       String(this.localProtocolVersion),
       "--min-supported-protocol-version",

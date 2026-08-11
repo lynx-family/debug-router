@@ -139,7 +139,7 @@ describe("MultiplexerDiscovery", function () {
     return { ...context, requests };
   }
 
-  it("talks to a frozen v1 daemon using the v1 health contract", async function () {
+  it("[v1 compatibility gate] recognizes a frozen v1 daemon health contract", async function () {
     const context = await startServer({
       expectedRequest: v1HealthRequest,
       response: v1HealthResponse,
@@ -164,8 +164,9 @@ describe("MultiplexerDiscovery", function () {
     assert.deepStrictEqual(context.requests, [v1HealthRequest]);
   });
 
-  it("accepts a newer compatible daemon", async function () {
+  it("[v1 compatibility gate] lets a v1 connector reuse a daemon advertising v1 support", async function () {
     const context = await startServer({
+      expectedRequest: v1HealthRequest,
       protocolVersion: 2,
       minSupportedProtocolVersion: 1,
     });
@@ -175,6 +176,7 @@ describe("MultiplexerDiscovery", function () {
     }).probeHealth();
     assert.strictEqual(result.status, "usable");
     assert.strictEqual(result.reason, "daemon-newer-compatible");
+    assert.deepStrictEqual(context.requests, [v1HealthRequest]);
   });
 
   it("requires replacement for an older daemon", async function () {

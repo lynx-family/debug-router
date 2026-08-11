@@ -410,7 +410,6 @@ describe("multiplexer integration stability, stress, and recovery", function () 
 
     await assert.rejects(pending, /closed|socket|Multiplexer/i);
     await waitFor(() => !processExists(initialInfo.pid), 3000);
-    await waitFor(() => !fs.existsSync(context.paths.daemonLockPath), 3000);
     truncateCommandLog(context);
 
     assert(

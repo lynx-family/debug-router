@@ -42,7 +42,7 @@ describe("multiplexer integration concurrent spawn", function () {
     );
     assert(Number.isInteger(daemon.pid));
     assert.strictEqual(fs.existsSync(context.paths.spawnLockPath), false);
-    assert.strictEqual(fs.existsSync(context.paths.daemonLockPath), true);
+    assert.strictEqual(Object.hasOwn(context.paths, "daemonLockPath"), false);
 
     const log = context.readLog();
     assert.strictEqual(

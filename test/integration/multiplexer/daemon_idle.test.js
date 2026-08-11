@@ -3,13 +3,12 @@
 // LICENSE file in the root directory of this source tree.
 
 const assert = require("assert");
-const fs = require("fs");
-
 const {
   createIntegrationContext,
   delay,
   getUsableDiscovery,
   platformTimeout,
+  processExists,
   waitFor,
 } = require("./helpers/integration_harness");
 
@@ -37,17 +36,17 @@ describe("multiplexer integration daemon idle", function () {
       3000
     );
     assert(info, "daemon discovery should be usable after control connect");
-    assert.strictEqual(fs.existsSync(context.paths.daemonLockPath), true);
+    assert.strictEqual(processExists(info.pid), true);
 
     await delay(180);
     assert.strictEqual(
-      fs.existsSync(context.paths.daemonLockPath),
+      processExists(info.pid),
       true,
-      "active control client should keep daemon lock"
+      "active control client should keep daemon alive"
     );
 
     await client.close();
-    await waitFor(() => !fs.existsSync(context.paths.daemonLockPath), 2000);
+    await waitFor(() => !processExists(info.pid), 2000);
     assert(
       context.readLog().some((entry) => entry.event === "fake-physical-closed"),
       "fake physical connector should close after daemon idles"
@@ -82,7 +81,7 @@ describe("multiplexer integration daemon idle", function () {
     );
     await delay(150);
     assert.strictEqual(
-      fs.existsSync(context.paths.daemonLockPath),
+      processExists(firstInfo.pid),
       true,
       "second active control client should cancel the first idle timer"
     );
@@ -102,13 +101,13 @@ describe("multiplexer integration daemon idle", function () {
     );
     await delay(150);
     assert.strictEqual(
-      fs.existsSync(context.paths.daemonLockPath),
+      processExists(firstInfo.pid),
       true,
       "third active control client should cancel the second idle timer"
     );
     await third.close();
 
-    await waitFor(() => !fs.existsSync(context.paths.daemonLockPath), 2000);
+    await waitFor(() => !processExists(firstInfo.pid), 2000);
     assert.strictEqual(
       context
         .readLog()
@@ -126,7 +125,7 @@ describe("multiplexer integration daemon idle", function () {
     assert(info.pid > 0);
     await delay(160);
 
-    assert.strictEqual(fs.existsSync(context.paths.daemonLockPath), true);
+    assert.strictEqual(processExists(info.pid), true);
     assert.strictEqual(
       context.readLog().some((entry) => entry.event === "fake-physical-closed"),
       false

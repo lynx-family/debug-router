@@ -19,6 +19,7 @@ const {
 const {
   createMultiplexerPaths,
 } = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
+const { findDaemonProcess, stopDaemonProcesses } = require("./daemon_process");
 
 const fakeDaemonEntry = path.resolve(
   __dirname,
@@ -103,7 +104,7 @@ function createContext(name, state, option = {}) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(paths.daemonLockPath);
+        await stopDaemonProcesses(paths.daemonProcessName);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
         if (hadOriginalHome) {
@@ -178,9 +179,9 @@ async function runEmptyDaemonFlow() {
     assert.deepStrictEqual(connector.getAllUsbClients(), []);
 
     const daemon = await waitFor(
-      () => readDaemonOwner(context.paths.daemonLockPath),
+      () => findDaemonProcess(context.paths.daemonProcessName),
       2000,
-      "daemon lock owner"
+      "daemon process"
     );
     daemonPid = daemon.pid;
     assert(processExists(daemonPid), "daemon should be alive while connected");
@@ -190,13 +191,7 @@ async function runEmptyDaemonFlow() {
     );
 
     await connector.close();
-    await waitFor(
-      () =>
-        !fs.existsSync(context.paths.daemonLockPath) &&
-        !processExists(daemonPid),
-      2500,
-      "idle daemon cleanup"
-    );
+    await waitFor(() => !processExists(daemonPid), 2500, "idle daemon cleanup");
 
     const events = context.readLog().map((entry) => entry.event);
     assert(events.includes("connect-devices"));
@@ -237,12 +232,12 @@ async function runSharedDaemonMirrorFlow() {
     );
 
     const daemon = await waitFor(
-      () => readDaemonOwner(context.paths.daemonLockPath),
+      () => findDaemonProcess(context.paths.daemonProcessName),
       3000,
-      "shared daemon lock owner"
+      "shared daemon process"
     );
     daemonPid = daemon?.pid;
-    assert(daemonPid, "expected daemon pid in daemon.lock");
+    assert(daemonPid, "expected daemon pid from process lookup");
 
     const [firstClients, secondClients] = await Promise.all([
       first.connectUsbClients("device-1", -1, true, null),
@@ -345,9 +340,7 @@ async function runSharedDaemonMirrorFlow() {
 
     await Promise.all([first.close(), second.close()]);
     await waitFor(
-      () =>
-        !fs.existsSync(context.paths.daemonLockPath) &&
-        !processExists(daemonPid),
+      () => !processExists(daemonPid),
       2500,
       "shared daemon idle cleanup"
     );
@@ -398,9 +391,9 @@ async function runLegacyPreemptionFlow() {
     );
 
     const daemon = await waitFor(
-      () => readDaemonOwner(context.paths.daemonLockPath),
+      () => findDaemonProcess(context.paths.daemonProcessName),
       3000,
-      "legacy preemption daemon lock owner"
+      "legacy preemption daemon process"
     );
     assert(processExists(daemon.pid), "daemon should be alive");
     await waitFor(
@@ -530,9 +523,9 @@ async function runWebSocketMirrorRecoveryFlow() {
     await connector.startWSServer();
 
     const daemon = await waitFor(
-      () => readDaemonOwner(context.paths.daemonLockPath),
+      () => findDaemonProcess(context.paths.daemonProcessName),
       2000,
-      "websocket recovery daemon lock owner"
+      "websocket recovery daemon process"
     );
     initialPid = daemon.pid;
     assert(connector.wssPort > 0, "websocket port should be assigned");
@@ -561,8 +554,8 @@ async function runWebSocketMirrorRecoveryFlow() {
     );
 
     const replacement = await waitFor(
-      () => {
-        const next = readDaemonOwner(context.paths.daemonLockPath);
+      async () => {
+        const next = await findDaemonProcess(context.paths.daemonProcessName);
         if (
           next?.pid &&
           next.pid !== initialPid &&
@@ -642,9 +635,7 @@ async function runCompatibilityUpgradeFlow() {
       v3.client.close(),
     ]);
     await waitFor(
-      () =>
-        !fs.existsSync(context.paths.daemonLockPath) &&
-        !processExists(daemonV3.pid),
+      () => !processExists(daemonV3.pid),
       2500,
       "upgrade daemon idle cleanup"
     );
@@ -675,9 +666,9 @@ function createVersionedControl(
   });
   const manager = new MultiplexerDaemonManager({
     discovery,
+    daemonProcessName: context.paths.daemonProcessName,
     controlEndpoint: context.paths.controlEndpoint,
     spawnLockPath: context.paths.spawnLockPath,
-    daemonLockPath: context.paths.daemonLockPath,
     daemonEntry: fakeDaemonEntry,
     startupTimeout: 3000,
     readyPollInterval: 10,
@@ -728,7 +719,7 @@ async function connectRuntime(client) {
 async function waitForDiscoveryProtocol(context, protocolVersion) {
   return waitFor(
     async () => {
-      const owner = readDaemonOwner(context.paths.daemonLockPath);
+      const owner = await findDaemonProcess(context.paths.daemonProcessName);
       if (!owner) {
         return null;
       }
@@ -765,37 +756,6 @@ function parseCustomizedEnvelope(message) {
     envelope,
     cdp: typeof payload === "string" ? JSON.parse(payload) : payload,
   };
-}
-
-async function stopDaemon(daemonLockPath) {
-  const owner = readDaemonOwner(daemonLockPath);
-  if (!owner?.pid) {
-    return;
-  }
-  try {
-    process.kill(owner.pid, "SIGTERM");
-  } catch (_error) {}
-  await waitFor(
-    () => !processExists(owner.pid) || !fs.existsSync(daemonLockPath),
-    1000,
-    "daemon termination"
-  ).catch(() => {
-    try {
-      process.kill(owner.pid, "SIGKILL");
-    } catch (_error) {}
-  });
-}
-
-function readDaemonOwner(daemonLockPath) {
-  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
-}
-
-function readJsonFile(filePath, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (_error) {
-    return fallback;
-  }
 }
 
 function readJsonLines(filePath) {

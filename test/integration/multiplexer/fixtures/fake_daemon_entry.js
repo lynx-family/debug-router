@@ -20,6 +20,7 @@ const STATE_FILE_NAME = "fake_physical_state.json";
 const COMMAND_FILE_NAME = "fake_physical_commands.jsonl";
 const LOG_FILE_NAME = "fake_daemon_log.jsonl";
 let emitControlSocketError;
+let daemonLogPath = path.join(process.cwd(), LOG_FILE_NAME);
 
 function readJsonFile(filePath, fallback) {
   try {
@@ -473,19 +474,25 @@ function readJsonValue(text) {
   }
 }
 
+function getDataDirFromControlEndpoint(controlEndpoint) {
+  const windowsPipePrefix = "\\\\.\\pipe\\";
+  return controlEndpoint.startsWith(windowsPipePrefix)
+    ? controlEndpoint.slice(windowsPipePrefix.length)
+    : path.dirname(controlEndpoint);
+}
+
 async function main() {
   const entryOption = parseEntryOption(process.argv.slice(2));
-  const dataDir = path.dirname(entryOption.daemonLockPath);
-  const logPath = path.join(dataDir, LOG_FILE_NAME);
+  const dataDir = getDataDirFromControlEndpoint(entryOption.controlEndpoint);
+  daemonLogPath = path.join(dataDir, LOG_FILE_NAME);
 
-  appendJsonLine(logPath, {
+  appendJsonLine(daemonLogPath, {
     event: "daemon-entry-start",
     pid: process.pid,
     at: Date.now(),
   });
 
   const host = new MultiplexerHost({
-    ...entryOption.physicalConnectorOption,
     controlEndpoint: entryOption.controlEndpoint,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
@@ -495,14 +502,17 @@ async function main() {
     enableWebSocket: entryOption.enableWebSocket,
     connectionTrace: entryOption.connectionTrace,
     websocketOption: entryOption.websocketOption,
+    physicalConnectorOption: {
+      ...entryOption.physicalConnectorOption,
+      multiplexerDataDirForFake: dataDir,
+    },
     PhysicalConnectorCtor: FakePhysicalConnector,
-    multiplexerDataDirForFake: dataDir,
   });
   const handleControlConnected = host.handleControlConnected.bind(host);
   const handleControlDisconnected = host.handleControlDisconnected.bind(host);
   host.handleControlConnected = (controlId) => {
     handleControlConnected(controlId);
-    appendJsonLine(logPath, {
+    appendJsonLine(daemonLogPath, {
       event: "control-connected-callback",
       pid: process.pid,
       at: Date.now(),
@@ -513,7 +523,7 @@ async function main() {
   };
   host.handleControlDisconnected = (controlId) => {
     handleControlDisconnected(controlId);
-    appendJsonLine(logPath, {
+    appendJsonLine(daemonLogPath, {
       event: "control-disconnected-callback",
       pid: process.pid,
       at: Date.now(),
@@ -538,7 +548,6 @@ async function main() {
   };
 
   const daemon = new MultiplexerDaemon({
-    daemonLockPath: entryOption.daemonLockPath,
     hostOption:
       entryOption.multiplexerDaemonIdleTimeout === undefined
         ? undefined
@@ -549,7 +558,7 @@ async function main() {
     host,
     onIdleTimeout(stopError) {
       if (stopError) {
-        appendJsonLine(logPath, {
+        appendJsonLine(daemonLogPath, {
           event: "daemon-idle-cleanup-error",
           pid: process.pid,
           at: Date.now(),
@@ -569,7 +578,7 @@ async function main() {
     try {
       await daemon.stop();
     } catch (error) {
-      appendJsonLine(logPath, {
+      appendJsonLine(daemonLogPath, {
         event: "daemon-cleanup-error",
         pid: process.pid,
         at: Date.now(),
@@ -590,7 +599,7 @@ async function main() {
   process.once("SIGINT", () => cleanupAndExit(130));
   process.once("SIGTERM", () => cleanupAndExit(143));
   process.once("uncaughtException", (error) => {
-    appendJsonLine(logPath, {
+    appendJsonLine(daemonLogPath, {
       event: "daemon-uncaught-exception",
       pid: process.pid,
       at: Date.now(),
@@ -599,7 +608,7 @@ async function main() {
     cleanupAndExit(1);
   });
   process.once("unhandledRejection", (reason) => {
-    appendJsonLine(logPath, {
+    appendJsonLine(daemonLogPath, {
       event: "daemon-unhandled-rejection",
       pid: process.pid,
       at: Date.now(),
@@ -609,7 +618,7 @@ async function main() {
   });
 
   await daemon.start();
-  appendJsonLine(logPath, {
+  appendJsonLine(daemonLogPath, {
     event: "daemon-started",
     pid: process.pid,
     at: Date.now(),
@@ -621,15 +630,7 @@ async function main() {
 }
 
 void main().catch((error) => {
-  const daemonLockPathIndex = process.argv.findIndex(
-    (arg) => arg === "--daemon-lock-path"
-  );
-  const daemonLockPath =
-    daemonLockPathIndex >= 0
-      ? process.argv[daemonLockPathIndex + 1]
-      : undefined;
-  const dataDir = daemonLockPath ? path.dirname(daemonLockPath) : process.cwd();
-  appendJsonLine(path.join(dataDir, LOG_FILE_NAME), {
+  appendJsonLine(daemonLogPath, {
     event: "daemon-entry-error",
     pid: process.pid,
     at: Date.now(),

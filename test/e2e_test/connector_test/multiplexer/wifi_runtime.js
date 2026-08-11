@@ -16,6 +16,7 @@ const {
 const {
   createMultiplexerPaths,
 } = require("@lynx-js/debug-router-connector/dist/cjs/src/multiplexer/utils/paths");
+const { findDaemonProcess, stopDaemonProcesses } = require("./daemon_process");
 
 const fakeDaemonEntry = path.resolve(
   __dirname,
@@ -161,9 +162,9 @@ async function runOwnershipPreemptionCase() {
       "ownership facade mirrors before preemption"
     );
     const daemon = await waitFor(
-      () => readDaemonOwner(context.paths.daemonLockPath),
+      () => findDaemonProcess(context.paths.daemonProcessName),
       3000,
-      "ownership daemon lock owner"
+      "ownership daemon process"
     );
     await waitFor(
       () => readOwnerPid(context.legacyOwnerPath) === daemon.pid,
@@ -716,9 +717,9 @@ async function runDaemonLivenessCase() {
     );
     context.trackSocket(runtime.socket);
     const daemon = await waitFor(
-      () => readDaemonOwner(context.paths.daemonLockPath),
+      () => findDaemonProcess(context.paths.daemonProcessName),
       2000,
-      "daemon lock owner"
+      "daemon process"
     );
 
     await first.close();
@@ -807,7 +808,7 @@ function createContext(name, idleTimeout = 30000) {
         for (const connector of connectors.splice(0)) {
           await connector.close().catch(() => {});
         }
-        await stopDaemon(paths.daemonLockPath);
+        await stopDaemonProcesses(paths.daemonProcessName);
         if (process.env.DEBUG_ROUTER_E2E_KEEP_TEMP === "1") {
           console.error(
             `[multiplexer-wifi-runtime-e2e] kept diagnostics at ${rootDir}`
@@ -993,37 +994,6 @@ async function waitFor(predicate, timeout, label, interval = 25) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function stopDaemon(daemonLockPath) {
-  const owner = readDaemonOwner(daemonLockPath);
-  if (!owner?.pid || !processExists(owner.pid)) {
-    return;
-  }
-  try {
-    process.kill(owner.pid, "SIGTERM");
-  } catch (_error) {}
-  await waitFor(
-    () => !processExists(owner.pid),
-    1000,
-    "daemon termination"
-  ).catch(() => {
-    try {
-      process.kill(owner.pid, "SIGKILL");
-    } catch (_error) {}
-  });
-}
-
-function readDaemonOwner(daemonLockPath) {
-  return readJsonFile(path.join(daemonLockPath, "owner.json"), null);
-}
-
-function readJsonFile(filePath, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (_error) {
-    return fallback;
-  }
 }
 
 function parseJson(text) {

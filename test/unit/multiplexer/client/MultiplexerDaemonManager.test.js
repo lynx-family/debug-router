@@ -13,6 +13,9 @@ const {
 const {
   FileLock,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/FileLock");
+const {
+  defaultLogger,
+} = require("../../../../debug_router_connector/dist/cjs/src/utils/logger");
 
 function response(protocolVersion = 1, minSupportedProtocolVersion = 1) {
   return {
@@ -70,6 +73,11 @@ function sequenceDiscovery(endpoint, values) {
   };
 }
 
+function getArgumentValue(args, name) {
+  const index = args.indexOf(name);
+  return index === -1 ? undefined : args[index + 1];
+}
+
 function createManager(tempDir, values, overrides = {}) {
   const controlEndpoint = path.join(tempDir, "control.sock");
   const discovery =
@@ -78,9 +86,9 @@ function createManager(tempDir, values, overrides = {}) {
   let now = 0;
   const manager = new MultiplexerDaemonManager({
     discovery,
+    daemonProcessName: overrides.daemonProcessName ?? "test-muxDaemon",
     controlEndpoint,
     spawnLockPath: path.join(tempDir, "spawn.lock"),
-    daemonLockPath: path.join(tempDir, "daemon.lock"),
     daemonEntry: "/tmp/entry.js",
     startupTimeout: 100,
     readyPollInterval: 10,
@@ -95,6 +103,7 @@ function createManager(tempDir, values, overrides = {}) {
       overrides.onSpawn?.(call);
       return { unref: () => (call.unref = true) };
     },
+    processFinder: overrides.processFinder ?? (async () => []),
     kill: overrides.kill ?? (() => {}),
     isProcessAlive: overrides.isProcessAlive ?? (() => false),
     sleep: async (duration) => {
@@ -156,23 +165,19 @@ describe("MultiplexerDaemonManager", function () {
     assert.strictEqual(await manager.ensureDaemon(), undefined);
     assert.strictEqual(spawnCalls.length, 1);
     assert.strictEqual(spawnCalls[0].args[0], "/tmp/entry.js");
-    const entryArgs = new Map();
-    for (let i = 1; i < spawnCalls[0].args.length; i += 2) {
-      entryArgs.set(spawnCalls[0].args[i], spawnCalls[0].args[i + 1]);
-    }
-    assert.strictEqual(entryArgs.get("--control-endpoint"), controlEndpoint);
     assert.strictEqual(
-      entryArgs.get("--daemon-lock-path"),
-      manager.daemonLock.lockPath
+      getArgumentValue(spawnCalls[0].args, "--control-endpoint"),
+      controlEndpoint
     );
-    assert.strictEqual(entryArgs.get("--protocol-version"), "1");
-    assert.strictEqual(entryArgs.get("--min-supported-protocol-version"), "1");
-    assert.strictEqual(spawnCalls[0].args.includes("--discovery-path"), false);
-    assert.strictEqual(spawnCalls[0].args.includes("--control-port"), false);
     assert.strictEqual(
-      spawnCalls[0].args.includes("--heartbeat-interval"),
-      false
+      getArgumentValue(spawnCalls[0].args, "--protocol-version"),
+      "1"
     );
+    assert.strictEqual(
+      getArgumentValue(spawnCalls[0].args, "--min-supported-protocol-version"),
+      "1"
+    );
+    assert.strictEqual(spawnCalls[0].options.argv0, manager.daemonProcessName);
     assert.strictEqual(spawnCalls[0].unref, true);
   });
 
@@ -267,9 +272,11 @@ describe("MultiplexerDaemonManager", function () {
     assert.deepStrictEqual(spawnCalls, []);
   });
 
-  it("uses daemon.lock PID for crash cleanup and removes a stale socket", async function () {
-    const alive = new Set([process.pid]);
+  it("[v1 compatibility gate] finds the named daemon for crash cleanup", async function () {
+    const daemonPid = 4242;
+    const alive = new Set([daemonPid]);
     const kills = [];
+    const findCalls = [];
     let spawned = false;
     const discovery = {
       controlEndpoint: path.join(tempDir, "control.sock"),
@@ -282,24 +289,103 @@ describe("MultiplexerDaemonManager", function () {
       onSpawn: () => {
         spawned = true;
       },
+      async processFinder(by, value, option) {
+        findCalls.push([by, value, option]);
+        return alive.has(daemonPid)
+          ? [
+              {
+                pid: daemonPid,
+                ppid: 1,
+                name: "node",
+                cmd: manager.daemonProcessName,
+              },
+            ]
+          : [];
+      },
       isProcessAlive: (pid) => alive.has(pid),
       kill(pid, signal) {
         kills.push([pid, signal]);
         alive.delete(pid);
       },
     });
-    const daemonOwner = new FileLock(manager.daemonLock.lockPath);
-    assert.strictEqual(daemonOwner.acquire(), true);
     fs.writeFileSync(controlEndpoint, "stale");
 
     await manager.ensureDaemon();
-    assert.deepStrictEqual(kills, [[process.pid, "SIGTERM"]]);
+    assert.ok(
+      findCalls.some(
+        ([by, value, option]) =>
+          by === "name" &&
+          value === manager.daemonProcessName &&
+          option.strict === false &&
+          option.skipSelf === true
+      )
+    );
+    assert.deepStrictEqual(kills, [[daemonPid, "SIGTERM"]]);
     assert.strictEqual(fs.existsSync(controlEndpoint), false);
   });
 
-  it("requests graceful shutdown for protocol replacement", async function () {
+  it("reports multiple daemon pids and stops only the first", async function () {
+    const daemonPids = [4242, 4343];
+    const alive = new Set(daemonPids);
+    const kills = [];
+    const errors = [];
+    let spawned = false;
+    const originalError = defaultLogger.error;
+    defaultLogger.error = (message) => errors.push(message);
+    try {
+      const { manager } = createManager(tempDir, [], {
+        discovery: {
+          controlEndpoint: path.join(tempDir, "control.sock"),
+          async probeHealth() {
+            return spawned ? usable() : unavailable();
+          },
+        },
+        onSpawn: () => {
+          spawned = true;
+        },
+        async processFinder() {
+          return daemonPids.map((pid) => ({
+            pid,
+            ppid: 1,
+            name: "node",
+            cmd: "test-muxDaemon",
+          }));
+        },
+        isProcessAlive: (pid) => alive.has(pid),
+        kill(pid, signal) {
+          kills.push([pid, signal]);
+          alive.delete(pid);
+        },
+      });
+
+      await manager.ensureDaemon();
+
+      assert.deepStrictEqual(kills, [[daemonPids[0], "SIGTERM"]]);
+      assert.strictEqual(alive.has(daemonPids[1]), true);
+      assert.strictEqual(errors.length, 1);
+      assert.ok(errors[0].includes(manager.daemonProcessName));
+      for (const pid of daemonPids) {
+        assert.ok(errors[0].includes(String(pid)));
+      }
+    } finally {
+      defaultLogger.error = originalError;
+    }
+  });
+
+  it("[v1 compatibility gate] requests graceful shutdown for protocol replacement", async function () {
     const calls = [];
-    const { manager } = createManager(tempDir, [replaceRequired(), usable()]);
+    const { manager } = createManager(tempDir, [replaceRequired(), usable()], {
+      async processFinder() {
+        return [
+          {
+            pid: 4242,
+            ppid: 1,
+            name: "node",
+            cmd: "test-muxDaemon",
+          },
+        ];
+      },
+    });
     manager.setDaemonClient({
       async callOnDaemon(method, params) {
         calls.push([method, params]);
@@ -310,5 +396,33 @@ describe("MultiplexerDaemonManager", function () {
     assert.deepStrictEqual(calls, [
       ["shutdownDaemon", { reason: "daemon-protocol-older-than-connector" }],
     ]);
+  });
+
+  it("reports and returns when graceful shutdown cannot find a daemon pid", async function () {
+    const errors = [];
+    const controlEndpoint = path.join(tempDir, "control.sock");
+    const { manager } = createManager(tempDir, [usable()]);
+    const calls = [];
+    manager.setDaemonClient({
+      async callOnDaemon(method, params) {
+        calls.push([method, params]);
+        return {};
+      },
+    });
+    fs.writeFileSync(controlEndpoint, "stale");
+    const originalError = defaultLogger.error;
+    defaultLogger.error = (message) => errors.push(message);
+    try {
+      await manager.tryGracefullyStopDaemon("force-stop");
+    } finally {
+      defaultLogger.error = originalError;
+    }
+
+    assert.deepStrictEqual(calls, [
+      ["shutdownDaemon", { reason: "force-stop" }],
+    ]);
+    assert.strictEqual(errors.length, 1);
+    assert.ok(errors[0].includes(manager.daemonProcessName));
+    assert.strictEqual(fs.existsSync(controlEndpoint), true);
   });
 });

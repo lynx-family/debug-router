@@ -9,8 +9,8 @@ export const DEBUG_ROUTER_CONNECTOR_DATA_DIR_NAME = ".DebugRouterConnector";
 export const MULTIPLEXER_DATA_DIR_NAME = "multiplexer";
 
 export const MULTIPLEXER_SPAWN_LOCK_NAME = "spawn.lock";
-export const MULTIPLEXER_DAEMON_LOCK_NAME = "daemon.lock";
 export const MULTIPLEXER_CONTROL_SOCKET_NAME = "control.sock";
+export const MULTIPLEXER_DAEMON_PROCESS_NAME_SUFFIX = "muxDaemon";
 
 export type MultiplexerPathOptions = {
   // Overrides the base DebugRouter connector data directory.
@@ -24,7 +24,7 @@ export type MultiplexerPaths = {
   dataDir: string;
   controlEndpoint: string;
   spawnLockPath: string;
-  daemonLockPath: string;
+  daemonProcessName: string;
 };
 
 export function getDefaultMultiplexerRootDir(): string {
@@ -64,13 +64,12 @@ export function getMultiplexerControlEndpoint(
   );
 }
 
-export function getMultiplexerDaemonLockPath(
-  options: MultiplexerPathOptions = {},
-): string {
-  return path.join(
-    getMultiplexerDataDir(options),
-    MULTIPLEXER_DAEMON_LOCK_NAME,
-  );
+export function getMultiplexerDaemonProcessName(dataDir: string): string {
+  const sanitizedDataDir = dataDir
+    .replace(/\//g, "-")
+    .replace(/[^A-Za-z0-9-]/g, "")
+    .replace(/^-+|-+$/g, "");
+  return `${sanitizedDataDir}-${MULTIPLEXER_DAEMON_PROCESS_NAME_SUFFIX}`;
 }
 
 export function createMultiplexerPaths(
@@ -84,6 +83,6 @@ export function createMultiplexerPaths(
     dataDir,
     controlEndpoint: getMultiplexerControlEndpoint({ dataDir }),
     spawnLockPath: path.join(dataDir, MULTIPLEXER_SPAWN_LOCK_NAME),
-    daemonLockPath: path.join(dataDir, MULTIPLEXER_DAEMON_LOCK_NAME),
+    daemonProcessName: getMultiplexerDaemonProcessName(dataDir),
   };
 }

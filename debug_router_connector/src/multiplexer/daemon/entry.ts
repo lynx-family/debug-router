@@ -2,29 +2,24 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import {
-  isMultiplexerDebugInfo,
-  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
-  MULTIPLEXER_PROTOCOL_VERSION,
-  MultiplexerDebugInfo,
-} from "../protocol";
+import type { MultiplexerDebugInfo } from "../protocol";
 import { defaultLogger } from "../../utils/logger";
 import {
   MultiplexerDaemon,
-  MultiplexerDaemonHost,
   MultiplexerDaemonOption,
 } from "./MultiplexerDaemon";
 import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
 import { setDriverReportService } from "../../report/interface/DriverReportService";
 import { DriverReportServiceImpl } from "../../report/interface/DriverReportServiceImpl";
 import type { ConnectionTraceOptions } from "../../trace/ConnectionTraceRecorder";
+import { setTimeout } from "timers/promises";
 import { MultiplexerHost } from "./MultiplexerHost";
+import type { MultiplexerHostOption } from "./MultiplexerHost";
 
 const ENTRY_CLEANUP_TIMEOUT = 3000;
 
 export type MultiplexerDaemonEntryOption = {
   controlEndpoint: string;
-  daemonLockPath: string;
   protocolVersion: number;
   minSupportedProtocolVersion: number;
   debugInfo?: MultiplexerDebugInfo;
@@ -44,33 +39,20 @@ type EntryArgKey =
   | "websocketPort"
   | "websocketRoomId";
 
-type RawEntryArgs = Partial<Record<EntryArgKey, string | true>>;
+type RawEntryArgs = Partial<Record<EntryArgKey, string>>;
 
-const OPTION_ALIASES: Record<string, EntryArgKey> = {
+const OPTION_KEY_MAP: Record<string, EntryArgKey | undefined> = {
   "control-endpoint": "controlEndpoint",
-  controlEndpoint: "controlEndpoint",
-  "daemon-lock-path": "daemonLockPath",
-  daemonLockPath: "daemonLockPath",
   "protocol-version": "protocolVersion",
-  protocolVersion: "protocolVersion",
   "min-supported-protocol-version": "minSupportedProtocolVersion",
-  minSupportedProtocolVersion: "minSupportedProtocolVersion",
   "debug-info": "debugInfo",
-  debugInfo: "debugInfo",
   "legacy-driver-dir": "legacyDriverDir",
-  legacyDriverDir: "legacyDriverDir",
   "multiplexer-daemon-idle-timeout": "multiplexerDaemonIdleTimeout",
-  multiplexerDaemonIdleTimeout: "multiplexerDaemonIdleTimeout",
   "enable-websocket": "enableWebSocket",
-  enableWebSocket: "enableWebSocket",
   "connection-trace": "connectionTrace",
-  connectionTrace: "connectionTrace",
   "websocket-port": "websocketPort",
-  websocketPort: "websocketPort",
   "websocket-room-id": "websocketRoomId",
-  websocketRoomId: "websocketRoomId",
   "physical-connector-option": "physicalConnectorOption",
-  physicalConnectorOption: "physicalConnectorOption",
 };
 
 export async function startMultiplexerDaemonEntry(
@@ -106,7 +88,6 @@ export function createMultiplexerDaemon(
     process.exit(stopError ? 1 : 0);
   };
   const daemonOption: MultiplexerDaemonOption = {
-    daemonLockPath: entryOption.daemonLockPath,
     host,
     onIdleTimeout: (stopError) => {
       exitAfterHostRequestedStop("idle", stopError);
@@ -126,63 +107,59 @@ export function createMultiplexerDaemon(
 
 export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   const rawArgs = parseRawArgs(argv);
-  const controlEndpoint = getRequiredString(rawArgs, "controlEndpoint");
-  const daemonLockPath = getRequiredString(rawArgs, "daemonLockPath");
-  const enableWebSocket = getOptionalBoolean(rawArgs, "enableWebSocket");
-  const connectionTrace = parseConnectionTraceOption(rawArgs);
-  const websocketOption = parseWebSocketOption(rawArgs);
-  const physicalConnectorOption = parsePhysicalConnectorOption(rawArgs);
-  const debugInfo = parseDebugInfo(rawArgs);
-
   const option: MultiplexerDaemonEntryOption = {
-    controlEndpoint,
-    daemonLockPath,
-    protocolVersion: getOptionalNumber(
-      rawArgs,
-      "protocolVersion",
-      MULTIPLEXER_PROTOCOL_VERSION,
-    ),
-    minSupportedProtocolVersion: getOptionalNumber(
-      rawArgs,
-      "minSupportedProtocolVersion",
-      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
+    controlEndpoint: getRequiredArg(rawArgs, "controlEndpoint"),
+    protocolVersion: Number(getRequiredArg(rawArgs, "protocolVersion")),
+    minSupportedProtocolVersion: Number(
+      getRequiredArg(rawArgs, "minSupportedProtocolVersion"),
     ),
   };
-  if (debugInfo !== undefined) {
-    option.debugInfo = debugInfo;
+  if (rawArgs.debugInfo !== undefined) {
+    option.debugInfo = JSON.parse(rawArgs.debugInfo) as MultiplexerDebugInfo;
   }
-  const legacyDriverDir = getOptionalString(rawArgs, "legacyDriverDir");
-  if (legacyDriverDir !== undefined) {
-    option.legacyDriverDir = legacyDriverDir;
+  if (rawArgs.legacyDriverDir !== undefined) {
+    option.legacyDriverDir = rawArgs.legacyDriverDir;
   }
-  const multiplexerDaemonIdleTimeout = getOptionalNumberOrUndefined(
-    rawArgs,
-    "multiplexerDaemonIdleTimeout",
-  );
-  if (multiplexerDaemonIdleTimeout !== undefined) {
-    option.multiplexerDaemonIdleTimeout = multiplexerDaemonIdleTimeout;
+  if (rawArgs.multiplexerDaemonIdleTimeout !== undefined) {
+    option.multiplexerDaemonIdleTimeout = Number(
+      rawArgs.multiplexerDaemonIdleTimeout,
+    );
   }
-  if (enableWebSocket !== undefined) {
-    option.enableWebSocket = enableWebSocket;
+  if (rawArgs.enableWebSocket !== undefined) {
+    option.enableWebSocket = rawArgs.enableWebSocket === "true";
   }
-  if (connectionTrace !== undefined) {
-    option.connectionTrace = connectionTrace;
+  if (rawArgs.connectionTrace !== undefined) {
+    option.connectionTrace = JSON.parse(
+      rawArgs.connectionTrace,
+    ) as ConnectionTraceOptions;
   }
-  if (websocketOption !== undefined) {
-    option.websocketOption = websocketOption;
+  if (
+    rawArgs.websocketPort !== undefined ||
+    rawArgs.websocketRoomId !== undefined
+  ) {
+    option.websocketOption = {
+      ...(rawArgs.websocketPort !== undefined
+        ? { port: Number(rawArgs.websocketPort) }
+        : {}),
+      ...(rawArgs.websocketRoomId !== undefined
+        ? { roomId: rawArgs.websocketRoomId }
+        : {}),
+    };
   }
-  if (physicalConnectorOption !== undefined) {
-    option.physicalConnectorOption = physicalConnectorOption;
+  if (rawArgs.physicalConnectorOption !== undefined) {
+    option.physicalConnectorOption = JSON.parse(
+      rawArgs.physicalConnectorOption,
+    ) as PhysicalConnectorOption;
   }
   return option;
 }
 
 function createEntryHost(
   entryOption: MultiplexerDaemonEntryOption,
-): MultiplexerDaemonHost {
+): MultiplexerHost {
   const reportService = new DriverReportServiceImpl();
   setDriverReportService(reportService);
-  const hostOption = {
+  const hostOption: MultiplexerHostOption = {
     controlEndpoint: entryOption.controlEndpoint,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
@@ -206,7 +183,7 @@ function createEntryHost(
     Object.assign(hostOption, { websocketOption: entryOption.websocketOption });
   }
   if (entryOption.physicalConnectorOption !== undefined) {
-    Object.assign(hostOption, entryOption.physicalConnectorOption);
+    hostOption.physicalConnectorOption = entryOption.physicalConnectorOption;
   }
   return new MultiplexerHost(hostOption);
 }
@@ -222,9 +199,18 @@ function registerProcessCleanup(daemon: MultiplexerDaemon): void {
     cleaning = true;
     try {
       const stopPromise = Promise.resolve(daemon.stop());
-      await (forceTimeout
-        ? withTimeout(stopPromise, ENTRY_CLEANUP_TIMEOUT)
-        : stopPromise);
+      if (forceTimeout) {
+        await Promise.race([
+          stopPromise,
+          setTimeout(ENTRY_CLEANUP_TIMEOUT).then(() => {
+            throw new Error(
+              `Multiplexer daemon cleanup timed out after ${ENTRY_CLEANUP_TIMEOUT}ms`,
+            );
+          }),
+        ]);
+      } else {
+        await stopPromise;
+      }
     } catch (error: any) {
       defaultLogger.error(
         `Multiplexer daemon cleanup failed: ${error?.message}`,
@@ -259,279 +245,40 @@ function registerProcessCleanup(daemon: MultiplexerDaemon): void {
   });
 }
 
-function withTimeout<T>(promise: Promise<T>, timeout: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(
-        new Error(`Multiplexer daemon cleanup timed out after ${timeout}ms`),
-      );
-    }, timeout);
-    timer.unref?.();
-
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
-}
-
 function parseRawArgs(argv: string[]): RawEntryArgs {
   const rawArgs: RawEntryArgs = {};
 
-  for (let index = 0; index < argv.length; index++) {
+  for (let index = 0; index < argv.length; index += 2) {
     const arg = argv[index];
     if (!arg.startsWith("--")) {
       throw new Error(`Unexpected multiplexer daemon argument: ${arg}`);
     }
 
-    const optionText = arg.slice(2);
-    const equalsIndex = optionText.indexOf("=");
-    const rawKey =
-      equalsIndex >= 0 ? optionText.slice(0, equalsIndex) : optionText;
-    const key = OPTION_ALIASES[rawKey];
+    const rawKey = arg.slice(2);
+    const key = OPTION_KEY_MAP[rawKey];
     if (!key) {
       throw new Error(`Unknown multiplexer daemon option: ${rawKey}`);
     }
 
-    if (equalsIndex >= 0) {
-      rawArgs[key] = optionText.slice(equalsIndex + 1);
-      continue;
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`Missing value for multiplexer daemon option: ${rawKey}`);
     }
-
-    const nextArg = argv[index + 1];
-    if (!nextArg || nextArg.startsWith("--")) {
-      rawArgs[key] = true;
-      continue;
-    }
-
-    rawArgs[key] = nextArg;
-    index++;
+    rawArgs[key] = value;
   }
 
   return rawArgs;
 }
 
-function getRequiredString(
+function getRequiredArg(
   rawArgs: RawEntryArgs,
   key: keyof MultiplexerDaemonEntryOption,
 ): string {
   const value = rawArgs[key];
-  if (typeof value !== "string" || value.length === 0) {
+  if (value === undefined) {
     throw new Error(`Missing required multiplexer daemon option: ${key}`);
   }
-
   return value;
-}
-
-function getOptionalString(
-  rawArgs: RawEntryArgs,
-  key: keyof MultiplexerDaemonEntryOption,
-): string | undefined {
-  const value = rawArgs[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function getOptionalNumber(
-  rawArgs: RawEntryArgs,
-  key: keyof MultiplexerDaemonEntryOption,
-  defaultValue: number,
-): number {
-  const value = rawArgs[key];
-  if (value === undefined) {
-    return defaultValue;
-  }
-
-  const numberValue = typeof value === "string" ? Number(value) : Number.NaN;
-  if (!Number.isFinite(numberValue)) {
-    throw new Error(`Invalid multiplexer daemon option ${key}: ${value}`);
-  }
-
-  return numberValue;
-}
-
-function getOptionalNumberOrUndefined(
-  rawArgs: RawEntryArgs,
-  key: keyof MultiplexerDaemonEntryOption,
-): number | undefined {
-  const value = rawArgs[key];
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const numberValue = typeof value === "string" ? Number(value) : Number.NaN;
-  if (!Number.isFinite(numberValue) || numberValue < 0) {
-    throw new Error(`Invalid multiplexer daemon option ${key}: ${value}`);
-  }
-
-  return numberValue;
-}
-
-function getOptionalBoolean(
-  rawArgs: RawEntryArgs,
-  key: keyof MultiplexerDaemonEntryOption,
-): boolean | undefined {
-  const value = rawArgs[key];
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (value === true) {
-    return true;
-  }
-
-  if (value === "true") {
-    return true;
-  }
-
-  if (value === "false") {
-    return false;
-  }
-
-  throw new Error(`Invalid multiplexer daemon option ${key}: ${value}`);
-}
-
-function parseWebSocketOption(
-  rawArgs: RawEntryArgs,
-): MultiplexerDaemonEntryOption["websocketOption"] {
-  const option: MultiplexerDaemonEntryOption["websocketOption"] = {};
-  const port = rawArgs.websocketPort;
-  if (port !== undefined) {
-    const numberValue = typeof port === "string" ? Number(port) : Number.NaN;
-    if (!Number.isFinite(numberValue)) {
-      throw new Error(
-        `Invalid multiplexer daemon option websocketPort: ${port}`,
-      );
-    }
-    option.port = numberValue;
-  }
-
-  const roomId = rawArgs.websocketRoomId;
-  if (typeof roomId === "string" && roomId.length > 0) {
-    option.roomId = roomId;
-  }
-
-  return option.port === undefined && option.roomId === undefined
-    ? undefined
-    : option;
-}
-
-function parseDebugInfo(
-  rawArgs: RawEntryArgs,
-): MultiplexerDebugInfo | undefined {
-  const value = rawArgs.debugInfo;
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`Invalid multiplexer daemon option debugInfo: ${value}`);
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch (error: any) {
-    throw new Error(
-      `Invalid multiplexer daemon option debugInfo: ${error?.message}`,
-    );
-  }
-
-  if (!isMultiplexerDebugInfo(parsed)) {
-    throw new Error(
-      "Invalid multiplexer daemon option debugInfo: expected MultiplexerDebugInfo",
-    );
-  }
-
-  return parsed;
-}
-
-function parsePhysicalConnectorOption(
-  rawArgs: RawEntryArgs,
-): PhysicalConnectorOption | undefined {
-  const value = rawArgs.physicalConnectorOption;
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(
-      `Invalid multiplexer daemon option physicalConnectorOption: ${value}`,
-    );
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch (error: any) {
-    throw new Error(
-      `Invalid multiplexer daemon option physicalConnectorOption: ${error?.message}`,
-    );
-  }
-
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(
-      "Invalid multiplexer daemon option physicalConnectorOption: expected object",
-    );
-  }
-
-  return parsed as PhysicalConnectorOption;
-}
-
-function parseConnectionTraceOption(
-  rawArgs: RawEntryArgs,
-): ConnectionTraceOptions | undefined {
-  const value = rawArgs.connectionTrace;
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(
-      `Invalid multiplexer daemon option connectionTrace: ${value}`,
-    );
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch (error: any) {
-    throw new Error(
-      `Invalid multiplexer daemon option connectionTrace: ${error?.message}`,
-    );
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(
-      "Invalid multiplexer daemon option connectionTrace: expected object",
-    );
-  }
-
-  const option = parsed as Record<string, unknown>;
-  if (option.enabled !== undefined && typeof option.enabled !== "boolean") {
-    throw new Error(
-      "Invalid multiplexer daemon option connectionTrace.enabled: expected boolean",
-    );
-  }
-  if (option.output !== undefined && typeof option.output !== "string") {
-    throw new Error(
-      "Invalid multiplexer daemon option connectionTrace.output: expected string path",
-    );
-  }
-  if (
-    option.bufferSize !== undefined &&
-    (typeof option.bufferSize !== "number" ||
-      !Number.isFinite(option.bufferSize) ||
-      option.bufferSize < 0)
-  ) {
-    throw new Error(
-      "Invalid multiplexer daemon option connectionTrace.bufferSize: expected non-negative finite number",
-    );
-  }
-
-  return parsed as ConnectionTraceOptions;
 }
 
 if (require.main === module) {

@@ -10,7 +10,7 @@ const {
   createMultiplexerPaths,
   getDefaultMultiplexerRootDir,
   getMultiplexerControlEndpoint,
-  getMultiplexerDaemonLockPath,
+  getMultiplexerDaemonProcessName,
   getMultiplexerDataDir,
   getMultiplexerSpawnLockPath,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/paths");
@@ -27,7 +27,7 @@ describe("multiplexer paths", function () {
     );
   });
 
-  it("creates a fixed Unix endpoint and lock paths", function () {
+  it("creates a fixed Unix endpoint, spawn lock, and daemon process name", function () {
     const rootDir = path.join(os.tmpdir(), "debug-router-mux-root");
     const paths = createMultiplexerPaths({ rootDir });
     assert.strictEqual(paths.rootDir, rootDir);
@@ -43,10 +43,9 @@ describe("multiplexer paths", function () {
       path.join(rootDir, "multiplexer", "spawn.lock")
     );
     assert.strictEqual(
-      paths.daemonLockPath,
-      path.join(rootDir, "multiplexer", "daemon.lock")
+      paths.daemonProcessName,
+      getMultiplexerDaemonProcessName(paths.dataDir)
     );
-    assert.strictEqual(Object.hasOwn(paths, "discoveryPath"), false);
   });
 
   it("derives the Windows named pipe from the custom data directory", function () {
@@ -80,13 +79,40 @@ describe("multiplexer paths", function () {
       getMultiplexerSpawnLockPath({ dataDir: firstDir }),
       path.join(firstDir, "spawn.lock")
     );
-    assert.strictEqual(
-      getMultiplexerDaemonLockPath({ dataDir: firstDir }),
-      path.join(firstDir, "daemon.lock")
-    );
     assert.notStrictEqual(
       getMultiplexerControlEndpoint({ dataDir: firstDir }, "darwin"),
       getMultiplexerControlEndpoint({ dataDir: secondDir }, "darwin")
+    );
+    assert.notStrictEqual(
+      getMultiplexerDaemonProcessName(firstDir),
+      getMultiplexerDaemonProcessName(secondDir)
+    );
+  });
+
+  it("[v1 compatibility gate] keeps discovery endpoints and daemon marker stable", function () {
+    assert.strictEqual(
+      getMultiplexerControlEndpoint(
+        { dataDir: "/Users/test/.Debug Router/mux_1" },
+        "darwin"
+      ),
+      "/Users/test/.Debug Router/mux_1/control.sock"
+    );
+    assert.strictEqual(
+      getMultiplexerControlEndpoint(
+        { dataDir: "C:\\Users\\tester\\mux" },
+        "win32"
+      ),
+      "\\\\.\\pipe\\C:\\Users\\tester\\mux"
+    );
+    assert.strictEqual(
+      getMultiplexerDaemonProcessName("/Users/test/.Debug Router/mux_1"),
+      "Users-test-DebugRouter-mux1-muxDaemon"
+    );
+    assert.strictEqual(
+      getMultiplexerDaemonProcessName(
+        "C:\\Users\\tester\\.DebugRouterConnector\\multiplexer"
+      ),
+      "CUserstesterDebugRouterConnectormultiplexer-muxDaemon"
     );
   });
 });
