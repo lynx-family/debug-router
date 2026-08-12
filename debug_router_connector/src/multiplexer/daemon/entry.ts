@@ -9,8 +9,8 @@ import { setDriverReportService } from "../../report/interface/DriverReportServi
 import { DriverReportServiceImpl } from "../../report/interface/DriverReportServiceImpl";
 import type { ConnectionTraceOptions } from "../../trace/ConnectionTraceRecorder";
 import { setTimeout } from "timers/promises";
-import { MultiplexerHost } from "./MultiplexerHost";
-import type { MultiplexerHostOption } from "./MultiplexerHost";
+import { MultiplexerDaemonHost } from "./MultiplexerDaemonHost";
+import type { MultiplexerDaemonHostOption } from "./MultiplexerDaemonHost";
 
 const ENTRY_CLEANUP_TIMEOUT = 3000;
 
@@ -53,9 +53,9 @@ const OPTION_KEY_MAP: Record<string, EntryArgKey | undefined> = {
 
 export async function startMultiplexerDaemonEntry(
   argv: string[] = process.argv.slice(2),
-): Promise<MultiplexerHost> {
+): Promise<MultiplexerDaemonHost> {
   const entryOption = parseEntryOption(argv);
-  const host = createEntryHost(entryOption);
+  const host = createDaemonHost(entryOption);
 
   registerProcessCleanup(host);
   await host.start();
@@ -115,12 +115,12 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   return option;
 }
 
-function createEntryHost(
+function createDaemonHost(
   entryOption: MultiplexerDaemonEntryOption,
-): MultiplexerHost {
+): MultiplexerDaemonHost {
   const reportService = new DriverReportServiceImpl();
   setDriverReportService(reportService);
-  const hostOption: MultiplexerHostOption = {
+  const hostOption: MultiplexerDaemonHostOption = {
     controlEndpoint: entryOption.controlEndpoint,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
@@ -146,10 +146,10 @@ function createEntryHost(
   if (entryOption.physicalConnectorOption !== undefined) {
     hostOption.physicalConnectorOption = entryOption.physicalConnectorOption;
   }
-  return new MultiplexerHost(hostOption);
+  return new MultiplexerDaemonHost(hostOption);
 }
 
-function registerProcessCleanup(host: MultiplexerHost): void {
+function registerProcessCleanup(host: MultiplexerDaemonHost): void {
   let cleanupPromise: Promise<unknown> | undefined;
 
   const cleanup = (

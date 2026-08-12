@@ -13,7 +13,7 @@ function assertNoInternalExports(moduleExports) {
     "MultiplexerDaemonClient",
     "MultiplexerDaemonManager",
     "MultiplexerDiscovery",
-    "MultiplexerHost",
+    "MultiplexerDaemonHost",
     "MultiplexerControlConnection",
     "MultiplexerControlServer",
     "PendingRouteTable",

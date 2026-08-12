@@ -25,7 +25,7 @@ const {
   setDriverReportService,
 } = require("../../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportService");
 
-class FakeEntryHost {
+class FakeDaemonHost {
   static instances = [];
   static startError = null;
   static stopError = null;
@@ -34,15 +34,15 @@ class FakeEntryHost {
     this.option = option;
     this.startCalls = 0;
     this.stopCalls = 0;
-    FakeEntryHost.instances.push(this);
+    FakeDaemonHost.instances.push(this);
   }
   async start() {
     this.startCalls++;
-    if (FakeEntryHost.startError) throw FakeEntryHost.startError;
+    if (FakeDaemonHost.startError) throw FakeDaemonHost.startError;
   }
   async stop() {
     this.stopCalls++;
-    if (FakeEntryHost.stopError) throw FakeEntryHost.stopError;
+    if (FakeDaemonHost.stopError) throw FakeDaemonHost.stopError;
   }
   setIdleTimeoutHandler(handler) {
     this.idleHandler = handler;
@@ -66,11 +66,11 @@ function stubProcessExit() {
   };
 }
 
-function replaceEntryHostCtor() {
-  const hostImport = entryModule.__get__("MultiplexerHost_1");
-  const original = hostImport.MultiplexerHost;
-  hostImport.MultiplexerHost = FakeEntryHost;
-  return () => (hostImport.MultiplexerHost = original);
+function replaceDaemonHostCtor() {
+  const hostImport = entryModule.__get__("MultiplexerDaemonHost_1");
+  const original = hostImport.MultiplexerDaemonHost;
+  hostImport.MultiplexerDaemonHost = FakeDaemonHost;
+  return () => (hostImport.MultiplexerDaemonHost = original);
 }
 
 function createOption(tempDir, overrides = {}) {
@@ -103,9 +103,9 @@ describe("multiplexer daemon entry", function () {
 
   beforeEach(function () {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-entry-"));
-    FakeEntryHost.instances = [];
-    FakeEntryHost.startError = null;
-    FakeEntryHost.stopError = null;
+    FakeDaemonHost.instances = [];
+    FakeDaemonHost.startError = null;
+    FakeDaemonHost.stopError = null;
   });
 
   afterEach(function () {
@@ -222,7 +222,7 @@ describe("multiplexer daemon entry", function () {
   });
 
   it("constructs Host with endpoint and omits daemon discovery state", async function () {
-    const restore = replaceEntryHostCtor();
+    const restore = replaceDaemonHostCtor();
     try {
       const option = createOption(tempDir, {
         protocolVersion: 3,
@@ -231,9 +231,9 @@ describe("multiplexer daemon entry", function () {
         enableWebSocket: true,
         physicalConnectorOption: { enableAndroid: true },
       });
-      const createEntryHost = entryModule.__get__("createEntryHost");
-      const host = createEntryHost(option);
-      assert.deepStrictEqual(FakeEntryHost.instances[0].option, {
+      const createDaemonHost = entryModule.__get__("createDaemonHost");
+      const host = createDaemonHost(option);
+      assert.deepStrictEqual(FakeDaemonHost.instances[0].option, {
         controlEndpoint: option.controlEndpoint,
         protocolVersion: 3,
         minSupportedProtocolVersion: 2,
@@ -258,7 +258,7 @@ describe("multiplexer daemon entry", function () {
   });
 
   it("registers cleanup handlers before starting and cleans on beforeExit", async function () {
-    const restoreHost = replaceEntryHostCtor();
+    const restoreHost = replaceDaemonHostCtor();
     const processOnce = stubProcessOnce();
     try {
       const option = createOption(tempDir);
@@ -270,8 +270,8 @@ describe("multiplexer daemon entry", function () {
         "--min-supported-protocol-version",
         String(option.minSupportedProtocolVersion),
       ]);
-      assert.strictEqual(host, FakeEntryHost.instances[0]);
-      assert.strictEqual(FakeEntryHost.instances[0].startCalls, 1);
+      assert.strictEqual(host, FakeDaemonHost.instances[0]);
+      assert.strictEqual(FakeDaemonHost.instances[0].startCalls, 1);
       assert.deepStrictEqual(
         processOnce.registrations.map((entry) => entry.event),
         [
@@ -286,7 +286,7 @@ describe("multiplexer daemon entry", function () {
         .find((entry) => entry.event === "beforeExit")
         .handler();
       await new Promise((resolve) => setImmediate(resolve));
-      assert.strictEqual(FakeEntryHost.instances[0].stopCalls, 1);
+      assert.strictEqual(FakeDaemonHost.instances[0].stopCalls, 1);
     } finally {
       processOnce.restore();
       restoreHost();
@@ -294,10 +294,10 @@ describe("multiplexer daemon entry", function () {
   });
 
   it("stops Host and exits for idle and shutdown requests", async function () {
-    const restoreHost = replaceEntryHostCtor();
+    const restoreHost = replaceDaemonHostCtor();
     try {
       for (const kind of ["idle", "shutdown"]) {
-        FakeEntryHost.instances = [];
+        FakeDaemonHost.instances = [];
         const processOnce = stubProcessOnce();
         const processExit = stubProcessExit();
         try {
@@ -326,11 +326,11 @@ describe("multiplexer daemon entry", function () {
   });
 
   it("exits with failure when Host-requested cleanup fails", async function () {
-    const restoreHost = replaceEntryHostCtor();
+    const restoreHost = replaceDaemonHostCtor();
     const processOnce = stubProcessOnce();
     const processExit = stubProcessExit();
     const originalExitCode = process.exitCode;
-    FakeEntryHost.stopError = new Error("entry host stop failed");
+    FakeDaemonHost.stopError = new Error("entry host stop failed");
     try {
       const option = createOption(tempDir);
       const host = await startMultiplexerDaemonEntry([
@@ -355,9 +355,9 @@ describe("multiplexer daemon entry", function () {
   });
 
   it("propagates Host start failures without creating daemon.lock", async function () {
-    const restoreHost = replaceEntryHostCtor();
+    const restoreHost = replaceDaemonHostCtor();
     const processOnce = stubProcessOnce();
-    FakeEntryHost.startError = new Error("entry host failed");
+    FakeDaemonHost.startError = new Error("entry host failed");
     try {
       const option = createOption(tempDir);
       await assert.rejects(

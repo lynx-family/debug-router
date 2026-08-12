@@ -103,7 +103,6 @@ function createManager(tempDir, values, overrides = {}) {
       overrides.onSpawn?.(call);
       return { unref: () => (call.unref = true) };
     },
-    processFinder: overrides.processFinder ?? (async () => []),
     kill: overrides.kill ?? (() => {}),
     isProcessAlive: overrides.isProcessAlive ?? (() => false),
     sleep: async (duration) => {
@@ -272,120 +271,9 @@ describe("MultiplexerDaemonManager", function () {
     assert.deepStrictEqual(spawnCalls, []);
   });
 
-  it("[v1 compatibility gate] finds the named daemon for crash cleanup", async function () {
-    const daemonPid = 4242;
-    const alive = new Set([daemonPid]);
-    const kills = [];
-    const findCalls = [];
-    let spawned = false;
-    const discovery = {
-      controlEndpoint: path.join(tempDir, "control.sock"),
-      async probeHealth() {
-        return spawned ? usable() : unavailable();
-      },
-    };
-    const { manager, controlEndpoint } = createManager(tempDir, [], {
-      discovery,
-      onSpawn: () => {
-        spawned = true;
-      },
-      async processFinder(by, value, option) {
-        findCalls.push([by, value, option]);
-        return alive.has(daemonPid)
-          ? [
-              {
-                pid: daemonPid,
-                ppid: 1,
-                name: "node",
-                cmd: manager.daemonProcessName,
-              },
-            ]
-          : [];
-      },
-      isProcessAlive: (pid) => alive.has(pid),
-      kill(pid, signal) {
-        kills.push([pid, signal]);
-        alive.delete(pid);
-      },
-    });
-    fs.writeFileSync(controlEndpoint, "stale");
-
-    await manager.ensureDaemon();
-    assert.ok(
-      findCalls.some(
-        ([by, value, option]) =>
-          by === "name" &&
-          value === manager.daemonProcessName &&
-          option.strict === false &&
-          option.skipSelf === true
-      )
-    );
-    assert.deepStrictEqual(kills, [[daemonPid, "SIGTERM"]]);
-    assert.strictEqual(fs.existsSync(controlEndpoint), false);
-  });
-
-  it("reports multiple daemon pids and stops only the first", async function () {
-    const daemonPids = [4242, 4343];
-    const alive = new Set(daemonPids);
-    const kills = [];
-    const errors = [];
-    let spawned = false;
-    const originalError = defaultLogger.error;
-    defaultLogger.error = (message) => errors.push(message);
-    try {
-      const { manager } = createManager(tempDir, [], {
-        discovery: {
-          controlEndpoint: path.join(tempDir, "control.sock"),
-          async probeHealth() {
-            return spawned ? usable() : unavailable();
-          },
-        },
-        onSpawn: () => {
-          spawned = true;
-        },
-        async processFinder() {
-          return daemonPids.map((pid) => ({
-            pid,
-            ppid: 1,
-            name: "node",
-            cmd: "test-muxDaemon",
-          }));
-        },
-        isProcessAlive: (pid) => alive.has(pid),
-        kill(pid, signal) {
-          kills.push([pid, signal]);
-          alive.delete(pid);
-        },
-      });
-
-      await manager.ensureDaemon();
-
-      assert.deepStrictEqual(kills, [[daemonPids[0], "SIGTERM"]]);
-      assert.strictEqual(alive.has(daemonPids[1]), true);
-      assert.strictEqual(errors.length, 1);
-      assert.ok(errors[0].includes(manager.daemonProcessName));
-      for (const pid of daemonPids) {
-        assert.ok(errors[0].includes(String(pid)));
-      }
-    } finally {
-      defaultLogger.error = originalError;
-    }
-  });
-
   it("[v1 compatibility gate] requests graceful shutdown for protocol replacement", async function () {
     const calls = [];
-    const { manager } = createManager(tempDir, [replaceRequired(), usable()], {
-      async processFinder() {
-        return [
-          {
-            pid: 4242,
-            ppid: 1,
-            name: "node",
-            cmd: "test-muxDaemon",
-          },
-        ];
-      },
-    });
+    const { manager } = createManager(tempDir, [replaceRequired(), usable()]);
     manager.setDaemonClient({
       async callOnDaemon(method, params) {
         calls.push([method, params]);

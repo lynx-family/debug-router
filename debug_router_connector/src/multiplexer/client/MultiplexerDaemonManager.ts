@@ -2,7 +2,11 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { spawn as spawnChildProcess, SpawnOptions } from "child_process";
+import {
+  execFileSync,
+  spawn as spawnChildProcess,
+  SpawnOptions,
+} from "child_process";
 import findProcess from "find-process";
 import fs from "fs";
 import { defaultLogger } from "../../utils/logger";
@@ -78,7 +82,6 @@ export type MultiplexerDaemonManagerOption = {
 
   // only used for testing
   spawn?: MultiplexerDaemonSpawn;
-  processFinder?: typeof findProcess;
   kill?: (pid: number, signal: NodeJS.Signals) => void;
   isProcessAlive?: (pid: number) => boolean;
   sleep?: (duration: number) => Promise<void>;
@@ -109,7 +112,6 @@ export class MultiplexerDaemonManager {
   private readonly replacementTimeout: number;
   private readonly spawnLockStaleTimeout: number;
   private readonly spawnProcess: MultiplexerDaemonSpawn;
-  private readonly processFinder: typeof findProcess;
   private readonly killProcess: (pid: number, signal: NodeJS.Signals) => void;
   private readonly isProcessAlive: (pid: number) => boolean;
   private readonly sleepFor: (duration: number) => Promise<void>;
@@ -147,7 +149,6 @@ export class MultiplexerDaemonManager {
       this.replacementTimeout +
       DEFAULT_MULTIPLEXER_SPAWN_LOCK_STALE_BUFFER;
     this.spawnProcess = option.spawn ?? spawnChildProcess;
-    this.processFinder = option.processFinder ?? findProcess;
     this.killProcess = option.kill ?? process.kill;
     this.isProcessAlive = option.isProcessAlive ?? isProcessAlive;
     this.sleepFor = option.sleep ?? defaultSleep;
@@ -346,19 +347,37 @@ export class MultiplexerDaemonManager {
   }
 
   private async findDaemonProcessId(): Promise<number> {
-    const processes = await this.processFinder("name", this.daemonProcessName, {
-      strict: false,
-      skipSelf: true,
-      logLevel: "warn",
-    });
-    if (processes.length > 1) {
+    let daemonProcessIds: number[];
+    if (process.platform === "win32") {
+      const processes = await findProcess("name", this.daemonProcessName, {
+        strict: false,
+        skipSelf: true,
+        logLevel: "warn",
+      });
+      daemonProcessIds = processes.map((daemonProcess) => daemonProcess.pid);
+    } else {
+      try {
+        daemonProcessIds = execFileSync(
+          "pgrep",
+          ["-f", `^${this.daemonProcessName}([[:space:]]|$)`],
+          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+        )
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .map(Number);
+      } catch (_error) {
+        daemonProcessIds = [];
+      }
+    }
+    if (daemonProcessIds.length > 1) {
       defaultLogger.error(
         `Found multiple multiplexer daemon processes for ${
           this.daemonProcessName
-        }: ${processes.map((daemonProcess) => daemonProcess.pid).join(", ")}`,
+        }: ${daemonProcessIds.join(", ")}`,
       );
     }
-    return processes.length === 0 ? -1 : processes[0].pid;
+    return daemonProcessIds.length === 0 ? -1 : daemonProcessIds[0];
   }
 
   private tryKillProcess(pid: number, signal: NodeJS.Signals): unknown {

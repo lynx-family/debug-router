@@ -12,10 +12,10 @@ const rewire = require(require.resolve("rewire", {
 const hostModule = rewire(
   path.join(
     __dirname,
-    "../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerHost"
+    "../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerDaemonHost"
   )
 );
-const { MultiplexerHost } = hostModule;
+const { MultiplexerDaemonHost } = hostModule;
 const {
   defaultLogger,
 } = require("../../../../debug_router_connector/dist/cjs/src/utils/logger");
@@ -511,10 +511,9 @@ class FakeLegacyOwnershipGuard {
 
 function createHost(options = {}) {
   const physical = options.physical ?? new FakePhysicalConnector(options);
-  const host = new MultiplexerHost({
+  const host = new MultiplexerDaemonHost({
     physicalConnector: physical,
-    protocolVersion:
-      options.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
+    protocolVersion: options.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
     minSupportedProtocolVersion:
       options.minSupportedProtocolVersion ??
       MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
@@ -672,7 +671,7 @@ function createSessionListMessage(clientId, sessions) {
   });
 }
 
-describe("MultiplexerHost", function () {
+describe("MultiplexerDaemonHost", function () {
   let restoreLegacyOwnershipGuard;
 
   before(function () {
@@ -707,7 +706,7 @@ describe("MultiplexerHost", function () {
       }
     }
 
-    const host = new MultiplexerHost({
+    const host = new MultiplexerDaemonHost({
       PhysicalConnectorCtor,
       controlEndpoint: "/tmp/debug-router-host-control.sock",
       protocolVersion: 3,

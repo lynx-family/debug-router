@@ -33,9 +33,7 @@ import {
   WebSocketClientSnapshot,
   WebSocketServerInfo,
 } from "../protocol";
-import {
-  MultiplexerControlServer,
-} from "./MultiplexerControlServer";
+import { MultiplexerControlServer } from "./MultiplexerControlServer";
 import {
   LegacyOwnershipChange,
   LegacyOwnershipGuard,
@@ -88,7 +86,7 @@ type WebSocketControllerLike = {
   close(): void;
 };
 
-export type MultiplexerHostOption = {
+export type MultiplexerDaemonHostOption = {
   enableWebSocket?: boolean;
   connectionTrace?: ConnectionTraceOptions;
   controlEndpoint: string;
@@ -112,11 +110,11 @@ export type MultiplexerHostOption = {
   now?: () => number;
 };
 
-export class MultiplexerHost {
+export class MultiplexerDaemonHost {
   private physicalConnector: PhysicalConnector;
   private readonly connectionTraceRecorder: ConnectionTraceRecorder | null;
   private connectionTraceRecorderClosed = false;
-  private readonly option: MultiplexerHostOption;
+  private readonly option: MultiplexerDaemonHostOption;
   private readonly protocolVersion: number;
   private readonly minSupportedProtocolVersion: number;
   private readonly now: () => number;
@@ -240,7 +238,7 @@ export class MultiplexerHost {
     });
   };
 
-  constructor(option: MultiplexerHostOption) {
+  constructor(option: MultiplexerDaemonHostOption) {
     this.option = option;
     this.protocolVersion = option.protocolVersion;
     this.minSupportedProtocolVersion = option.minSupportedProtocolVersion;

@@ -10,8 +10,8 @@ const {
   parseEntryOption,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/entry");
 const {
-  MultiplexerHost,
-} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerHost");
+  MultiplexerDaemonHost,
+} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerDaemonHost");
 
 const STATE_FILE_NAME = "fake_physical_state.json";
 const COMMAND_FILE_NAME = "fake_physical_commands.jsonl";
@@ -489,7 +489,7 @@ async function main() {
     at: Date.now(),
   });
 
-  const host = new MultiplexerHost({
+  const host = new MultiplexerDaemonHost({
     controlEndpoint: entryOption.controlEndpoint,
     protocolVersion: entryOption.protocolVersion,
     minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,

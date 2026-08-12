@@ -26,7 +26,7 @@ The most important implementation boundary is: the public `DebugRouterConnector`
 | debug_router SDK            | The SDK-side DebugRouter component. It receives debugging messages from frontends and returns SDK runtime events and responses.                                                                                                                |
 | debug_router_connector      | The PC-side DebugRouter connection library. It discovers devices, connects to SDK runtimes, and provides a WebSocket debugging entry for Lynx DevTool/browser DevTool pages.                                                                   |
 | DebugRouter Multiplexer     | A local multiplexing mechanism inside the connector. A daemon owns the real device and SDK connections, isolates messages, rewrites IDs, and routes responses for multiple frontends.                                                          |
-| Multiplexer daemon          | A local detached shared process. It owns real physical connections, the control server, the WebSocket server, snapshot/event broadcast, and routing.                                                                                           |
+| Multiplexer daemon          | A local detached shared process composed of the process entry and `MultiplexerDaemonHost`. It is a deployment role rather than a standalone lifecycle class.                                                                                   |
 | memoized notification query | An ID-less `Customized` query whose runtime reply is an SDK-initiated notification. The daemon can coalesce duplicate queries and briefly reuse the latest notification for the same runtime client.                                           |
 | control client              | A daemon client created after a normal connector process registers over the local `node:net` control endpoint.                                                                                                                                 |
 | WebSocket Driver frontend   | A WebSocket frontend page whose type is `Driver`.                                                                                                                                                                                              |
@@ -99,7 +99,7 @@ Connector-side daemon client and mirror objects:
 Daemon side:
 
 - `debug_router_connector/src/multiplexer/daemon/entry.ts`
-- `debug_router_connector/src/multiplexer/daemon/MultiplexerHost.ts`
+- `debug_router_connector/src/multiplexer/daemon/MultiplexerDaemonHost.ts`
 - `debug_router_connector/src/multiplexer/daemon/MemoizedNotificationQueryTable.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerControlServer.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerControlConnection.ts`
@@ -133,23 +133,20 @@ The current `src/connector` directory only exports the new `DebugRouterConnector
 ```text
 Caller process
   DebugRouterConnector
-    MultiplexerDaemonClient
-      fixed node:net endpoint
-        Unix-like: <dataDir>/control.sock
-        Windows:   \\.\pipe\<dataDir>
-        Multiplexer daemon
-          MultiplexerHost
-            PhysicalConnector
-              SDK runtime / device
+    MultiplexerDaemonManager ── starts / replaces ──────> daemon/entry.ts
+    MultiplexerDaemonClient  ── fixed endpoint ─────────> MultiplexerControlServer
 
-WebSocket frontends
-  ws://<host>:<wssPort>/mdevices/page/android
-    daemon-side WebSocketController
-      MultiplexerHost
-        USB SDK runtime / WiFi SDK runtime / device
+Multiplexer daemon process
+  daemon/entry.ts
+    MultiplexerDaemonHost
+      MultiplexerControlServer
+      PhysicalConnector ── USB ── SDK runtime / device
+      WebSocketController ── WiFi / Driver frontend
 ```
 
-Connector processes no longer directly own real device watchers or SDK runtime/WebSocket connections. USB physical connections exist only in daemon-side `MultiplexerHost -> PhysicalConnector`, while daemon-side `WebSocketController` owns WiFi runtime and Driver frontend connections. Connector processes maintain local `MultiplexerDevice`, `MultiplexerUsbClient`, and `MultiplexerWebSocketClient` mirrors; WebSocket mirrors and events are exposed only to control clients that called `startWSServer()`.
+The Multiplexer daemon is a process boundary, not an additional object layer. `entry.ts` adapts process startup and termination to one `MultiplexerDaemonHost`; Host composes and owns the control, physical, WebSocket, routing, and compatibility resources used by that process.
+
+Connector processes no longer directly own real device watchers or SDK runtime/WebSocket connections. USB physical connections exist only in daemon-side `MultiplexerDaemonHost -> PhysicalConnector`, while daemon-side `WebSocketController` owns WiFi runtime and Driver frontend connections. Connector processes maintain local `MultiplexerDevice`, `MultiplexerUsbClient`, and `MultiplexerWebSocketClient` mirrors; WebSocket mirrors and events are exposed only to control clients that called `startWSServer()`.
 
 ### 4.2 Local State Directory
 
@@ -231,31 +228,23 @@ healthCheckTimeout = 500ms
 spawnLockStaleTimeout = startupTimeout + replacementTimeout + 1000ms
 ```
 
-Spawn uses the current Node executable to start `multiplexer/daemon/entry.js` as a detached child with `stdio: "ignore"`, then calls `unref()`. The path layer derives `daemonProcessName` from `dataDir`: `/` becomes `-`, dots and other non-alphanumeric/non-hyphen characters are removed, leading and trailing hyphens are trimmed, and `-muxDaemon` is appended as a short suffix. Facade passes this generated name to Manager; Manager does not accept `dataDir`, and neither value is forwarded to the daemon entry. Required startup arguments are the control endpoint, protocol version, and minimum supported protocol version. Legacy driver dir, idle timeout, WebSocket config, connection trace, daemon-side `PhysicalConnectorOption`, and serialized `debugInfo` are forwarded only when configured.
-
-Manager calls `find-process@2.0.0` directly by the sanitized process name with `{ strict: false, skipSelf: true, logLevel: "warn" }`. Non-strict matching is required because Windows applies `argv0` to the process command line rather than the native process name. Manager expects one matching daemon: no match becomes `-1`; multiple matches are reported through `defaultLogger.error`, and only the first pid is used. Cleanup first tries SIGTERM and then SIGKILL after the replacement timeout.
+Manager starts `multiplexer/daemon/entry.js` as a detached child process. A process marker derived from the Multiplexer data directory lets Manager identify the daemon during replacement or stale cleanup, but it is not part of the daemon's runtime protocol or Host configuration. Entry receives only the configuration required to construct Host, such as the control endpoint, protocol range, physical connection options, WebSocket settings, trace settings, and idle policy.
 
 ## 7. Daemon Process and Host
 
-`entry.ts` parses daemon arguments, creates `MultiplexerHost`, installs the Host idle/shutdown callbacks, and registers cleanup logic for `beforeExit`, `SIGINT`, `SIGTERM`, `uncaughtException`, and `unhandledRejection`. Cleanup calls `host.stop()`. Forced exit paths wait at most 3000 ms.
+`entry.ts` is the adapter between process lifecycle and the daemon runtime. It parses Manager-provided configuration, installs daemon-local dependencies, constructs one `MultiplexerDaemonHost`, starts it, and coordinates process termination when Host or the operating environment requests shutdown.
 
-Entry startup flow:
+The responsibility boundary is:
 
-1. Create `MultiplexerHost` with the complete `MultiplexerHostOption`, including the idle timeout when configured.
-2. Register process cleanup and Host-requested stop callbacks.
-3. Call `host.start()`; Host starts the fixed `node:net` control endpoint.
+1. `MultiplexerDaemonManager` decides whether a daemon must be reused, started, replaced, or force-stopped.
+2. `entry.ts` owns process construction and termination, and translates process-level configuration into one Host configuration.
+3. `MultiplexerDaemonHost` owns startup, shutdown, and all runtime resources inside the daemon process.
 
-Entry shutdown flow:
+There is no separate `MultiplexerDaemon` lifecycle wrapper. Host options are provided once at construction, and `host.start()` only activates the resources represented by that configuration. Host-requested idle or explicit shutdown is routed back to entry, which stops Host before ending the process.
 
-1. For idle timeout or `shutdownDaemon`, call `host.stop()` and exit with the cleanup result.
-2. For process signals or failures, stop Host with a bounded cleanup window and preserve the corresponding exit code.
-3. Host stops all provisional/registered control transports and removes the Unix socket file; Windows named pipes disappear with the server/process.
+Host composes its control server and WebSocket controller through small structural contracts. These contracts keep the subcomponents independently testable without making the core Host inherit from or explicitly implement server-side wrapper interfaces.
 
-There is no separate `MultiplexerDaemon` lifecycle wrapper. Host owns every daemon runtime resource, while entry owns process construction and termination, so Host options are passed once at construction rather than again through `host.start()`.
-
-`MultiplexerControlServer` keeps its small structural `MultiplexerControlHost` dependency so it can remain independently testable. The real `MultiplexerHost` provides the required callbacks structurally, but does not import or explicitly `implements` that interface; this avoids making the core Host depend on a thin server-side abstraction.
-
-`MultiplexerHost` is the core daemon object. It is responsible for:
+`MultiplexerDaemonHost` is the core daemon object. It is responsible for:
 
 - Owning the real `PhysicalConnector`.
 - Starting the fixed local control server and handling health/register first-message handshakes.
@@ -457,7 +446,7 @@ The former `capabilities` field is removed. Actual compatibility arbitration use
 
 ### 8.6 Connection Trace Is Not a Control Protocol
 
-Connection trace is daemon-owned and is not part of `snapshot` or the control protocol. `MultiplexerHost` is the only owner that constructs `ConnectionTraceRecorder` from `connectionTrace`, passes that same instance to the `PhysicalConnector` it creates, records whole-chain connection facts, and closes the recorder. It does not reuse a recorder from an injected `PhysicalConnector` or an incoming `traceRecorder` option. In addition to the legacy device, runtime, and WebSocket-client connection facts, Host records daemon lifecycle and stop triggers, control-socket connections, shared WebSocket-server lifecycle, and legacy-ownership acquisition or loss. Control-socket events include the `controlId` and the resulting active-connection count; server and ownership events carry their endpoint or owner metadata. The Connector facade no longer exposes `getConnectionTrace()` or `onConnectionTrace()`, and the daemon exposes no trace query/subscription RPC or trace control event. The recorder's existing buffer, listener, and query capabilities remain available internally for now but are not exposed across processes.
+Connection trace is daemon-owned and is not part of `snapshot` or the control protocol. `MultiplexerDaemonHost` is the only owner that constructs `ConnectionTraceRecorder` from `connectionTrace`, passes that same instance to the `PhysicalConnector` it creates, records whole-chain connection facts, and closes the recorder. It does not reuse a recorder from an injected `PhysicalConnector` or an incoming `traceRecorder` option. In addition to the legacy device, runtime, and WebSocket-client connection facts, Host records daemon lifecycle and stop triggers, control-socket connections, shared WebSocket-server lifecycle, and legacy-ownership acquisition or loss. Control-socket events include the `controlId` and the resulting active-connection count; server and ownership events carry their endpoint or owner metadata. The Connector facade no longer exposes `getConnectionTrace()` or `onConnectionTrace()`, and the daemon exposes no trace query/subscription RPC or trace control event. The recorder's existing buffer, listener, and query capabilities remain available internally for now but are not exposed across processes.
 
 Trace configuration is daemon-startup-global. The first Connector that actually starts the daemon determines `connectionTrace`; later Connectors reuse that daemon and cannot replace its recorder configuration until the daemon restarts. The daemon constructs the recorder using the original `ConnectionTraceOptions` rules and `process.env.DriverConnectionTracePath`, so the default remains disabled when neither provides an output. A string `connectionTrace.output` is converted to an absolute path and serialized to the daemon. A `WritableStream` remains valid for an in-process `PhysicalConnector`, but cannot cross the Multiplexer process boundary, so the facade ignores that output and logs a warning while forwarding the other trace options. `MultiplexerDaemonManager` explicitly removes `traceRecorder` from daemon startup serialization; the daemon entry also rejects a manually supplied recorder instance.
 
@@ -495,7 +484,7 @@ Local mirror synchronization rules:
 
 ## 10. WebSocket Frontend Path
 
-`WebSocketController` has been decoupled from the concrete `DebugRouterConnector` class and depends on the structural `WebSocketControllerHost`. In the current Multiplexer implementation, that host is the daemon-side `MultiplexerHost`.
+`WebSocketController` has been decoupled from the concrete `DebugRouterConnector` class and depends on the structural `WebSocketControllerHost`. In the current Multiplexer implementation, that host is the daemon-side `MultiplexerDaemonHost`.
 
 `startWSServer` RPC runs inside the daemon:
 
@@ -515,7 +504,7 @@ WebSocket client handshake:
 
 Message paths:
 
-- Driver frontend sends `Customized` to a target runtime: `WebSocketClient` extracts the target `client_id`, calls `WebSocketController.sendMessageToApp(id, message, fromWebClientId)`, and enters `MultiplexerHost.handleWebSocketMessage()`. Host selects either a WebSocket app client (WiFi) or `PhysicalConnector.usbClients` (USB) by client id.
+- Driver frontend sends `Customized` to a target runtime: `WebSocketClient` extracts the target `client_id`, calls `WebSocketController.sendMessageToApp(id, message, fromWebClientId)`, and enters `MultiplexerDaemonHost.handleWebSocketMessage()`. Host selects either a WebSocket app client (WiFi) or `PhysicalConnector.usbClients` (USB) by client id.
 - WebSocket app client sends a message to frontend: `WebSocketClient` calls `handleWebSocketAppMessage()`. Host passes it to the transport-independent `handleRuntimeMessage(appClientId, message, "websocket-runtime")`, so WiFi and USB share routing while retaining an explicit message source.
 - `ClientList` is triggered by Driver frontends and returns current WebSocket app clients and USB runtime clients. USB runtime clients use `network: "USB"`; WebSocket app clients use `network: "WiFi"`.
 
@@ -689,7 +678,7 @@ The corresponding sequence is:
 sequenceDiagram
     participant A as Frontend A
     participant B as Frontend B
-    participant H as MultiplexerHost
+    participant H as MultiplexerDaemonHost
     participant T as MemoizedNotificationQueryTable
     participant S as SDK runtime
 
@@ -795,7 +784,7 @@ Host idle detection only counts two upper-layer consumers:
 1. Registered local control socket connections, meaning connector API users.
 2. WebSocket frontends whose type is `Driver`.
 
-When both counts are 0, Host starts the idle timer. When the timer expires, Host calls the daemon idle handler. The daemon runs `stop()` and the entry process exits. If a new control connection or Driver frontend connects during the idle window, the timer is cancelled.
+When both counts are 0, Host starts the idle timer. When the timer expires, Host requests process shutdown through the handler installed by entry. Entry stops Host and then exits the daemon process. If a new control connection or Driver frontend connects during the idle window, the timer is cancelled.
 
 WiFi runtime/app connections are not consumers for idle ownership. Connecting, disconnecting, or continuing to use a phone over WiFi does not cancel or restart the idle timer; without a Connector control client or Driver frontend, the daemon exits after the configured timeout and closes the shared WebSocket server as part of `stop()`.
 
@@ -803,7 +792,7 @@ If `multiplexerDaemonIdleTimeout` is negative, non-finite, or not configured in 
 
 ### 13.3 Daemon Replacement/Yield
 
-When a connector finds an outdated or unhealthy daemon that must be replaced, Manager first finds the pid carrying the current data directory's daemon marker, then requests graceful daemon shutdown through the `shutdownDaemon` RPC. If no pid was found, Manager reports an error through `defaultLogger` and returns from graceful cleanup after the request. Otherwise Host calls its shutdown handler, and the daemon runs `stop()` to clean the local control server/socket, WebSocket server, and physical connector. Manager waits for that same pid and only tries SIGTERM/SIGKILL if it remains alive; it does not query the process list again. If health is unavailable, the same marker lookup supplies the cleanup pid without relying on a daemon-owned file.
+When a connector finds an outdated or unhealthy daemon that must be replaced, Manager identifies the process through the data directory's daemon marker and requests graceful shutdown through the control protocol when possible. Host forwards that request to entry; entry stops Host-owned resources and exits the process. If graceful shutdown cannot complete, Manager falls back to process-level termination and stale endpoint cleanup. This flow does not rely on a daemon-owned discovery or lock file.
 
 ### 13.4 Unknown Response ID
 
@@ -828,7 +817,7 @@ Current Multiplexer-related `DebugRouterConnectorOption` fields:
 | `websocketOption.port`         | Retained for the legacy option shape but ignored; selection starts at 19783.                         |
 | `websocketOption.roomId`       | Room id returned by WebSocket `RoomJoined`.                                                          |
 
-`MultiplexerHostOption.memoizedNotificationTtlMs` controls the daemon-side pending and cache TTL and defaults to 1000 ms. It is currently an internal Host option used for embedding and deterministic tests, not a public `DebugRouterConnectorOption` propagated through daemon startup.
+`MultiplexerDaemonHostOption.memoizedNotificationTtlMs` controls the daemon-side pending and cache TTL and defaults to 1000 ms. It is currently an internal Host option used for embedding and deterministic tests, not a public `DebugRouterConnectorOption` propagated through daemon startup.
 
 The daemon-side `PhysicalConnector` receives transport endpoints and serializable options such as `adbHostPort`, `hdcHostPort`, `usbConnectOpt`, `networkDeviceOpt`, and `connectionTrace`. In the normal shared-daemon path, generally available platform options are enabled in the daemon and each Connector filters the devices, clients, snapshots, and events it exposes according to its own option flags. Only `forceRespawnDaemon` makes the replacement daemon use that Connector's `manualConnect`, WebSocket, and platform enable flags exactly. The daemon entry validates `connectionTrace.enabled` as boolean, `connectionTrace.output` as a string path, and `connectionTrace.bufferSize` as a non-negative finite number; recorder instances are rejected. `reportService` is not serialized across the process boundary; the daemon creates its own local report service.
 
@@ -849,7 +838,7 @@ Protocol compatibility rules:
 2. `connectDevices()` triggers `daemonClient.connect()`.
 3. Health probe cannot reach the fixed endpoint, so Manager acquires `spawn.lock`.
 4. Manager spawns detached daemon entry.
-5. Daemon starts Host/control server at the fixed endpoint without holding a runtime lock.
+5. Entry constructs and starts Host; Host starts the control server at the fixed endpoint without holding a runtime lock.
 6. Connector sends `register`, receives `register-response`, and then receives the initial `snapshot`.
 7. Facade uses the `connectDevices` RPC to ask Host to start physical device discovery.
 
