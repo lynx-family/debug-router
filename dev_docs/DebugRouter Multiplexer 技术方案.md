@@ -99,7 +99,6 @@ connector 侧 daemon client 与镜像对象：
 daemon 侧：
 
 - `debug_router_connector/src/multiplexer/daemon/entry.ts`
-- `debug_router_connector/src/multiplexer/daemon/MultiplexerDaemon.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerHost.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerControlServer.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerControlConnection.ts`
@@ -246,22 +245,23 @@ spawn 使用当前 Node 可执行文件 detached 启动 `multiplexer/daemon/entr
 
 ## 7. daemon 进程与 Host
 
-`entry.ts` 负责解析 daemon 参数、创建 `MultiplexerHost` 和 `MultiplexerDaemon`，并注册 `beforeExit`、`SIGINT`、`SIGTERM`、`uncaughtException`、`unhandledRejection` 清理逻辑。清理会调用 `daemon.stop()`；强制退出路径最多等待 3000ms。
+`entry.ts` 负责解析 daemon 参数、创建 `MultiplexerHost`、安装 Host 的 idle/shutdown 回调，并注册 `beforeExit`、`SIGINT`、`SIGTERM`、`uncaughtException`、`unhandledRejection` 清理逻辑。清理直接调用 `host.stop()`；强制退出路径最多等待 3000ms。
 
-`MultiplexerDaemon.start()` 的流程：
+entry 启动流程：
 
-1. 抢占 `daemon.lock`。
-2. 启动 `MultiplexerHost`。
-3. 读取 Host 实际 control port。
-4. 写入 `daemon.json`。
-5. 启动 heartbeat timer，默认每 1000ms 刷新一次 discovery heartbeat。
+1. 使用完整的 `MultiplexerHostOption` 构造 Host，空闲超时等配置只在构造时传递一次。
+2. 注册进程清理以及 Host 主动停止回调。
+3. 调用 `host.start()`，由 Host 启动固定的 `node:net` control endpoint。
 
-`MultiplexerDaemon.stop()` 的流程：
+entry 停止流程：
 
-1. 停止 heartbeat timer。
-2. 停止 Host。
-3. 删除 `daemon.json`。
-4. 释放 `daemon.lock`。
+1. Host idle timeout 或收到 `shutdownDaemon` 时，entry 调用 `host.stop()` 并根据清理结果退出进程。
+2. 收到进程信号或未捕获异常时，entry 在限定时间内停止 Host，并保留对应退出码。
+3. Host 关闭 control、WebSocket 和物理连接资源，并清理 Unix socket。
+
+当前不再保留单独的 `MultiplexerDaemon` 生命周期封装。运行时资源全部由 Host 持有，进程构造与退出由 entry 负责，避免 Host 反向依赖只负责转发的薄封装，也避免同一份 Host option 在构造和 `start()` 时重复传递。
+
+Control Server 内部继续保留小型结构接口 `MultiplexerControlHost`，便于独立测试和注入 fake host。真实 `MultiplexerHost` 只需在结构上提供对应回调，不再导入或显式 `implements` 这个接口，避免核心 Host 反向依赖 Control Server 内的薄抽象。
 
 `MultiplexerHost` 是 daemon 内部核心对象，负责：
 

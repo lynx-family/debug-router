@@ -99,7 +99,6 @@ Connector-side daemon client and mirror objects:
 Daemon side:
 
 - `debug_router_connector/src/multiplexer/daemon/entry.ts`
-- `debug_router_connector/src/multiplexer/daemon/MultiplexerDaemon.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerHost.ts`
 - `debug_router_connector/src/multiplexer/daemon/MemoizedNotificationQueryTable.ts`
 - `debug_router_connector/src/multiplexer/daemon/MultiplexerControlServer.ts`
@@ -238,17 +237,23 @@ Manager calls `find-process@2.0.0` directly by the sanitized process name with `
 
 ## 7. Daemon Process and Host
 
-`entry.ts` parses daemon arguments, creates `MultiplexerHost` and `MultiplexerDaemon`, and registers cleanup logic for `beforeExit`, `SIGINT`, `SIGTERM`, `uncaughtException`, and `unhandledRejection`. Cleanup calls `daemon.stop()`. Forced exit paths wait at most 3000 ms.
+`entry.ts` parses daemon arguments, creates `MultiplexerHost`, installs the Host idle/shutdown callbacks, and registers cleanup logic for `beforeExit`, `SIGINT`, `SIGTERM`, `uncaughtException`, and `unhandledRejection`. Cleanup calls `host.stop()`. Forced exit paths wait at most 3000 ms.
 
-`MultiplexerDaemon.start()` flow:
+Entry startup flow:
 
-1. Start `MultiplexerHost`.
-2. Host starts the fixed `node:net` control endpoint.
+1. Create `MultiplexerHost` with the complete `MultiplexerHostOption`, including the idle timeout when configured.
+2. Register process cleanup and Host-requested stop callbacks.
+3. Call `host.start()`; Host starts the fixed `node:net` control endpoint.
 
-`MultiplexerDaemon.stop()` flow:
+Entry shutdown flow:
 
-1. Stop Host and all provisional/registered control transports.
-2. Remove the Unix socket file; Windows named pipes disappear with the server/process.
+1. For idle timeout or `shutdownDaemon`, call `host.stop()` and exit with the cleanup result.
+2. For process signals or failures, stop Host with a bounded cleanup window and preserve the corresponding exit code.
+3. Host stops all provisional/registered control transports and removes the Unix socket file; Windows named pipes disappear with the server/process.
+
+There is no separate `MultiplexerDaemon` lifecycle wrapper. Host owns every daemon runtime resource, while entry owns process construction and termination, so Host options are passed once at construction rather than again through `host.start()`.
+
+`MultiplexerControlServer` keeps its small structural `MultiplexerControlHost` dependency so it can remain independently testable. The real `MultiplexerHost` provides the required callbacks structurally, but does not import or explicitly `implements` that interface; this avoids making the core Host depend on a thin server-side abstraction.
 
 `MultiplexerHost` is the core daemon object. It is responsible for:
 

@@ -16,11 +16,7 @@ const entryModule = rewire(
     "../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/entry"
   )
 );
-const {
-  createMultiplexerDaemon,
-  parseEntryOption,
-  startMultiplexerDaemonEntry,
-} = entryModule;
+const { parseEntryOption, startMultiplexerDaemonEntry } = entryModule;
 const {
   DriverReportServiceImpl,
 } = require("../../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportServiceImpl");
@@ -32,19 +28,21 @@ const {
 class FakeEntryHost {
   static instances = [];
   static startError = null;
+  static stopError = null;
 
   constructor(option) {
     this.option = option;
-    this.startCalls = [];
+    this.startCalls = 0;
     this.stopCalls = 0;
     FakeEntryHost.instances.push(this);
   }
-  async start(option) {
-    this.startCalls.push(option);
+  async start() {
+    this.startCalls++;
     if (FakeEntryHost.startError) throw FakeEntryHost.startError;
   }
   async stop() {
     this.stopCalls++;
+    if (FakeEntryHost.stopError) throw FakeEntryHost.stopError;
   }
   setIdleTimeoutHandler(handler) {
     this.idleHandler = handler;
@@ -52,6 +50,20 @@ class FakeEntryHost {
   setShutdownHandler(handler) {
     this.shutdownHandler = handler;
   }
+}
+
+function stubProcessExit() {
+  const original = process.exit;
+  const exitCodes = [];
+  process.exit = (code) => {
+    exitCodes.push(code);
+  };
+  return {
+    exitCodes,
+    restore() {
+      process.exit = original;
+    },
+  };
 }
 
 function replaceEntryHostCtor() {
@@ -93,6 +105,7 @@ describe("multiplexer daemon entry", function () {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-entry-"));
     FakeEntryHost.instances = [];
     FakeEntryHost.startError = null;
+    FakeEntryHost.stopError = null;
   });
 
   afterEach(function () {
@@ -218,7 +231,8 @@ describe("multiplexer daemon entry", function () {
         enableWebSocket: true,
         physicalConnectorOption: { enableAndroid: true },
       });
-      const daemon = createMultiplexerDaemon(option);
+      const createEntryHost = entryModule.__get__("createEntryHost");
+      const host = createEntryHost(option);
       assert.deepStrictEqual(FakeEntryHost.instances[0].option, {
         controlEndpoint: option.controlEndpoint,
         protocolVersion: 3,
@@ -228,7 +242,7 @@ describe("multiplexer daemon entry", function () {
         physicalConnectorOption: { enableAndroid: true },
       });
       assert(getDriverReportService() instanceof DriverReportServiceImpl);
-      await daemon.start();
+      await host.start();
       assert.strictEqual(
         fs.existsSync(path.join(tempDir, "daemon.lock")),
         false
@@ -237,7 +251,7 @@ describe("multiplexer daemon entry", function () {
         fs.existsSync(path.join(tempDir, "daemon.json")),
         false
       );
-      await daemon.stop();
+      await host.stop();
     } finally {
       restore();
     }
@@ -248,7 +262,7 @@ describe("multiplexer daemon entry", function () {
     const processOnce = stubProcessOnce();
     try {
       const option = createOption(tempDir);
-      const daemon = await startMultiplexerDaemonEntry([
+      const host = await startMultiplexerDaemonEntry([
         "--control-endpoint",
         option.controlEndpoint,
         "--protocol-version",
@@ -256,7 +270,8 @@ describe("multiplexer daemon entry", function () {
         "--min-supported-protocol-version",
         String(option.minSupportedProtocolVersion),
       ]);
-      assert.strictEqual(FakeEntryHost.instances[0].startCalls.length, 1);
+      assert.strictEqual(host, FakeEntryHost.instances[0]);
+      assert.strictEqual(FakeEntryHost.instances[0].startCalls, 1);
       assert.deepStrictEqual(
         processOnce.registrations.map((entry) => entry.event),
         [
@@ -272,8 +287,68 @@ describe("multiplexer daemon entry", function () {
         .handler();
       await new Promise((resolve) => setImmediate(resolve));
       assert.strictEqual(FakeEntryHost.instances[0].stopCalls, 1);
-      await daemon.stop();
     } finally {
+      processOnce.restore();
+      restoreHost();
+    }
+  });
+
+  it("stops Host and exits for idle and shutdown requests", async function () {
+    const restoreHost = replaceEntryHostCtor();
+    try {
+      for (const kind of ["idle", "shutdown"]) {
+        FakeEntryHost.instances = [];
+        const processOnce = stubProcessOnce();
+        const processExit = stubProcessExit();
+        try {
+          const option = createOption(tempDir);
+          const host = await startMultiplexerDaemonEntry([
+            "--control-endpoint",
+            option.controlEndpoint,
+            "--protocol-version",
+            String(option.protocolVersion),
+            "--min-supported-protocol-version",
+            String(option.minSupportedProtocolVersion),
+          ]);
+
+          await (kind === "idle" ? host.idleHandler() : host.shutdownHandler());
+
+          assert.strictEqual(host.stopCalls, 1);
+          assert.deepStrictEqual(processExit.exitCodes, [0]);
+        } finally {
+          processExit.restore();
+          processOnce.restore();
+        }
+      }
+    } finally {
+      restoreHost();
+    }
+  });
+
+  it("exits with failure when Host-requested cleanup fails", async function () {
+    const restoreHost = replaceEntryHostCtor();
+    const processOnce = stubProcessOnce();
+    const processExit = stubProcessExit();
+    const originalExitCode = process.exitCode;
+    FakeEntryHost.stopError = new Error("entry host stop failed");
+    try {
+      const option = createOption(tempDir);
+      const host = await startMultiplexerDaemonEntry([
+        "--control-endpoint",
+        option.controlEndpoint,
+        "--protocol-version",
+        String(option.protocolVersion),
+        "--min-supported-protocol-version",
+        String(option.minSupportedProtocolVersion),
+      ]);
+
+      await host.idleHandler();
+
+      assert.strictEqual(host.stopCalls, 1);
+      assert.deepStrictEqual(processExit.exitCodes, [1]);
+    } finally {
+      process.exitCode = originalExitCode;
+      processExit.restore();
       processOnce.restore();
       restoreHost();
     }

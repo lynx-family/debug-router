@@ -4,10 +4,6 @@
 
 import type { MultiplexerDebugInfo } from "../protocol";
 import { defaultLogger } from "../../utils/logger";
-import {
-  MultiplexerDaemon,
-  MultiplexerDaemonOption,
-} from "./MultiplexerDaemon";
 import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
 import { setDriverReportService } from "../../report/interface/DriverReportService";
 import { DriverReportServiceImpl } from "../../report/interface/DriverReportServiceImpl";
@@ -57,52 +53,17 @@ const OPTION_KEY_MAP: Record<string, EntryArgKey | undefined> = {
 
 export async function startMultiplexerDaemonEntry(
   argv: string[] = process.argv.slice(2),
-): Promise<MultiplexerDaemon> {
+): Promise<MultiplexerHost> {
   const entryOption = parseEntryOption(argv);
-  const daemon = createMultiplexerDaemon(entryOption);
+  const host = createEntryHost(entryOption);
 
-  registerProcessCleanup(daemon);
-  await daemon.start();
+  registerProcessCleanup(host);
+  await host.start();
   defaultLogger.info(
     `Multiplexer daemon started with control endpoint ${entryOption.controlEndpoint}`,
   );
 
-  return daemon;
-}
-
-export function createMultiplexerDaemon(
-  entryOption: MultiplexerDaemonEntryOption,
-): MultiplexerDaemon {
-  const host = createEntryHost(entryOption);
-  const exitAfterHostRequestedStop = (
-    source: "idle" | "shutdown",
-    stopError?: unknown,
-  ) => {
-    if (stopError) {
-      defaultLogger.error(
-        `Multiplexer daemon ${source} cleanup failed: ${
-          (stopError as any)?.message
-        }`,
-      );
-    }
-    process.exit(stopError ? 1 : 0);
-  };
-  const daemonOption: MultiplexerDaemonOption = {
-    host,
-    onIdleTimeout: (stopError) => {
-      exitAfterHostRequestedStop("idle", stopError);
-    },
-    onShutdownRequest: (stopError) => {
-      exitAfterHostRequestedStop("shutdown", stopError);
-    },
-  };
-  if (entryOption.multiplexerDaemonIdleTimeout !== undefined) {
-    daemonOption.hostOption = {
-      multiplexerDaemonIdleTimeout: entryOption.multiplexerDaemonIdleTimeout,
-    };
-  }
-
-  return new MultiplexerDaemon(daemonOption);
+  return host;
 }
 
 export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
@@ -188,41 +149,58 @@ function createEntryHost(
   return new MultiplexerHost(hostOption);
 }
 
-function registerProcessCleanup(daemon: MultiplexerDaemon): void {
-  let cleaning = false;
+function registerProcessCleanup(host: MultiplexerHost): void {
+  let cleanupPromise: Promise<unknown> | undefined;
 
-  const cleanup = async (exitCode: number, forceTimeout: boolean = false) => {
-    if (cleaning) {
-      return;
+  const cleanup = (
+    exitCode: number,
+    forceTimeout: boolean = false,
+    source?: "idle" | "shutdown",
+  ): Promise<unknown> => {
+    if (cleanupPromise) {
+      return cleanupPromise;
     }
 
-    cleaning = true;
-    try {
-      const stopPromise = Promise.resolve(daemon.stop());
-      if (forceTimeout) {
-        await Promise.race([
-          stopPromise,
-          setTimeout(ENTRY_CLEANUP_TIMEOUT).then(() => {
-            throw new Error(
-              `Multiplexer daemon cleanup timed out after ${ENTRY_CLEANUP_TIMEOUT}ms`,
-            );
-          }),
-        ]);
-      } else {
-        await stopPromise;
+    cleanupPromise = (async () => {
+      try {
+        const stopPromise = Promise.resolve(host.stop());
+        if (forceTimeout) {
+          await Promise.race([
+            stopPromise,
+            setTimeout(ENTRY_CLEANUP_TIMEOUT).then(() => {
+              throw new Error(
+                `Multiplexer daemon cleanup timed out after ${ENTRY_CLEANUP_TIMEOUT}ms`,
+              );
+            }),
+          ]);
+        } else {
+          await stopPromise;
+        }
+        return undefined;
+      } catch (error: any) {
+        defaultLogger.error(
+          source
+            ? `Multiplexer daemon ${source} cleanup failed: ${error?.message}`
+            : `Multiplexer daemon cleanup failed: ${error?.message}`,
+        );
+        if (exitCode === 0) {
+          process.exitCode = 1;
+        }
+        return error;
       }
-    } catch (error: any) {
-      defaultLogger.error(
-        `Multiplexer daemon cleanup failed: ${error?.message}`,
-      );
-      if (exitCode === 0) {
-        process.exitCode = 1;
-      }
-    }
+    })();
+    return cleanupPromise;
+  };
+  const cleanupAfterHostRequest = async (source: "idle" | "shutdown") => {
+    const stopError = await cleanup(0, false, source);
+    process.exit(stopError ? 1 : 0);
   };
   const cleanupAndExit = (exitCode: number) => {
     void cleanup(exitCode, true).finally(() => process.exit(exitCode));
   };
+
+  host.setIdleTimeoutHandler(() => cleanupAfterHostRequest("idle"));
+  host.setShutdownHandler(() => cleanupAfterHostRequest("shutdown"));
 
   process.once("beforeExit", () => {
     void cleanup(process.exitCode ?? 0);

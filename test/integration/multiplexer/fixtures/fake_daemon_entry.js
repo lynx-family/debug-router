@@ -10,9 +10,6 @@ const {
   parseEntryOption,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/entry");
 const {
-  MultiplexerDaemon,
-} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerDaemon");
-const {
   MultiplexerHost,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerHost");
 
@@ -547,51 +544,49 @@ async function main() {
     connection.transport.destroy(new Error(message));
   };
 
-  const daemon = new MultiplexerDaemon({
-    hostOption:
-      entryOption.multiplexerDaemonIdleTimeout === undefined
-        ? undefined
-        : {
-            multiplexerDaemonIdleTimeout:
-              entryOption.multiplexerDaemonIdleTimeout,
-          },
-    host,
-    onIdleTimeout(stopError) {
-      if (stopError) {
+  let cleanupPromise;
+  const cleanup = async (exitCode) => {
+    if (cleanupPromise) {
+      return cleanupPromise;
+    }
+
+    cleanupPromise = (async () => {
+      try {
+        await host.stop();
+        return undefined;
+      } catch (error) {
         appendJsonLine(daemonLogPath, {
-          event: "daemon-idle-cleanup-error",
+          event: "daemon-cleanup-error",
           pid: process.pid,
           at: Date.now(),
-          message: stopError?.message,
+          message: error?.message,
         });
+        if (exitCode === 0) {
+          process.exitCode = 1;
+        }
+        return error;
       }
-      process.exit(stopError ? 1 : 0);
-    },
-  });
-
-  let cleaning = false;
-  const cleanup = async (exitCode) => {
-    if (cleaning) {
-      return;
-    }
-    cleaning = true;
-    try {
-      await daemon.stop();
-    } catch (error) {
+    })();
+    return cleanupPromise;
+  };
+  const cleanupAfterHostRequest = async (source) => {
+    const stopError = await cleanup(0);
+    if (stopError) {
       appendJsonLine(daemonLogPath, {
-        event: "daemon-cleanup-error",
+        event: `daemon-${source}-cleanup-error`,
         pid: process.pid,
         at: Date.now(),
-        message: error?.message,
+        message: stopError?.message,
       });
-      if (exitCode === 0) {
-        process.exitCode = 1;
-      }
     }
+    process.exit(stopError ? 1 : 0);
   };
   const cleanupAndExit = (exitCode) => {
     void cleanup(exitCode).finally(() => process.exit(exitCode));
   };
+
+  host.setIdleTimeoutHandler(() => cleanupAfterHostRequest("idle"));
+  host.setShutdownHandler(() => cleanupAfterHostRequest("shutdown"));
 
   process.once("beforeExit", () => {
     void cleanup(process.exitCode ?? 0);
@@ -617,7 +612,7 @@ async function main() {
     cleanupAndExit(1);
   });
 
-  await daemon.start();
+  await host.start();
   appendJsonLine(daemonLogPath, {
     event: "daemon-started",
     pid: process.pid,

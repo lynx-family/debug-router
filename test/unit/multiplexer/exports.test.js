@@ -10,7 +10,6 @@ function keys(moduleExports) {
 
 function assertNoInternalExports(moduleExports) {
   [
-    "MultiplexerDaemon",
     "MultiplexerDaemonClient",
     "MultiplexerDaemonManager",
     "MultiplexerDiscovery",

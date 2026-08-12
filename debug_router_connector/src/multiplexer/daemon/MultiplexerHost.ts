@@ -33,9 +33,7 @@ import {
   WebSocketClientSnapshot,
   WebSocketServerInfo,
 } from "../protocol";
-import { MultiplexerDaemonHost } from "./MultiplexerDaemon";
 import {
-  MultiplexerControlHost,
   MultiplexerControlServer,
 } from "./MultiplexerControlServer";
 import {
@@ -114,12 +112,7 @@ export type MultiplexerHostOption = {
   now?: () => number;
 };
 
-type MultiplexerHostStartOption = {
-  multiplexerDaemonIdleTimeout?: number;
-};
-
-export class MultiplexerHost
-  implements MultiplexerDaemonHost, MultiplexerControlHost {
+export class MultiplexerHost {
   private physicalConnector: PhysicalConnector;
   private readonly connectionTraceRecorder: ConnectionTraceRecorder | null;
   private connectionTraceRecorderClosed = false;
@@ -153,7 +146,6 @@ export class MultiplexerHost
   private idleTimer: NodeJS.Timeout | null = null;
   private idleTimeoutHandler: (() => void | Promise<void>) | undefined;
   private shutdownHandler: (() => void | Promise<void>) | undefined;
-  private runtimeIdleTimeout: number | undefined;
   private nextGlobalMessageId = 1;
   private started = false;
   private shutdownRequested = false;
@@ -272,7 +264,7 @@ export class MultiplexerHost
     });
   }
 
-  async start(startOption?: unknown): Promise<void> {
+  async start(): Promise<void> {
     if (this.started) {
       return;
     }
@@ -281,12 +273,6 @@ export class MultiplexerHost
     this.daemonStopReason = undefined;
     if (!this.option.controlEndpoint) {
       throw new Error("Multiplexer control endpoint is required");
-    }
-    if (
-      isMultiplexerHostStartOption(startOption) &&
-      startOption.multiplexerDaemonIdleTimeout !== undefined
-    ) {
-      this.runtimeIdleTimeout = startOption.multiplexerDaemonIdleTimeout;
     }
     this.bindPhysicalConnectorEvents();
 
@@ -1671,8 +1657,7 @@ export class MultiplexerHost
   }
 
   private getIdleTimeout(): number | undefined {
-    const idleTimeout =
-      this.runtimeIdleTimeout ?? this.option.multiplexerDaemonIdleTimeout;
+    const idleTimeout = this.option.multiplexerDaemonIdleTimeout;
     if (
       idleTimeout === undefined ||
       !Number.isFinite(idleTimeout) ||
@@ -1852,10 +1837,4 @@ function rewriteRuntimeClientIdData(data: any, clientId: number): void {
 
 function isWebSocketDriverType(type?: string): boolean {
   return type === "Driver";
-}
-
-function isMultiplexerHostStartOption(
-  option: unknown,
-): option is MultiplexerHostStartOption {
-  return typeof option === "object" && option !== null;
 }
