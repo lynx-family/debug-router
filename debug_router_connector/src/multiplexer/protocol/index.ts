@@ -9,9 +9,13 @@ export type {
   ControlRpcRequest,
   ControlRpcResponse,
   ControlRpcResult,
+  MultiplexerHealthRequest,
+  MultiplexerHealthResponse,
+  MultiplexerHandshakeErrorResponse,
   WebSocketServerInfo,
 } from "./control";
 export type { MultiplexerDebugInfo } from "./debuginfo";
+export { MULTIPLEXER_PROTOCOL_VERSION } from "./control";
 export type { ControlEvent, ControlEventEnvelope } from "./event";
 export type {
   ClientSnapshot,
@@ -25,9 +29,13 @@ export {
   isControlEvent,
   isMultiplexerDebugInfo,
   isControlRpcMethod,
+  isControlRpcParams,
   isControlRpcRequest,
   isControlRpcResponse,
   isDeviceSnapshot,
+  isMultiplexerHealthRequest,
+  isMultiplexerHealthResponse,
+  isMultiplexerHandshakeErrorResponse,
   isNumber,
   isNumberArray,
   isRecord,
