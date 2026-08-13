@@ -42,6 +42,24 @@ const connector = new DebugRouterConnector({
 });
 ```
 
+#### Add a Network Device at Runtime
+
+Network devices can be added after initialization:
+
+```js
+await connector.watchNetworkDeviceAtIp({
+  ip: "192.168.1.20",
+  port: [8901, 8902],
+});
+
+await connector.watchNetworkDeviceAtIp({
+  ip: "192.168.1.21",
+  port: [8901, 8902],
+});
+```
+
+Each IP is watched once. Repeated calls with the same IP do nothing.
+
 #### Connection trace (optional)
 Use `connectionTrace` to enable flat JSON-line connection logging, or set `DriverConnectionTracePath` to a file path. Each record includes a monotonically increasing `sequence`; socket-backed records also include `connectionAttemptId` for later trace analysis.
 
