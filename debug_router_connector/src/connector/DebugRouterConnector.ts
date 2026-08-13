@@ -102,6 +102,10 @@ export class DebugRouterConnector {
         port: number[];
       }
     | undefined;
+  private readonly networkDeviceManagers = new Map<
+    string,
+    NetworkDeviceManager
+  >();
   readonly adbOption: any;
   readonly hdcOption: any;
   readonly usbConnectOpt: {
@@ -192,9 +196,15 @@ export class DebugRouterConnector {
     if (this.enableNetworkDevice && this.networkDeviceOpt) {
       if (this.networkDeviceOpt) {
         // NetWorkDevices use ip as their serial.
-        this.devicesManager.add(
-          new NetworkDeviceManager(this, this.networkDeviceOpt),
+        const networkDeviceManager = new NetworkDeviceManager(
+          this,
+          this.networkDeviceOpt,
         );
+        this.networkDeviceManagers.set(
+          this.networkDeviceOpt.ip,
+          networkDeviceManager,
+        );
+        this.devicesManager.add(networkDeviceManager);
       } else {
         getDriverReportService()?.report("network_connect_error", null, {
           msg: "networkDeviceOpt == undefined",
@@ -430,6 +440,25 @@ export class DebugRouterConnector {
 
   addDeviceManager(manager: DeviceManager) {
     this.devicesManager.add(manager);
+  }
+
+  async watchNetworkDeviceAtIp(options: {
+    ip: string;
+    port: number[];
+  }): Promise<void> {
+    if (this.networkDeviceManagers.has(options.ip)) {
+      return;
+    }
+    const networkDeviceManager = new NetworkDeviceManager(this, options);
+    this.networkDeviceManagers.set(options.ip, networkDeviceManager);
+    this.devicesManager.add(networkDeviceManager);
+    await networkDeviceManager.watchDevices().catch((e) => {
+      getDriverReportService()?.report("device_connect_error", null, {
+        msg: "watchDevices error:" + e?.message,
+        stage: "device",
+      });
+      throw e;
+    });
   }
 
   private async startDeviceListeners() {
