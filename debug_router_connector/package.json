@@ -50,7 +50,7 @@
     "chalk": "^4.1.2",
     "debug": "4.3.4",
     "detect-port": "^1.5.1",
-    "find-process": "2.0.0",
+    "find-process": "1.4.7",
     "fs-extra": "^11.1.0",
     "ip": "^2.0.1",
     "plist": "3.0.6",
@@ -59,7 +59,6 @@
     "unzipper": "0.12.3",
     "utf8": "^3.0.0",
     "uuid": "^9.0.1",
-    "write-file-atomic": "^5.0.1",
     "ws": "^8.12.1",
     "yargs": "15.4.1"
   }

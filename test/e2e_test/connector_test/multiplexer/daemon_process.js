@@ -3,18 +3,32 @@
 // LICENSE file in the root directory of this source tree.
 
 const path = require("path");
+const { execFileSync } = require("child_process");
 
 const findProcessModule = require(require.resolve("find-process", {
   paths: [path.join(__dirname, "../../../../debug_router_connector")],
 }));
 const findProcess = findProcessModule.default ?? findProcessModule;
 
-function findDaemonProcesses(daemonProcessName) {
-  return findProcess("name", daemonProcessName, {
-    strict: false,
-    skipSelf: true,
-    logLevel: "warn",
-  });
+async function findDaemonProcesses(daemonProcessName) {
+  if (process.platform === "win32") {
+    return findProcess("name", daemonProcessName, false);
+  }
+
+  try {
+    return execFileSync(
+      "pgrep",
+      ["-f", `^${daemonProcessName}([[:space:]]|$)`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    )
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(Number)
+      .map((pid) => ({ pid }));
+  } catch (_error) {
+    return [];
+  }
 }
 
 async function findDaemonProcess(daemonProcessName) {

@@ -8,10 +8,6 @@ const os = require("os");
 const path = require("path");
 
 const {
-  writeFileAtomic,
-  writeJsonAtomic,
-} = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/atomic_file");
-const {
   FileLock,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/FileLock");
 
@@ -32,40 +28,6 @@ function writeLockOwner(lockPath, owner) {
     })
   );
 }
-
-describe("multiplexer atomic file utilities", function () {
-  let tempDir;
-
-  beforeEach(function () {
-    tempDir = createTempDir();
-  });
-
-  afterEach(function () {
-    cleanupTempDir(tempDir);
-  });
-
-  it("writes JSON atomically", function () {
-    const filePath = path.join(tempDir, "nested", "state.json");
-
-    writeJsonAtomic(filePath, {
-      pid: 1,
-      protocolVersion: 1,
-    });
-
-    assert.deepStrictEqual(JSON.parse(fs.readFileSync(filePath, "utf8")), {
-      pid: 1,
-      protocolVersion: 1,
-    });
-  });
-
-  it("writes buffer content atomically", function () {
-    const filePath = path.join(tempDir, "buffer.bin");
-
-    writeFileAtomic(filePath, Buffer.from("hello"));
-
-    assert.strictEqual(fs.readFileSync(filePath, "utf8"), "hello");
-  });
-});
 
 describe("multiplexer FileLock", function () {
   let tempDir;

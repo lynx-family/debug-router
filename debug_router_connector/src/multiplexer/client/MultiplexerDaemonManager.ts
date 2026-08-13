@@ -349,11 +349,7 @@ export class MultiplexerDaemonManager {
   private async findDaemonProcessId(): Promise<number> {
     let daemonProcessIds: number[];
     if (process.platform === "win32") {
-      const processes = await findProcess("name", this.daemonProcessName, {
-        strict: false,
-        skipSelf: true,
-        logLevel: "warn",
-      });
+      const processes = await findProcess("name", this.daemonProcessName, false);
       daemonProcessIds = processes.map((daemonProcess) => daemonProcess.pid);
     } else {
       try {

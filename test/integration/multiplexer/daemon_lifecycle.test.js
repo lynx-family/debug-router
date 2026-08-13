@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 const assert = require("assert");
+const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -94,6 +95,35 @@ describe("multiplexer integration daemon lifecycle", function () {
     await waitFor(() => !processExists(info.pid), 2000);
   });
 
+  it("finds an unreachable daemon by argv0 marker and force-stops only the exact match", async function () {
+    context = createIntegrationContext("daemon-process-name-cleanup", {
+      replacementTimeout: platformTimeout(100),
+    });
+    const daemonProcess = spawnIdleProcess(context.paths.daemonProcessName);
+    const decoyProcess =
+      process.platform === "win32"
+        ? undefined
+        : spawnIdleProcess(`${context.paths.daemonProcessName}-decoy`);
+
+    try {
+      await waitFor(() => processExists(daemonProcess.pid), 1000);
+      if (decoyProcess) {
+        await waitFor(() => processExists(decoyProcess.pid), 1000);
+      }
+      assert.strictEqual(fs.existsSync(context.paths.controlEndpoint), false);
+
+      await context.manager.stopDaemonOnConnectorRequest();
+
+      await waitFor(() => !processExists(daemonProcess.pid), 2000);
+      if (decoyProcess) {
+        assert.strictEqual(processExists(decoyProcess.pid), true);
+      }
+    } finally {
+      await stopProcess(daemonProcess);
+      await stopProcess(decoyProcess);
+    }
+  });
+
   it("isolates one control socket error from the daemon and other controls", async function () {
     context = createIntegrationContext("daemon-control-socket-error");
     await context.manager.ensureDaemon();
@@ -125,3 +155,27 @@ describe("multiplexer integration daemon lifecycle", function () {
     );
   });
 });
+
+function spawnIdleProcess(argv0) {
+  return spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    argv0,
+    stdio: "ignore",
+  });
+}
+
+async function stopProcess(child) {
+  if (!child?.pid || !processExists(child.pid)) {
+    return;
+  }
+  try {
+    process.kill(child.pid, "SIGTERM");
+  } catch (_error) {}
+  await waitFor(() => !processExists(child.pid), 1000).catch(() => {});
+  if (!processExists(child.pid)) {
+    return;
+  }
+  try {
+    process.kill(child.pid, "SIGKILL");
+  } catch (_error) {}
+  await waitFor(() => !processExists(child.pid), 1000).catch(() => {});
+}
