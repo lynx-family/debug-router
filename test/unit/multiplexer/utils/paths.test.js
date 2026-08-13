@@ -7,9 +7,12 @@ const os = require("os");
 const path = require("path");
 
 const {
+  createMultiplexerPaths,
   getDefaultMultiplexerRootDir,
   getMultiplexerControlEndpoint,
+  getMultiplexerDaemonProcessName,
   getMultiplexerDataDir,
+  getMultiplexerSpawnLockPath,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/utils/paths");
 
 describe("multiplexer paths", function () {
@@ -21,6 +24,27 @@ describe("multiplexer paths", function () {
     assert.strictEqual(
       getMultiplexerDataDir(),
       path.join(os.homedir(), ".DebugRouterConnector", "multiplexer")
+    );
+  });
+
+  it("creates a fixed Unix endpoint, spawn lock, and daemon process name", function () {
+    const rootDir = path.join(os.tmpdir(), "debug-router-mux-root");
+    const paths = createMultiplexerPaths({ rootDir });
+    assert.strictEqual(paths.rootDir, rootDir);
+    assert.strictEqual(paths.dataDir, path.join(rootDir, "multiplexer"));
+    if (process.platform !== "win32") {
+      assert.strictEqual(
+        paths.controlEndpoint,
+        path.join(rootDir, "multiplexer", "control.sock")
+      );
+    }
+    assert.strictEqual(
+      paths.spawnLockPath,
+      path.join(rootDir, "multiplexer", "spawn.lock")
+    );
+    assert.strictEqual(
+      paths.daemonProcessName,
+      getMultiplexerDaemonProcessName(paths.dataDir)
     );
   });
 
@@ -51,13 +75,21 @@ describe("multiplexer paths", function () {
     const firstDir = path.join(os.tmpdir(), "debug-router-mux-a");
     const secondDir = path.join(os.tmpdir(), "debug-router-mux-b");
     assert.strictEqual(getMultiplexerDataDir({ dataDir: firstDir }), firstDir);
+    assert.strictEqual(
+      getMultiplexerSpawnLockPath({ dataDir: firstDir }),
+      path.join(firstDir, "spawn.lock")
+    );
     assert.notStrictEqual(
       getMultiplexerControlEndpoint({ dataDir: firstDir }, "darwin"),
       getMultiplexerControlEndpoint({ dataDir: secondDir }, "darwin")
     );
+    assert.notStrictEqual(
+      getMultiplexerDaemonProcessName(firstDir),
+      getMultiplexerDaemonProcessName(secondDir)
+    );
   });
 
-  it("[v1 compatibility gate] keeps discovery endpoints stable", function () {
+  it("[v1 compatibility gate] keeps discovery endpoints and daemon marker stable", function () {
     assert.strictEqual(
       getMultiplexerControlEndpoint(
         { dataDir: "/Users/test/.Debug Router/mux_1" },
@@ -71,6 +103,16 @@ describe("multiplexer paths", function () {
         "win32"
       ),
       "\\\\.\\pipe\\C:\\Users\\tester\\mux"
+    );
+    assert.strictEqual(
+      getMultiplexerDaemonProcessName("/Users/test/.Debug Router/mux_1"),
+      "Users-test-DebugRouter-mux1-muxDaemon"
+    );
+    assert.strictEqual(
+      getMultiplexerDaemonProcessName(
+        "C:\\Users\\tester\\.DebugRouterConnector\\multiplexer"
+      ),
+      "CUserstesterDebugRouterConnectormultiplexer-muxDaemon"
     );
   });
 });
