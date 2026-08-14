@@ -15,9 +15,8 @@ import {
   MULTIPLEXER_PROTOCOL_VERSION,
   MultiplexerDebugInfo,
   MultiplexerRegisterRequest,
-  Snapshot,
   isControlEvent,
-  isControlRpcRequest,
+  isControlRpcParams,
   isControlRpcResponse,
   isMultiplexerHandshakeErrorResponse,
   isMultiplexerRegisterResponse,
@@ -67,7 +66,6 @@ export class MultiplexerDaemonClient {
   private unsubscribeTransportClose: (() => void) | undefined;
   private nextRpcId = 1;
   private connecting: Promise<void> | null = null;
-  private closed = false;
   private registered = false;
 
   constructor(option: MultiplexerDaemonClientOption) {
@@ -82,7 +80,7 @@ export class MultiplexerDaemonClient {
         }
       : undefined;
     this.now = option.now ?? Date.now;
-    this.daemonManager.setDaemonClient?.(this);
+    this.daemonManager.setDaemonClient(this);
   }
 
   get ready(): boolean {
@@ -93,6 +91,29 @@ export class MultiplexerDaemonClient {
     );
   }
 
+  async call<M extends ControlRpcMethod>(
+    method: M,
+    params: ControlRpcParams[M],
+    ensureDaemon: boolean = true,
+  ): Promise<ControlRpcResult[M]> {
+    this.assertValidRpcParams(method, params);
+    if (ensureDaemon) {
+      await this.connect();
+    } else if (!this.ready) {
+      await this.connectInternal(false);
+    }
+    return this.sendRpc(method, params);
+  }
+
+  private assertValidRpcParams<M extends ControlRpcMethod>(
+    method: M,
+    params: ControlRpcParams[M],
+  ): void {
+    if (!isControlRpcParams(method, params)) {
+      throw new Error(`Invalid multiplexer RPC ${method} params`);
+    }
+  }
+
   async connect(): Promise<void> {
     if (this.ready) {
       return;
@@ -101,34 +122,13 @@ export class MultiplexerDaemonClient {
       return this.connecting;
     }
 
-    this.closed = false;
     this.connecting = this.connectInternal(true).finally(() => {
       this.connecting = null;
     });
     return this.connecting;
   }
 
-  async call<M extends ControlRpcMethod>(
-    method: M,
-    params: ControlRpcParams[M],
-  ): Promise<ControlRpcResult[M]> {
-    this.assertValidRpcParams(method, params);
-    await this.connect();
-    return this.callConnected(method, params);
-  }
-
-  async callOnDaemon<M extends ControlRpcMethod>(
-    method: M,
-    params: ControlRpcParams[M],
-  ): Promise<ControlRpcResult[M]> {
-    this.assertValidRpcParams(method, params);
-    if (!this.ready) {
-      await this.connectInternal(false);
-    }
-    return this.callConnected(method, params);
-  }
-
-  private callConnected<M extends ControlRpcMethod>(
+  private sendRpc<M extends ControlRpcMethod>(
     method: M,
     params: ControlRpcParams[M],
   ): Promise<ControlRpcResult[M]> {
@@ -174,23 +174,6 @@ export class MultiplexerDaemonClient {
     });
   }
 
-  private assertValidRpcParams<M extends ControlRpcMethod>(
-    method: M,
-    params: ControlRpcParams[M],
-  ): void {
-    const debugInfo = this.createDebugInfo();
-    const request: ControlRpcRequest<M> = {
-      kind: "rpc",
-      id: 0,
-      method,
-      params,
-      ...(debugInfo ? { debugInfo } : {}),
-    };
-    if (!isControlRpcRequest(request)) {
-      throw new Error(`Invalid multiplexer RPC ${method} params`);
-    }
-  }
-
   subscribe(listener: (event: ControlEvent) => void): () => void {
     this.eventListener = listener;
     return () => {
@@ -207,25 +190,15 @@ export class MultiplexerDaemonClient {
     };
   }
 
+  private emitConnectionState(state: MultiplexerDaemonConnectionState): void {
+    this.connectionStateListener?.(state);
+  }
+
   async forceStopDaemon(): Promise<void> {
     await this.daemonManager.stopDaemonOnConnectorRequest();
   }
 
-  async close(): Promise<void> {
-    this.closed = true;
-    await this.closeSocket(new Error("Multiplexer remote client closed"));
-    this.eventListener = undefined;
-  }
-
-  handleSnapshot(snapshot: Snapshot): void {
-    this.handleHostEvent({ kind: "event", event: "snapshot", data: snapshot });
-  }
-
-  handleHostEvent(event: ControlEvent): void {
-    this.eventListener?.(event);
-  }
-
-  rejectPending(error: Error): void {
+  rejectAllPendingRpc(error: Error): void {
     for (const [id, pending] of Array.from(this.pendingRpc.entries())) {
       this.pendingRpc.delete(id);
       clearTimeout(pending.timer);
@@ -237,7 +210,6 @@ export class MultiplexerDaemonClient {
     if (this.controlTransport) {
       await this.closeSocket(
         new Error("Replacing multiplexer control socket"),
-        true,
         false,
       );
     }
@@ -315,6 +287,13 @@ export class MultiplexerDaemonClient {
     });
   }
 
+  private readonly handleTransportClose = (error?: Error): void => {
+    void this.closeSocket(
+      error ?? new Error("Multiplexer control socket closed"),
+      false,
+    );
+  };
+
   private readonly handleTransportMessage = (value: unknown): void => {
     if (isControlRpcResponse(value)) {
       this.handleRpcResponse(value);
@@ -325,13 +304,6 @@ export class MultiplexerDaemonClient {
       return;
     }
     this.reportUnknownControlMessage(value);
-  };
-
-  private readonly handleTransportClose = (error?: Error): void => {
-    void this.closeSocket(
-      error ?? new Error("Multiplexer control socket closed"),
-      false,
-    );
   };
 
   private handleRpcResponse(response: ControlRpcResponse): void {
@@ -358,9 +330,18 @@ export class MultiplexerDaemonClient {
     }
   }
 
+  handleHostEvent(event: ControlEvent): void {
+    this.eventListener?.(event);
+  }
+
+  async close(): Promise<void> {
+    await this.closeSocket(new Error("Multiplexer remote client closed"));
+    this.eventListener = undefined;
+    this.connectionStateListener = undefined;
+  }
+
   private async closeSocket(
     error: Error,
-    closeUnderlyingSocket: boolean = true,
     clearConnecting: boolean = true,
   ): Promise<void> {
     const transport = this.controlTransport;
@@ -373,20 +354,13 @@ export class MultiplexerDaemonClient {
     this.unsubscribeTransportClose?.();
     this.unsubscribeTransportMessage = undefined;
     this.unsubscribeTransportClose = undefined;
-    this.rejectPending(error);
+    this.rejectAllPendingRpc(error);
 
     if (!transport) {
       return;
     }
     this.emitConnectionState({ state: "disconnected", error });
-    if (!closeUnderlyingSocket) {
-      return;
-    }
     await transport.end();
-  }
-
-  private emitConnectionState(state: MultiplexerDaemonConnectionState): void {
-    this.connectionStateListener?.(state);
   }
 
   private createRpcId(): number {
@@ -412,7 +386,12 @@ export class MultiplexerDaemonClient {
   }
 
   private reportUnknownControlMessage(value: unknown): void {
-    const messageText = safeStringify(value);
+    let messageText: string;
+    try {
+      messageText = JSON.stringify(value) ?? String(value);
+    } catch (_error) {
+      messageText = String(value);
+    }
     const categories = {
       kind:
         isRecord(value) && typeof value.kind === "string"
@@ -424,7 +403,10 @@ export class MultiplexerDaemonClient {
           : undefined,
       id:
         isRecord(value) && typeof value.id === "number" ? value.id : undefined,
-      messagePreview: truncateMessage(messageText),
+      messagePreview:
+        messageText.length <= UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT
+          ? messageText
+          : `${messageText.slice(0, UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT)}...`,
     };
     defaultLogger.warn(
       `Unknown multiplexer control message: ${JSON.stringify(categories)}`,
@@ -450,18 +432,4 @@ function createRpcError(error: ControlRpcError): Error {
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
-}
-
-function safeStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? String(value);
-  } catch (_error) {
-    return String(value);
-  }
-}
-
-function truncateMessage(message: string): string {
-  return message.length <= UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT
-    ? message
-    : `${message.slice(0, UNKNOWN_CONTROL_MESSAGE_PREVIEW_LIMIT)}...`;
 }

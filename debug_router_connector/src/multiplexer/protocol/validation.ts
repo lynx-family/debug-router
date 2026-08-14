@@ -284,7 +284,7 @@ export function isControlEvent(value: unknown): value is ControlEvent {
   }
 }
 
-function isControlRpcParams(
+export function isControlRpcParams(
   method: ControlRpcMethod,
   params: unknown,
 ): boolean {

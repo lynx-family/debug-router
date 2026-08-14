@@ -192,7 +192,7 @@ When the daemon control socket disconnects, the facade clears local mirrors, rej
 
 ## 6. Daemon Discovery, Startup, and Replacement
 
-When `DebugRouterConnector` forwards some behavior to the daemon, it calls `MultiplexerDaemonClient.call()`. `MultiplexerDaemonClient.call()` validates the complete RPC request before connecting; `connect()` then obtains an available daemon through `MultiplexerDaemonManager.ensureDaemon()`.
+When `DebugRouterConnector` forwards some behavior to the daemon, it calls `MultiplexerDaemonClient.call()`. This method validates the method-specific RPC parameters and ensures an available daemon by default. Daemon replacement passes `ensureDaemon: false` to send the shutdown RPC without starting another daemon, while `sendRpc()` is the private send path after registration.
 
 `MultiplexerDaemonClient.connect()` owns connection idempotency through its in-flight `connecting` Promise. Manager does not keep a second `ensureDaemon()` Promise; one production facade constructs one DaemonClient and one Manager, while different facades coordinate daemon startup through `spawn.lock`.
 

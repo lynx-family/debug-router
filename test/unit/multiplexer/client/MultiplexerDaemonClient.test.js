@@ -122,9 +122,22 @@ describe("MultiplexerDaemonClient", function () {
     assert.strictEqual(client.pendingRpc.size, 0);
   });
 
+  it("rejects invalid RPC params before ensuring the daemon", async function () {
+    await start();
+    await assert.rejects(
+      () =>
+        client.call("startDeviceClientWatcher", {
+          deviceId: "",
+        }),
+      /Invalid multiplexer RPC startDeviceClientWatcher params/
+    );
+    assert.strictEqual(ensureCalls, 0);
+    assert.strictEqual(client.ready, false);
+  });
+
   it("uses direct Register/RPC for graceful shutdown without ensure", async function () {
     await start();
-    await client.callOnDaemon("shutdownDaemon", { reason: "test" });
+    await client.call("shutdownDaemon", { reason: "test" }, false);
     assert.strictEqual(ensureCalls, 0);
     assert.strictEqual(client.ready, true);
   });
@@ -132,7 +145,7 @@ describe("MultiplexerDaemonClient", function () {
   it("reuses a ready connection for direct daemon RPCs", async function () {
     await start();
     await client.connect();
-    await client.callOnDaemon("shutdownDaemon", { reason: "test" });
+    await client.call("shutdownDaemon", { reason: "test" }, false);
     assert.strictEqual(ensureCalls, 1);
     assert.deepStrictEqual(connectedIds, [1]);
     assert.strictEqual(client.ready, true);

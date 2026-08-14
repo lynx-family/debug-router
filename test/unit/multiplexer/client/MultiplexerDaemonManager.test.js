@@ -275,14 +275,18 @@ describe("MultiplexerDaemonManager", function () {
     const calls = [];
     const { manager } = createManager(tempDir, [replaceRequired(), usable()]);
     manager.setDaemonClient({
-      async callOnDaemon(method, params) {
-        calls.push([method, params]);
+      async call(method, params, ensureDaemon) {
+        calls.push([method, params, ensureDaemon]);
         return {};
       },
     });
     await manager.ensureDaemon();
     assert.deepStrictEqual(calls, [
-      ["shutdownDaemon", { reason: "daemon-protocol-older-than-connector" }],
+      [
+        "shutdownDaemon",
+        { reason: "daemon-protocol-older-than-connector" },
+        false,
+      ],
     ]);
   });
 
@@ -292,8 +296,8 @@ describe("MultiplexerDaemonManager", function () {
     const { manager } = createManager(tempDir, [usable()]);
     const calls = [];
     manager.setDaemonClient({
-      async callOnDaemon(method, params) {
-        calls.push([method, params]);
+      async call(method, params, ensureDaemon) {
+        calls.push([method, params, ensureDaemon]);
         return {};
       },
     });
@@ -307,7 +311,7 @@ describe("MultiplexerDaemonManager", function () {
     }
 
     assert.deepStrictEqual(calls, [
-      ["shutdownDaemon", { reason: "force-stop" }],
+      ["shutdownDaemon", { reason: "force-stop" }, false],
     ]);
     assert.strictEqual(errors.length, 1);
     assert.ok(errors[0].includes(manager.daemonProcessName));

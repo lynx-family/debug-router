@@ -45,9 +45,10 @@ export type MultiplexerDaemonSpawn = (
 ) => SpawnedDaemonProcess;
 
 type MultiplexerDaemonControlClient = {
-  callOnDaemon(
+  call(
     method: "shutdownDaemon",
     params: { reason?: string },
+    ensureDaemon?: boolean,
   ): Promise<unknown>;
 };
 
@@ -305,7 +306,7 @@ export class MultiplexerDaemonManager {
     if (!this.daemonClient) {
       return Promise.resolve(false);
     }
-    return this.daemonClient.callOnDaemon("shutdownDaemon", { reason }).then(
+    return this.daemonClient.call("shutdownDaemon", { reason }, false).then(
       () => true,
       () => false,
     );

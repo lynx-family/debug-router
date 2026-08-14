@@ -34,6 +34,7 @@ export {
   isControlEvent,
   isMultiplexerDebugInfo,
   isControlRpcMethod,
+  isControlRpcParams,
   isControlRpcRequest,
   isControlRpcResponse,
   isDeviceSnapshot,
