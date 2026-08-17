@@ -196,27 +196,26 @@ When `DebugRouterConnector` forwards some behavior to the daemon, it calls `Mult
 
 `MultiplexerDaemonClient.connect()` owns connection idempotency through its in-flight `connecting` Promise. Manager does not keep a second `ensureDaemon()` Promise; one production facade constructs one DaemonClient and one Manager, while different facades coordinate daemon startup through `spawn.lock`.
 
-`MultiplexerDiscovery.probeHealth()` opens the fixed endpoint, sends a framed `{ kind: "health" }` first message, validates the framed `health-response`, and compares protocol versions. A normal health response contains only `kind`, `ok`, `protocolVersion`, and `minSupportedProtocolVersion`; optional `debugInfo` remains diagnostic and is not used for cleanup or feature detection.
+`MultiplexerDiscovery.probeHealth()` opens the fixed endpoint, sends a framed `{ kind: "health" }` first message, validates the framed `health-response`, and compares protocol versions. A normal health response contains `kind`, `ok`, `protocolVersion`, and `isInUse`; optional `debugInfo` remains diagnostic and is not used for cleanup or feature detection. `isInUse` follows the daemon idle-consumer definition: it is true when at least one registered Connector control client or Driver WebSocket frontend is connected. The temporary Health socket and WiFi runtime/app connections do not count.
 
 Current default protocol constants:
 
 ```text
 MULTIPLEXER_PROTOCOL_VERSION = 1
-MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION = 1
 ```
 
 `MultiplexerDaemonManager` handles validation results as follows:
 
 - `usable`: reuse immediately.
-- `replace-required`: acquire `spawn.lock`, locate the marked daemon process, and request graceful shutdown through `shutdownDaemon`; if that same process does not exit, try SIGTERM/SIGKILL; then clean the stale Unix socket and start a new daemon.
-- connector protocol too old: throw an upgrade error. Do not clean up or kill the newer daemon.
+- `replace-required`: the daemon protocol is older and `isInUse` is false. Acquire `spawn.lock`, locate the marked daemon process, and request graceful shutdown through `shutdownDaemon`; if that same process does not exit, try SIGTERM/SIGKILL; then clean the stale Unix socket and start a new daemon.
+- `daemon-upgrade-blocked-by-active-connections`: the daemon protocol is older but `isInUse` is true. Throw an error without acquiring `spawn.lock`, stopping the daemon, or replacing it.
 - `unreachable`, `timeout`, `invalid-frame`, or `invalid-response`: acquire `spawn.lock`, locate the first process carrying the current data directory's daemon marker, stop it when still alive, clean the Unix socket, and spawn.
 
-The initial health check is followed by up to three delayed retries for all four transient/unusable health outcomes. `usable`, `replace-required`, and connector-too-old return immediately. In the normal ensure path, once `spawn.lock` is acquired, the manager does not probe again; the window after the initial probe is deliberately kept simple.
+The initial health check is followed by up to three delayed retries for all four transient/unusable health outcomes. `usable`, `replace-required`, and `daemon-upgrade-blocked-by-active-connections` return immediately. In the normal ensure path, once `spawn.lock` is acquired, the manager does not probe again; the window after the initial probe is deliberately kept simple.
 
 If the current Manager acquires `spawn.lock`, it owns the cleanup and spawn attempt. A subsequent `waitUntilReady()` failure therefore means the daemon it spawned did not become reusable, so the detailed error, including the last validation and last health error, is propagated to the caller.
 
-If another Connector owns `spawn.lock`, the current Manager calls `waitUntilReady()` only to observe that Connector's startup. This method is already a polling loop, so each iteration calls `probeHealth()` directly rather than nesting the three-retry helper. It exits early for usable, replacement-required, or connector-too-old. If the wait fails, `ensureDaemon()` does not expose that error; it restarts discovery and competes for `spawn.lock` again. The other Connector may still be replacing the daemon or may have started an unavailable or lower-version daemon, in which case the current Manager should get an opportunity to acquire the lock and perform its own replacement before reporting failure.
+If another Connector owns `spawn.lock`, the current Manager immediately returns to the outer `ensureDaemon()` loop without calling `waitUntilReady()`. The next `probeDaemonHealthWithRetry()` observes the other Manager's startup and already provides a short bounded retry window before another lock attempt. This keeps readiness polling in one place. An active older daemon remains a terminal result and is reported without replacement.
 
 Important defaults:
 
@@ -228,7 +227,7 @@ healthCheckTimeout = 500ms
 spawnLockStaleTimeout = startupTimeout + replacementTimeout + 1000ms
 ```
 
-Manager starts `multiplexer/daemon/entry.js` as a detached child process. A process marker derived from the Multiplexer data directory lets Manager identify the daemon during replacement or stale cleanup, but it is not part of the daemon's runtime protocol or Host configuration. Entry receives only the configuration required to construct Host, such as the control endpoint, protocol range, physical connection options, WebSocket settings, trace settings, and idle policy.
+Manager starts `multiplexer/daemon/entry.js` as a detached child process. A process marker derived from the Multiplexer data directory lets Manager identify the daemon during replacement or stale cleanup, but it is not part of the daemon's runtime protocol or Host configuration. Entry receives only the configuration required to construct Host, such as the control endpoint, protocol version, physical connection options, WebSocket settings, trace settings, and idle policy.
 
 ## 7. Daemon Process and Host
 
@@ -442,7 +441,7 @@ type MultiplexerDebugInfo = {
 
 Every field is optional and diagnostic only. `processId` identifies the process that generated the context, and `timestamp` is its Unix timestamp in milliseconds. Ordinary `DebugRouterConnector` construction does not configure this context, so normal protocol messages omit `debugInfo`; internal embedding and tests can opt in, after which producers add current process and timestamp information. Consumers must not use `debugInfo` for feature detection or compatibility decisions.
 
-The former `capabilities` field is removed. Actual compatibility arbitration uses the required top-level `protocolVersion` and `minSupportedProtocolVersion` in `health-response`. A normal health response carries no pid or instance token. Version strings used only for troubleshooting remain inside `MultiplexerDebugInfo` rather than appearing as standalone protocol fields.
+Actual compatibility arbitration uses the required top-level `protocolVersion` in `health-response`. A normal health response carries no pid or instance token. Version strings used only for troubleshooting remain inside `MultiplexerDebugInfo` rather than appearing as standalone protocol fields.
 
 ### 8.6 Connection Trace Is Not a Control Protocol
 
@@ -792,7 +791,7 @@ If `multiplexerDaemonIdleTimeout` is negative, non-finite, or not configured in 
 
 ### 13.3 Daemon Replacement/Yield
 
-When a connector finds an outdated or unhealthy daemon that must be replaced, Manager identifies the process through the data directory's daemon marker and requests graceful shutdown through the control protocol when possible. Host forwards that request to entry; entry stops Host-owned resources and exits the process. If graceful shutdown cannot complete, Manager falls back to process-level termination and stale endpoint cleanup. This flow does not rely on a daemon-owned discovery or lock file.
+When a connector finds an idle outdated daemon or an unhealthy daemon that must be replaced, Manager identifies the process through the data directory's daemon marker and requests graceful shutdown through the control protocol when possible. Host forwards that request to entry; entry stops Host-owned resources and exits the process. If graceful shutdown cannot complete, Manager falls back to process-level termination and stale endpoint cleanup. An outdated daemon with an active Connector or Driver frontend is not stopped automatically. This flow does not rely on a daemon-owned discovery or lock file.
 
 ### 13.4 Unknown Response ID
 
@@ -826,9 +825,9 @@ The public facade no longer treats `enableMultiplexer`, `enableProxy`, `proxyDae
 Protocol compatibility rules:
 
 1. `daemon.protocolVersion === connector.protocolVersion`: reuse directly.
-2. `daemon.protocolVersion > connector.protocolVersion` and `connector.protocolVersion >= daemon.minSupportedProtocolVersion`: reuse the newer daemon; old connector only calls RPCs and events it knows.
-3. `connector.protocolVersion < daemon.minSupportedProtocolVersion`: connector rejects connection and asks for upgrade. It does not clean up the newer daemon.
-4. `daemon.protocolVersion < connector.protocolVersion`: connector treats daemon as outdated and runs replacement.
+2. `daemon.protocolVersion > connector.protocolVersion`: reuse the newer daemon; the Connector only calls RPCs and events it knows.
+3. `daemon.protocolVersion < connector.protocolVersion` and `daemon.isInUse === false`: connector treats the daemon as outdated and runs replacement.
+4. `daemon.protocolVersion < connector.protocolVersion` and `daemon.isInUse === true`: connector reports that active connections block the upgrade and leaves the daemon running.
 
 ## 15. Typical Flows
 

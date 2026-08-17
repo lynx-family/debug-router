@@ -26,7 +26,6 @@ const {
   isControlEvent,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol/validation");
 const {
-  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
   MULTIPLEXER_PROTOCOL_VERSION,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol");
 
@@ -514,9 +513,6 @@ function createHost(options = {}) {
   const host = new MultiplexerDaemonHost({
     physicalConnector: physical,
     protocolVersion: options.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
-    minSupportedProtocolVersion:
-      options.minSupportedProtocolVersion ??
-      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
     debugInfo: options.debugInfo,
     controlEndpoint:
       options.controlEndpoint ?? "/tmp/debug-router-host-control.sock",
@@ -710,7 +706,6 @@ describe("MultiplexerDaemonHost", function () {
       PhysicalConnectorCtor,
       controlEndpoint: "/tmp/debug-router-host-control.sock",
       protocolVersion: 3,
-      minSupportedProtocolVersion: 2,
       connectionTrace: {
         enabled: true,
         output: { write() {} },
@@ -790,7 +785,6 @@ describe("MultiplexerDaemonHost", function () {
     const trace = [];
     const { host } = createHost({
       protocolVersion: 3,
-      minSupportedProtocolVersion: 2,
       debugInfo: {
         daemonVersion: "0.0.3",
       },
@@ -806,8 +800,11 @@ describe("MultiplexerDaemonHost", function () {
 
     try {
       await host.start();
+      assert.strictEqual(host.isInUse(), false);
       host.handleControlConnected(7);
+      assert.strictEqual(host.isInUse(), true);
       host.handleControlDisconnected(7);
+      assert.strictEqual(host.isInUse(), false);
       await host.stop();
       await host.stop();
 
@@ -825,7 +822,6 @@ describe("MultiplexerDaemonHost", function () {
         pid: process.pid,
         controlEndpoint: "/tmp/debug-router-host-control.sock",
         protocolVersion: 3,
-        minSupportedProtocolVersion: 2,
         debugInfo: {
           protocolVersion: 3,
           daemonVersion: "0.0.3",
@@ -2367,6 +2363,7 @@ describe("MultiplexerDaemonHost", function () {
     host.emit("websocket-app-client-connected", runtime);
     host.handleWebSocketClientConnected(91, "runtime");
     assert.strictEqual(host.isIdle(), true);
+    assert.strictEqual(host.isInUse(), false);
     host.emit("websocket-web-client-connected", driver);
     host.handleWebSocketClientConnected(92, "Driver");
 
@@ -2380,6 +2377,7 @@ describe("MultiplexerDaemonHost", function () {
       [92]
     );
     assert.strictEqual(host.isIdle(), false);
+    assert.strictEqual(host.isInUse(), true);
     assert.deepStrictEqual(controlServer.broadcasts, []);
     assert.deepStrictEqual(
       controlServer.targeted.map(({ controlId, event }) => [

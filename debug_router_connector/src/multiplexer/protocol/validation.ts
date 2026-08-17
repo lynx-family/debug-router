@@ -185,7 +185,7 @@ export function isMultiplexerHealthResponse(
     value.kind === "health-response" &&
     value.ok === true &&
     isNumber(value.protocolVersion) &&
-    isNumber(value.minSupportedProtocolVersion) &&
+    isBoolean(value.isInUse) &&
     isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
 }

@@ -492,7 +492,6 @@ async function main() {
   const host = new MultiplexerDaemonHost({
     controlEndpoint: entryOption.controlEndpoint,
     protocolVersion: entryOption.protocolVersion,
-    minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
     debugInfo: entryOption.debugInfo,
     legacyDriverDir: entryOption.legacyDriverDir,
     multiplexerDaemonIdleTimeout: entryOption.multiplexerDaemonIdleTimeout,
@@ -619,7 +618,6 @@ async function main() {
     at: Date.now(),
     controlEndpoint: entryOption.controlEndpoint,
     protocolVersion: entryOption.protocolVersion,
-    minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
     debugInfo: entryOption.debugInfo,
   });
 }

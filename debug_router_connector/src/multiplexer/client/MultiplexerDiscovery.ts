@@ -42,9 +42,8 @@ export type MultiplexerDiscoveryValidation =
     }
   | {
       status: "unusable";
-      reason: "connector-protocol-too-old";
+      reason: "daemon-upgrade-blocked-by-active-connections";
       daemonProtocolVersion: number;
-      daemonMinSupportedProtocolVersion: number;
       connectorProtocolVersion: number;
     }
   | {
@@ -141,17 +140,15 @@ export class MultiplexerDiscovery {
   compareProtocolVersion(
     response: MultiplexerHealthResponse,
   ): MultiplexerDiscoveryValidation {
-    if (this.localProtocolVersion < response.minSupportedProtocolVersion) {
-      return {
-        status: "unusable",
-        reason: "connector-protocol-too-old",
-        daemonProtocolVersion: response.protocolVersion,
-        daemonMinSupportedProtocolVersion: response.minSupportedProtocolVersion,
-        connectorProtocolVersion: this.localProtocolVersion,
-      };
-    }
-
     if (response.protocolVersion < this.localProtocolVersion) {
+      if (response.isInUse) {
+        return {
+          status: "unusable",
+          reason: "daemon-upgrade-blocked-by-active-connections",
+          daemonProtocolVersion: response.protocolVersion,
+          connectorProtocolVersion: this.localProtocolVersion,
+        };
+      }
       return {
         status: "replace-required",
         reason: "daemon-older-than-connector",

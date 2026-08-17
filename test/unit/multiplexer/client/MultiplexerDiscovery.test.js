@@ -14,7 +14,7 @@ const v1HealthResponse = {
   kind: "health-response",
   ok: true,
   protocolVersion: 1,
-  minSupportedProtocolVersion: 1,
+  isInUse: false,
 };
 
 const {
@@ -125,8 +125,7 @@ describe("MultiplexerDiscovery", function () {
                 kind: "health-response",
                 ok: true,
                 protocolVersion: option.protocolVersion ?? 1,
-                minSupportedProtocolVersion:
-                  option.minSupportedProtocolVersion ?? 1,
+                isInUse: option.isInUse ?? false,
               }
             )
           );
@@ -164,11 +163,10 @@ describe("MultiplexerDiscovery", function () {
     assert.deepStrictEqual(context.requests, [v1HealthRequest]);
   });
 
-  it("[v1 compatibility gate] lets a v1 connector reuse a daemon advertising v1 support", async function () {
+  it("[v1 compatibility gate] lets a v1 connector reuse a newer daemon", async function () {
     const context = await startServer({
       expectedRequest: v1HealthRequest,
       protocolVersion: 2,
-      minSupportedProtocolVersion: 1,
     });
     const result = await new MultiplexerDiscovery({
       controlEndpoint: context.endpoint,
@@ -182,7 +180,6 @@ describe("MultiplexerDiscovery", function () {
   it("requires replacement for an older daemon", async function () {
     const context = await startServer({
       protocolVersion: 0,
-      minSupportedProtocolVersion: 0,
     });
     const result = await new MultiplexerDiscovery({
       controlEndpoint: context.endpoint,
@@ -191,17 +188,21 @@ describe("MultiplexerDiscovery", function () {
     assert.strictEqual(result.status, "replace-required");
   });
 
-  it("rejects a connector below the daemon minimum", async function () {
+  it("rejects replacement when an older daemon is in use", async function () {
     const context = await startServer({
-      protocolVersion: 2,
-      minSupportedProtocolVersion: 2,
+      protocolVersion: 0,
+      isInUse: true,
     });
     const result = await new MultiplexerDiscovery({
       controlEndpoint: context.endpoint,
       localProtocolVersion: 1,
     }).probeHealth();
-    assert.strictEqual(result.status, "unusable");
-    assert.strictEqual(result.reason, "connector-protocol-too-old");
+    assert.deepStrictEqual(result, {
+      status: "unusable",
+      reason: "daemon-upgrade-blocked-by-active-connections",
+      daemonProtocolVersion: 0,
+      connectorProtocolVersion: 1,
+    });
   });
 
   it("reports unreachable and timeout endpoints", async function () {

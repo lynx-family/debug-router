@@ -91,7 +91,6 @@ export type MultiplexerDaemonHostOption = {
   connectionTrace?: ConnectionTraceOptions;
   controlEndpoint: string;
   protocolVersion: number;
-  minSupportedProtocolVersion: number;
   debugInfo?: MultiplexerDebugInfo;
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
@@ -116,7 +115,6 @@ export class MultiplexerDaemonHost {
   private connectionTraceRecorderClosed = false;
   private readonly option: MultiplexerDaemonHostOption;
   private readonly protocolVersion: number;
-  private readonly minSupportedProtocolVersion: number;
   private readonly now: () => number;
   private readonly pendingRoutes: PendingRouteTable;
   private readonly memoizedNotificationQueryTable: MemoizedNotificationQueryTable;
@@ -241,7 +239,6 @@ export class MultiplexerDaemonHost {
   constructor(option: MultiplexerDaemonHostOption) {
     this.option = option;
     this.protocolVersion = option.protocolVersion;
-    this.minSupportedProtocolVersion = option.minSupportedProtocolVersion;
     this.now = option.now ?? Date.now;
     this.pendingRoutes = new PendingRouteTable({
       now: this.now,
@@ -278,7 +275,6 @@ export class MultiplexerDaemonHost {
       host: this,
       controlEndpoint: this.option.controlEndpoint,
       protocolVersion: this.protocolVersion,
-      minSupportedProtocolVersion: this.minSupportedProtocolVersion,
       ...(this.option.debugInfo ? { debugInfo: this.option.debugInfo } : {}),
       now: this.now,
     });
@@ -293,7 +289,6 @@ export class MultiplexerDaemonHost {
         pid: process.pid,
         controlEndpoint: controlServer.controlEndpoint,
         protocolVersion: this.protocolVersion,
-        minSupportedProtocolVersion: this.minSupportedProtocolVersion,
         ...(debugInfo ? { debugInfo } : {}),
       });
       this.legacyOwnershipGuard.start();
@@ -412,6 +407,12 @@ export class MultiplexerDaemonHost {
       new Error(`Multiplexer control ${controlId} disconnected`),
     );
     this.scheduleIdleTimeoutIfNeeded();
+  }
+
+  isInUse(): boolean {
+    return (
+      this.activeControlIds.size > 0 || this.activeWebSocketDriverIds.size > 0
+    );
   }
 
   async handleControlRpc(
@@ -1648,10 +1649,7 @@ export class MultiplexerDaemonHost {
   }
 
   private isIdle(): boolean {
-    return (
-      this.activeControlIds.size === 0 &&
-      this.activeWebSocketDriverIds.size === 0
-    );
+    return !this.isInUse();
   }
 
   private getIdleTimeout(): number | undefined {

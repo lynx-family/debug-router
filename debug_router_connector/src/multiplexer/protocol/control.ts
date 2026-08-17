@@ -7,7 +7,6 @@ import type { RequireMessageType, ResponseMessageType } from "../../utils/type";
 import type { MultiplexerDebugInfo } from "./debuginfo";
 
 export const MULTIPLEXER_PROTOCOL_VERSION = 1;
-export const MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION = 1;
 
 export type MultiplexerHealthRequest = {
   kind: "health";
@@ -15,12 +14,11 @@ export type MultiplexerHealthRequest = {
 };
 
 // protocolVersion is used for version arbitration when connecting to the Multiplexer daemon.
-// minSupportedProtocolVersion is used to check if the Multiplexer daemon supports the protocol version.
 export type MultiplexerHealthResponse = {
   kind: "health-response";
   ok: true;
   protocolVersion: number;
-  minSupportedProtocolVersion: number;
+  isInUse: boolean;
   debugInfo?: MultiplexerDebugInfo;
 };
 

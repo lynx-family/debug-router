@@ -589,12 +589,22 @@ async function runCompatibilityUpgradeFlow() {
   });
 
   try {
-    const v1 = createVersionedControl(context, "connector-v1", 1, 1);
+    const v1 = createVersionedControl(context, "connector-v1", 1);
     await connectRuntime(v1.client);
     const daemonV1 = await waitForDiscoveryProtocol(context, 1);
     assert.strictEqual(daemonV1.debugInfo.daemonVersion, "connector-v1");
 
-    const v2 = createVersionedControl(context, "connector-v2", 2, 1);
+    const v2 = createVersionedControl(context, "connector-v2", 2);
+    await assert.rejects(
+      () => connectRuntime(v2.client),
+      /daemon is still in use by a connector or WebSocket frontend/
+    );
+    assert.strictEqual(
+      (await waitForDiscoveryProtocol(context, 1)).pid,
+      daemonV1.pid
+    );
+
+    await v1.client.close();
     await connectRuntime(v2.client);
     const daemonV2 = await waitForDiscoveryProtocol(context, 2);
     assert.notStrictEqual(daemonV2.pid, daemonV1.pid);
@@ -609,7 +619,18 @@ async function runCompatibilityUpgradeFlow() {
     await connectRuntime(v1.client);
     await connectRuntime(v2.client);
 
-    const v3 = createVersionedControl(context, "connector-v3", 3, 2);
+    const v3 = createVersionedControl(context, "connector-v3", 3);
+    await assert.rejects(
+      () => connectRuntime(v3.client),
+      /daemon is still in use by a connector or WebSocket frontend/
+    );
+    assert.strictEqual(
+      (await waitForDiscoveryProtocol(context, 2)).pid,
+      daemonV2.pid
+    );
+
+    await v1.client.close();
+    await v2.client.close();
     await connectRuntime(v3.client);
     const daemonV3 = await waitForDiscoveryProtocol(context, 3);
     assert.notStrictEqual(daemonV3.pid, daemonV2.pid);
@@ -620,10 +641,7 @@ async function runCompatibilityUpgradeFlow() {
       "v2 daemon replaced"
     );
 
-    await assert.rejects(
-      () => reconnectDaemonClient(v1.client),
-      /requires debug-router-connector protocol 2 or newer/i
-    );
+    await reconnectDaemonClient(v1.client);
     await reconnectDaemonClient(v2.client);
     await reconnectDaemonClient(v3.client);
     await connectRuntime(v2.client);
@@ -654,12 +672,7 @@ async function runCompatibilityUpgradeFlow() {
   }
 }
 
-function createVersionedControl(
-  context,
-  name,
-  protocolVersion,
-  minSupportedVersion
-) {
+function createVersionedControl(context, name, protocolVersion) {
   const discovery = new MultiplexerDiscovery({
     controlEndpoint: context.paths.controlEndpoint,
     localProtocolVersion: protocolVersion,
@@ -674,7 +687,6 @@ function createVersionedControl(
     readyPollInterval: 10,
     replacementTimeout: 50,
     localProtocolVersion: protocolVersion,
-    minSupportedProtocolVersion: minSupportedVersion,
     debugInfo: {
       daemonVersion: name,
     },

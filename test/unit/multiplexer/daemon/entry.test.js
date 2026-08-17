@@ -78,7 +78,6 @@ function createOption(tempDir, overrides = {}) {
     controlEndpoint:
       overrides.controlEndpoint ?? path.join(tempDir, "control.sock"),
     protocolVersion: overrides.protocolVersion ?? 1,
-    minSupportedProtocolVersion: overrides.minSupportedProtocolVersion ?? 1,
     ...overrides,
   };
 }
@@ -120,15 +119,12 @@ describe("multiplexer daemon entry", function () {
         "/tmp/control.sock",
         "--protocol-version",
         "1",
-        "--min-supported-protocol-version",
-        "1",
         "--debug-info",
         '{"daemonVersion":"1.2.3"}',
       ]),
       {
         controlEndpoint: "/tmp/control.sock",
         protocolVersion: 1,
-        minSupportedProtocolVersion: 1,
         debugInfo: { daemonVersion: "1.2.3" },
       }
     );
@@ -139,8 +135,6 @@ describe("multiplexer daemon entry", function () {
       "--control-endpoint",
       "/tmp/control.sock",
       "--protocol-version",
-      "2",
-      "--min-supported-protocol-version",
       "2",
       "--legacy-driver-dir",
       "/tmp/legacy",
@@ -160,7 +154,6 @@ describe("multiplexer daemon entry", function () {
     assert.deepStrictEqual(option, {
       controlEndpoint: "/tmp/control.sock",
       protocolVersion: 2,
-      minSupportedProtocolVersion: 2,
       legacyDriverDir: "/tmp/legacy",
       multiplexerDaemonIdleTimeout: 50,
       enableWebSocket: true,
@@ -170,7 +163,7 @@ describe("multiplexer daemon entry", function () {
     });
   });
 
-  it("rejects removed discovery/data-dir/lock args and missing endpoint", function () {
+  it("rejects removed daemon args and missing endpoint", function () {
     assert.throws(
       () => parseEntryOption(["--discovery-path", "/tmp/daemon.json"]),
       /Unknown multiplexer daemon option: discovery-path/
@@ -207,8 +200,6 @@ describe("multiplexer daemon entry", function () {
       "/tmp/control.sock",
       "--protocol-version",
       "1",
-      "--min-supported-protocol-version",
-      "1",
     ];
     assert.throws(() => parseEntryOption([...base, "--debug-info", "{"]));
     assert.throws(
@@ -226,7 +217,6 @@ describe("multiplexer daemon entry", function () {
     try {
       const option = createOption(tempDir, {
         protocolVersion: 3,
-        minSupportedProtocolVersion: 2,
         debugInfo: { daemonVersion: "3" },
         enableWebSocket: true,
         physicalConnectorOption: { enableAndroid: true },
@@ -236,7 +226,6 @@ describe("multiplexer daemon entry", function () {
       assert.deepStrictEqual(FakeDaemonHost.instances[0].option, {
         controlEndpoint: option.controlEndpoint,
         protocolVersion: 3,
-        minSupportedProtocolVersion: 2,
         debugInfo: { daemonVersion: "3" },
         enableWebSocket: true,
         physicalConnectorOption: { enableAndroid: true },
@@ -267,8 +256,6 @@ describe("multiplexer daemon entry", function () {
         option.controlEndpoint,
         "--protocol-version",
         String(option.protocolVersion),
-        "--min-supported-protocol-version",
-        String(option.minSupportedProtocolVersion),
       ]);
       assert.strictEqual(host, FakeDaemonHost.instances[0]);
       assert.strictEqual(FakeDaemonHost.instances[0].startCalls, 1);
@@ -307,8 +294,6 @@ describe("multiplexer daemon entry", function () {
             option.controlEndpoint,
             "--protocol-version",
             String(option.protocolVersion),
-            "--min-supported-protocol-version",
-            String(option.minSupportedProtocolVersion),
           ]);
 
           await (kind === "idle" ? host.idleHandler() : host.shutdownHandler());
@@ -338,8 +323,6 @@ describe("multiplexer daemon entry", function () {
         option.controlEndpoint,
         "--protocol-version",
         String(option.protocolVersion),
-        "--min-supported-protocol-version",
-        String(option.minSupportedProtocolVersion),
       ]);
 
       await host.idleHandler();
@@ -367,8 +350,6 @@ describe("multiplexer daemon entry", function () {
             option.controlEndpoint,
             "--protocol-version",
             String(option.protocolVersion),
-            "--min-supported-protocol-version",
-            String(option.minSupportedProtocolVersion),
           ]),
         /entry host failed/
       );

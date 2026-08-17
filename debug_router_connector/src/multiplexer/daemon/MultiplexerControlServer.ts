@@ -20,6 +20,7 @@ import { MultiplexerControlTransport } from "../transport/MultiplexerControlTran
 import { MultiplexerControlConnection } from "./MultiplexerControlConnection";
 
 export type MultiplexerControlHost = {
+  isInUse: () => boolean;
   handleControlRpc: (
     controlId: number,
     message: ControlRpcRequest,
@@ -32,7 +33,6 @@ export type MultiplexerControlServerOption = {
   host: MultiplexerControlHost;
   controlEndpoint: string;
   protocolVersion: number;
-  minSupportedProtocolVersion: number;
   debugInfo?: MultiplexerDebugInfo;
 
   // only used for testing or embedding
@@ -179,7 +179,7 @@ export class MultiplexerControlServer {
           kind: "health-response",
           ok: true,
           protocolVersion: this.option.protocolVersion,
-          minSupportedProtocolVersion: this.option.minSupportedProtocolVersion,
+          isInUse: this.host.isInUse(),
           ...(debugInfo ? { debugInfo } : {}),
         };
         transport.send(response);

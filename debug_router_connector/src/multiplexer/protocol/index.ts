@@ -17,10 +17,7 @@ export type {
   WebSocketServerInfo,
 } from "./control";
 export type { MultiplexerDebugInfo } from "./debuginfo";
-export {
-  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
-  MULTIPLEXER_PROTOCOL_VERSION,
-} from "./control";
+export { MULTIPLEXER_PROTOCOL_VERSION } from "./control";
 export type { ControlEvent, ControlEventEnvelope } from "./event";
 export type {
   ClientSnapshot,

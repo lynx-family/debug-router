@@ -195,7 +195,7 @@ export class MultiplexerDaemonClient {
   }
 
   async forceStopDaemon(): Promise<void> {
-    await this.daemonManager.stopDaemonOnConnectorRequest();
+    await this.daemonManager.stopDaemonForDebugging();
   }
 
   rejectAllPendingRpc(error: Error): void {

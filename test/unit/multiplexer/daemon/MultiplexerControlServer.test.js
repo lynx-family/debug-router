@@ -46,6 +46,7 @@ describe("MultiplexerControlServer", function () {
   let connected;
   let disconnected;
   let rpcCalls;
+  let daemonInUse;
 
   beforeEach(function () {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-server-"));
@@ -53,13 +54,16 @@ describe("MultiplexerControlServer", function () {
     connected = [];
     disconnected = [];
     rpcCalls = [];
+    daemonInUse = false;
     server = new MultiplexerControlServer({
       controlEndpoint: endpoint,
       protocolVersion: 2,
-      minSupportedProtocolVersion: 1,
       debugInfo: { daemonVersion: "test" },
       now: () => 1234,
       host: {
+        isInUse() {
+          return daemonInUse;
+        },
         handleControlConnected(id) {
           connected.push(id);
         },
@@ -92,7 +96,7 @@ describe("MultiplexerControlServer", function () {
       kind: "health-response",
       ok: true,
       protocolVersion: 2,
-      minSupportedProtocolVersion: 1,
+      isInUse: false,
       debugInfo: {
         daemonVersion: "test",
         protocolVersion: 2,
@@ -118,6 +122,18 @@ describe("MultiplexerControlServer", function () {
           "First control message must be a valid health or register request",
       },
     });
+    assert.deepStrictEqual(connected, []);
+    assert.strictEqual(server.connections.size, 0);
+  });
+
+  it("reports whether the daemon has an active consumer", async function () {
+    daemonInUse = true;
+    await server.start();
+    const transport = await connectTransport(endpoint);
+    const responsePromise = waitForMessage(transport);
+    transport.send({ kind: "health" });
+
+    assert.strictEqual((await responsePromise).isInUse, true);
     assert.deepStrictEqual(connected, []);
     assert.strictEqual(server.connections.size, 0);
   });

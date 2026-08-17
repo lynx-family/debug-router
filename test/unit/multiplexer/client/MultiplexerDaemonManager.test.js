@@ -17,12 +17,12 @@ const {
   defaultLogger,
 } = require("../../../../debug_router_connector/dist/cjs/src/utils/logger");
 
-function response(protocolVersion = 1, minSupportedProtocolVersion = 1) {
+function response(protocolVersion = 1) {
   return {
     kind: "health-response",
     ok: true,
     protocolVersion,
-    minSupportedProtocolVersion,
+    isInUse: false,
   };
 }
 
@@ -48,12 +48,11 @@ function replaceRequired() {
   };
 }
 
-function connectorTooOld() {
+function olderDaemonInUse() {
   return {
     status: "unusable",
-    reason: "connector-protocol-too-old",
-    daemonProtocolVersion: 2,
-    daemonMinSupportedProtocolVersion: 2,
+    reason: "daemon-upgrade-blocked-by-active-connections",
+    daemonProtocolVersion: 0,
     connectorProtocolVersion: 1,
   };
 }
@@ -94,7 +93,6 @@ function createManager(tempDir, values, overrides = {}) {
     readyPollInterval: 10,
     replacementTimeout: 20,
     localProtocolVersion: 1,
-    minSupportedProtocolVersion: 1,
     debugInfo: overrides.debugInfo,
     legacyDriverDir: overrides.legacyDriverDir,
     spawn(command, args, options) {
@@ -141,7 +139,7 @@ describe("MultiplexerDaemonManager", function () {
     ]);
     const { manager, spawnCalls } = createManager(tempDir, [], { discovery });
 
-    await manager.stopDaemonOnConnectorRequest();
+    await manager.stopDaemonForDebugging();
     assert.deepStrictEqual(spawnCalls, []);
     assert.strictEqual(fs.existsSync(spawnLockPath), false);
   });
@@ -172,10 +170,6 @@ describe("MultiplexerDaemonManager", function () {
       getArgumentValue(spawnCalls[0].args, "--protocol-version"),
       "1"
     );
-    assert.strictEqual(
-      getArgumentValue(spawnCalls[0].args, "--min-supported-protocol-version"),
-      "1"
-    );
     assert.strictEqual(spawnCalls[0].options.argv0, manager.daemonProcessName);
     assert.strictEqual(spawnCalls[0].unref, true);
   });
@@ -190,30 +184,23 @@ describe("MultiplexerDaemonManager", function () {
     assert.deepStrictEqual(spawnCalls, []);
   });
 
-  it("waits for the lock owner daemon instead of spawning concurrently", async function () {
-    const { manager, spawnCalls } = createManager(tempDir, [
+  it("retries discovery without waiting when another manager owns spawn.lock", async function () {
+    const { manager, discovery, spawnCalls } = createManager(tempDir, [
       replaceRequired(),
       usable(),
     ]);
+    manager.waitUntilReady = async () => {
+      throw new Error("waitUntilReady must not run without spawn.lock");
+    };
     const owner = new FileLock(manager.spawnLock.lockPath);
     assert.strictEqual(owner.acquire(), true);
     try {
       assert.strictEqual(await manager.ensureDaemon(), undefined);
+      assert.strictEqual(discovery.calls, 2);
       assert.deepStrictEqual(spawnCalls, []);
     } finally {
       owner.release();
     }
-  });
-
-  it("stops health retries when a version incompatibility is discovered", async function () {
-    const { manager, discovery, spawnCalls } = createManager(tempDir, [
-      unavailable(),
-      connectorTooOld(),
-      usable(),
-    ]);
-
-    await assert.rejects(() => manager.ensureDaemon());
-    assert.deepStrictEqual(spawnCalls, []);
   });
 
   it("rejects when the daemon does not become ready before timeout", async function () {
@@ -227,7 +214,7 @@ describe("MultiplexerDaemonManager", function () {
     await assert.rejects(() => manager.waitUntilReady(20));
   });
 
-  it("waitUntilReady exits early for terminal protocol results", async function () {
+  it("waitUntilReady exits early when daemon replacement is required", async function () {
     const shouldNotProbeAgain = () => {
       throw new Error("terminal protocol result must stop readiness polling");
     };
@@ -236,12 +223,36 @@ describe("MultiplexerDaemonManager", function () {
       shouldNotProbeAgain,
     ]);
     await assert.rejects(() => replaceContext.manager.waitUntilReady(100));
+  });
 
-    const incompatibleContext = createManager(tempDir, [
-      connectorTooOld(),
+  it("rejects an older daemon that is still in use without replacing it", async function () {
+    const { manager, discovery, spawnCalls } = createManager(tempDir, [
+      olderDaemonInUse(),
+      usable(),
+    ]);
+
+    await assert.rejects(
+      () => manager.ensureDaemon(),
+      /daemon is still in use by a connector or WebSocket frontend/
+    );
+    assert.strictEqual(discovery.calls, 1);
+    assert.deepStrictEqual(spawnCalls, []);
+    assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
+  });
+
+  it("waitUntilReady exits early when an older daemon is in use", async function () {
+    const shouldNotProbeAgain = () => {
+      throw new Error("terminal protocol result must stop readiness polling");
+    };
+    const { manager } = createManager(tempDir, [
+      olderDaemonInUse(),
       shouldNotProbeAgain,
     ]);
-    await assert.rejects(() => incompatibleContext.manager.waitUntilReady(100));
+
+    await assert.rejects(
+      () => manager.waitUntilReady(100),
+      /daemon is still in use by a connector or WebSocket frontend/
+    );
   });
 
   it("propagates readiness failures after spawning its own daemon", async function () {
@@ -249,7 +260,7 @@ describe("MultiplexerDaemonManager", function () {
     const discovery = {
       controlEndpoint: path.join(tempDir, "control.sock"),
       async probeHealth() {
-        return spawned ? connectorTooOld() : unavailable();
+        return spawned ? replaceRequired() : unavailable();
       },
     };
     const { manager, spawnCalls } = createManager(tempDir, [], {
@@ -263,12 +274,6 @@ describe("MultiplexerDaemonManager", function () {
 
     assert.strictEqual(spawnCalls.length, 1);
     assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
-  });
-
-  it("rejects a connector below the daemon minimum without cleanup", async function () {
-    const { manager, spawnCalls } = createManager(tempDir, [connectorTooOld()]);
-    await assert.rejects(() => manager.ensureDaemon());
-    assert.deepStrictEqual(spawnCalls, []);
   });
 
   it("[v1 compatibility gate] requests graceful shutdown for protocol replacement", async function () {

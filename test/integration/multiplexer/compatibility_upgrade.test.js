@@ -29,7 +29,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     }
   });
 
-  it("replaces older daemons as newer connector protocol versions arrive and restores compatible frontends", async function () {
+  it("blocks protocol replacement while connectors are active and upgrades after they disconnect", async function () {
     context = createIntegrationContext("compat-staged-upgrade", {
       readyPollInterval: 10,
       replacementTimeout: platformTimeout(50),
@@ -40,19 +40,25 @@ describe("multiplexer integration compatibility upgrade", function () {
       },
     });
 
-    const v1 = createVersionedControl("connector-v1", 1, 1);
+    const v1 = createVersionedControl("connector-v1", 1);
     await connectRuntime(v1.client);
     const daemonV1 = await currentDiscovery(1);
     assert.strictEqual(daemonV1.protocolVersion, 1);
-    assert.strictEqual(daemonV1.minSupportedProtocolVersion, 1);
     assert.strictEqual(daemonV1.debugInfo.daemonVersion, "connector-v1");
 
-    const v2 = createVersionedControl("connector-v2", 2, 1);
+    const v2 = createVersionedControl("connector-v2", 2);
+    await assert.rejects(
+      () => connectRuntime(v2.client),
+      /daemon is still in use by a connector or WebSocket frontend/
+    );
+    assert.strictEqual((await currentDiscovery(1)).pid, daemonV1.pid);
+    assert.deepStrictEqual(daemonStartedPids(), [daemonV1.pid]);
+
+    await v1.client.close();
     await connectRuntime(v2.client);
     const daemonV2 = await currentDiscovery(2);
     assert.notStrictEqual(daemonV2.pid, daemonV1.pid);
     assert.strictEqual(daemonV2.protocolVersion, 2);
-    assert.strictEqual(daemonV2.minSupportedProtocolVersion, 1);
     assert.strictEqual(daemonV2.debugInfo.daemonVersion, "connector-v2");
     await waitFor(() => !processExists(daemonV1.pid), 3000);
 
@@ -62,19 +68,23 @@ describe("multiplexer integration compatibility upgrade", function () {
     assert.deepStrictEqual(await listDeviceSerials(v2.client), ["device-1"]);
     assert.deepStrictEqual(await listClientIds(v2.client), [1]);
 
-    const v3 = createVersionedControl("connector-v3", 3, 2);
+    const v3 = createVersionedControl("connector-v3", 3);
+    await assert.rejects(
+      () => connectRuntime(v3.client),
+      /daemon is still in use by a connector or WebSocket frontend/
+    );
+    assert.strictEqual((await currentDiscovery(2)).pid, daemonV2.pid);
+
+    await v1.client.close();
+    await v2.client.close();
     await connectRuntime(v3.client);
     const daemonV3 = await currentDiscovery(3);
     assert.notStrictEqual(daemonV3.pid, daemonV2.pid);
     assert.strictEqual(daemonV3.protocolVersion, 3);
-    assert.strictEqual(daemonV3.minSupportedProtocolVersion, 2);
     assert.strictEqual(daemonV3.debugInfo.daemonVersion, "connector-v3");
     await waitFor(() => !processExists(daemonV2.pid), 3000);
 
-    await assert.rejects(
-      () => reconnectDaemonClient(v1.client),
-      /requires debug-router-connector protocol 2 or newer/i
-    );
+    await reconnectDaemonClient(v1.client);
     await reconnectDaemonClient(v2.client);
     await reconnectDaemonClient(v3.client);
     assert.deepStrictEqual(await listDeviceSerials(v2.client), ["device-1"]);
@@ -95,7 +105,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     );
   });
 
-  it("recovers connector and WebSocket frontends after a daemon protocol upgrade", async function () {
+  it("blocks protocol replacement while WebSocket frontends are active", async function () {
     context = createIntegrationContext("compat-websocket-upgrade", {
       readyPollInterval: 10,
       replacementTimeout: platformTimeout(50),
@@ -106,7 +116,7 @@ describe("multiplexer integration compatibility upgrade", function () {
       },
     });
 
-    const v1 = createVersionedControl("connector-v1", 1, 1);
+    const v1 = createVersionedControl("connector-v1", 1);
     await connectRuntime(v1.client);
     const serverV1 = await v1.client.call("startWSServer", {});
     const urlV1 = webSocketUrl(serverV1.port);
@@ -121,16 +131,22 @@ describe("multiplexer integration compatibility upgrade", function () {
       waitForSocketClose(webA.socket),
       waitForSocketClose(webB.socket),
     ]);
-    const v2 = createVersionedControl("connector-v2", 2, 1);
+    await v1.client.close();
+    const v2 = createVersionedControl("connector-v2", 2);
+    await assert.rejects(
+      () => connectRuntime(v2.client),
+      /daemon is still in use by a connector or WebSocket frontend/
+    );
+    assert.strictEqual((await currentDiscovery(1)).pid, daemonV1.pid);
+    assert.deepStrictEqual(daemonStartedPids(), [daemonV1.pid]);
+
+    webA.socket.close();
+    webB.socket.close();
+    await oldWebSocketsClosed;
     await connectRuntime(v2.client);
     const daemonV2 = await currentDiscovery(2);
     assert.notStrictEqual(daemonV2.pid, daemonV1.pid);
-    await oldWebSocketsClosed;
     await waitFor(() => !processExists(daemonV1.pid), 3000);
-
-    await reconnectDaemonClient(v1.client);
-    assert.deepStrictEqual(await listDeviceSerials(v1.client), ["device-1"]);
-    assert.deepStrictEqual(await listClientIds(v1.client), [1]);
 
     const serverV2 = await v2.client.call("startWSServer", {});
     const urlV2 = webSocketUrl(serverV2.port);
@@ -161,10 +177,9 @@ describe("multiplexer integration compatibility upgrade", function () {
     );
   });
 
-  function createVersionedControl(name, protocolVersion, minSupportedVersion) {
+  function createVersionedControl(name, protocolVersion) {
     const manager = context.createManager({
       localProtocolVersion: protocolVersion,
-      minSupportedProtocolVersion: minSupportedVersion,
       debugInfo: {
         daemonVersion: name,
       },

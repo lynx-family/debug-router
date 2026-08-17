@@ -11,10 +11,7 @@ import findProcess from "find-process";
 import fs from "fs";
 import { defaultLogger } from "../../utils/logger";
 import { FileLock } from "../utils/FileLock";
-import {
-  MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION,
-  MULTIPLEXER_PROTOCOL_VERSION,
-} from "../protocol/control";
+import { MULTIPLEXER_PROTOCOL_VERSION } from "../protocol/control";
 import type { MultiplexerDebugInfo } from "../protocol/debuginfo";
 import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
 import type { ConnectionTraceOptions } from "../../trace/ConnectionTraceRecorder";
@@ -63,7 +60,6 @@ export type MultiplexerDaemonManagerOption = {
   // Optional manager tuning with constructor defaults.
   startupTimeout?: number;
   localProtocolVersion?: number;
-  minSupportedProtocolVersion?: number;
   forceRespawnDaemon?: boolean;
   readyPollInterval?: number;
   replacementTimeout?: number;
@@ -97,7 +93,6 @@ export class MultiplexerDaemonManager {
   readonly daemonEntry: string;
   readonly startupTimeout: number;
   readonly localProtocolVersion: number;
-  readonly minSupportedProtocolVersion: number;
   readonly debugInfo?: MultiplexerDebugInfo;
   readonly legacyDriverDir?: string;
   readonly multiplexerDaemonIdleTimeout?: number;
@@ -130,9 +125,6 @@ export class MultiplexerDaemonManager {
       option.startupTimeout ?? DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT;
     this.localProtocolVersion =
       option.localProtocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION;
-    this.minSupportedProtocolVersion =
-      option.minSupportedProtocolVersion ??
-      MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION;
     this.debugInfo = option.debugInfo;
     this.legacyDriverDir = option.legacyDriverDir;
     this.multiplexerDaemonIdleTimeout = option.multiplexerDaemonIdleTimeout;
@@ -160,7 +152,7 @@ export class MultiplexerDaemonManager {
     this.daemonClient = daemonClient;
   }
 
-  async stopDaemonOnConnectorRequest(): Promise<void> {
+  async stopDaemonForDebugging(): Promise<void> {
     while (!this.acquireSpawnLock()) {
       await this.sleepFor(this.readyPollInterval);
     }
@@ -188,7 +180,7 @@ export class MultiplexerDaemonManager {
     while (true) {
       const validation = await this.probeDaemonHealthWithRetry();
       if (await this.ensureDaemonFromDiscoveryValidation(validation)) return;
-      // If another connector process has spawned an unavailable or lower version Daemon, Retry to ensureDaemon again
+      // If another connector process has spawned an unavailable daemon, retry ensureDaemon.
     }
   }
 
@@ -205,8 +197,8 @@ export class MultiplexerDaemonManager {
         );
       });
     }
-    if (isConnectorProtocolTooOld(validation)) {
-      throw createConnectorUpgradeError(validation);
+    if (isOlderDaemonInUse(validation)) {
+      throw createOlderDaemonInUseError(validation);
     }
     return this.ensureDaemonWithSpawnLock(async () => {
       await this.forceStopDaemon();
@@ -217,12 +209,7 @@ export class MultiplexerDaemonManager {
     beforeSpawn: () => void | Promise<void>,
   ): Promise<boolean> {
     if (!this.acquireSpawnLock()) {
-      try {
-        await this.waitUntilReady(this.startupTimeout);
-        return true;
-      } catch (_error) {
-        return false;
-      }
+      return false;
     }
 
     try {
@@ -263,8 +250,8 @@ export class MultiplexerDaemonManager {
       if (validation.status === "replace-required") {
         throw createDaemonReplacementRequiredError(validation);
       }
-      if (isConnectorProtocolTooOld(validation)) {
-        throw createConnectorUpgradeError(validation);
+      if (isOlderDaemonInUse(validation)) {
+        throw createOlderDaemonInUseError(validation);
       }
       lastHealthCheckFailure = validation.error?.message ?? null;
       await this.sleepFor(this.readyPollInterval);
@@ -350,7 +337,11 @@ export class MultiplexerDaemonManager {
   private async findDaemonProcessId(): Promise<number> {
     let daemonProcessIds: number[];
     if (process.platform === "win32") {
-      const processes = await findProcess("name", this.daemonProcessName, false);
+      const processes = await findProcess(
+        "name",
+        this.daemonProcessName,
+        false,
+      );
       daemonProcessIds = processes.map((daemonProcess) => daemonProcess.pid);
     } else {
       try {
@@ -469,8 +460,6 @@ export class MultiplexerDaemonManager {
       this.controlEndpoint,
       "--protocol-version",
       String(this.localProtocolVersion),
-      "--min-supported-protocol-version",
-      String(this.minSupportedProtocolVersion),
     ];
 
     if (this.debugInfo) {
@@ -534,18 +523,6 @@ function formatValidation(
   return `${validation.status}/${validation.reason}`;
 }
 
-function isConnectorProtocolTooOld(
-  validation: MultiplexerDiscoveryValidation,
-): validation is Extract<
-  MultiplexerDiscoveryValidation,
-  { status: "unusable"; reason: "connector-protocol-too-old" }
-> {
-  return (
-    validation.status === "unusable" &&
-    validation.reason === "connector-protocol-too-old"
-  );
-}
-
 function isRetryableHealthProbeResult(
   validation: MultiplexerDiscoveryValidation,
 ): boolean {
@@ -558,18 +535,34 @@ function isRetryableHealthProbeResult(
   );
 }
 
-function createConnectorUpgradeError(
+function isOlderDaemonInUse(
+  validation: MultiplexerDiscoveryValidation,
+): validation is Extract<
+  MultiplexerDiscoveryValidation,
+  {
+    status: "unusable";
+    reason: "daemon-upgrade-blocked-by-active-connections";
+  }
+> {
+  return (
+    validation.status === "unusable" &&
+    validation.reason === "daemon-upgrade-blocked-by-active-connections"
+  );
+}
+
+function createOlderDaemonInUseError(
   validation: Extract<
     MultiplexerDiscoveryValidation,
-    { status: "unusable"; reason: "connector-protocol-too-old" }
+    {
+      status: "unusable";
+      reason: "daemon-upgrade-blocked-by-active-connections";
+    }
   >,
 ): Error {
   return new Error(
-    `Multiplexer daemon requires debug-router-connector protocol ` +
-      `${validation.daemonMinSupportedProtocolVersion} or newer, ` +
-      `but current connector protocol is ` +
-      `${validation.connectorProtocolVersion}. Please upgrade ` +
-      `@lynx-js/debug-router-connector.`,
+    `Multiplexer daemon protocol ${validation.daemonProtocolVersion} is older ` +
+      `than current connector protocol ${validation.connectorProtocolVersion}, ` +
+      `but the daemon is still in use by a connector or WebSocket frontend`,
   );
 }
 

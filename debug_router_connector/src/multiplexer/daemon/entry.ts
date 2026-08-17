@@ -17,7 +17,6 @@ const ENTRY_CLEANUP_TIMEOUT = 3000;
 export type MultiplexerDaemonEntryOption = {
   controlEndpoint: string;
   protocolVersion: number;
-  minSupportedProtocolVersion: number;
   debugInfo?: MultiplexerDebugInfo;
   legacyDriverDir?: string;
   multiplexerDaemonIdleTimeout?: number;
@@ -40,7 +39,6 @@ type RawEntryArgs = Partial<Record<EntryArgKey, string>>;
 const OPTION_KEY_MAP: Record<string, EntryArgKey | undefined> = {
   "control-endpoint": "controlEndpoint",
   "protocol-version": "protocolVersion",
-  "min-supported-protocol-version": "minSupportedProtocolVersion",
   "debug-info": "debugInfo",
   "legacy-driver-dir": "legacyDriverDir",
   "multiplexer-daemon-idle-timeout": "multiplexerDaemonIdleTimeout",
@@ -71,9 +69,6 @@ export function parseEntryOption(argv: string[]): MultiplexerDaemonEntryOption {
   const option: MultiplexerDaemonEntryOption = {
     controlEndpoint: getRequiredArg(rawArgs, "controlEndpoint"),
     protocolVersion: Number(getRequiredArg(rawArgs, "protocolVersion")),
-    minSupportedProtocolVersion: Number(
-      getRequiredArg(rawArgs, "minSupportedProtocolVersion"),
-    ),
   };
   if (rawArgs.debugInfo !== undefined) {
     option.debugInfo = JSON.parse(rawArgs.debugInfo) as MultiplexerDebugInfo;
@@ -123,7 +118,6 @@ function createDaemonHost(
   const hostOption: MultiplexerDaemonHostOption = {
     controlEndpoint: entryOption.controlEndpoint,
     protocolVersion: entryOption.protocolVersion,
-    minSupportedProtocolVersion: entryOption.minSupportedProtocolVersion,
     ...(entryOption.debugInfo ? { debugInfo: entryOption.debugInfo } : {}),
   };
   if (entryOption.legacyDriverDir !== undefined) {

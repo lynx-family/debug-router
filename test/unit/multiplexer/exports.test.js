@@ -91,7 +91,6 @@ describe("multiplexer public export indexes", function () {
     const protocol = require("../../../debug_router_connector/dist/cjs/src/multiplexer/protocol");
 
     [
-      "MULTIPLEXER_MIN_SUPPORTED_PROTOCOL_VERSION",
       "MULTIPLEXER_PROTOCOL_VERSION",
       "isClientSnapshot",
       "isControlEvent",

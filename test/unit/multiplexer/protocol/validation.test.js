@@ -321,7 +321,7 @@ describe("multiplexer protocol validation", function () {
         kind: "health-response",
         ok: true,
         protocolVersion: 1,
-        minSupportedProtocolVersion: 1,
+        isInUse: false,
         debugInfo: {
           daemonVersion: "0.0.1",
           processId: 123,
@@ -335,6 +335,16 @@ describe("multiplexer protocol validation", function () {
         kind: "health-response",
         ok: true,
         protocolVersion: 1,
+        isInUse: false,
+      }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerHealthResponse({
+        kind: "health-response",
+        ok: false,
+        protocolVersion: 1,
+        isInUse: false,
       }),
       false
     );
@@ -343,16 +353,7 @@ describe("multiplexer protocol validation", function () {
         kind: "health-response",
         ok: true,
         protocolVersion: 1,
-        minSupportedProtocolVersion: "1",
-      }),
-      false
-    );
-    assert.strictEqual(
-      isMultiplexerHealthResponse({
-        kind: "health-response",
-        ok: false,
-        protocolVersion: 1,
-        minSupportedProtocolVersion: 1,
+        isInUse: "false",
       }),
       false
     );

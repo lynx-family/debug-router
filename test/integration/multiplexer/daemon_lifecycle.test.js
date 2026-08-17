@@ -112,7 +112,7 @@ describe("multiplexer integration daemon lifecycle", function () {
       }
       assert.strictEqual(fs.existsSync(context.paths.controlEndpoint), false);
 
-      await context.manager.stopDaemonOnConnectorRequest();
+      await context.manager.stopDaemonForDebugging();
 
       await waitFor(() => !processExists(daemonProcess.pid), 2000);
       if (decoyProcess) {

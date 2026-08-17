@@ -52,8 +52,10 @@ describe("MultiplexerDaemonClient", function () {
     server = new MultiplexerControlServer({
       controlEndpoint: endpoint,
       protocolVersion: 1,
-      minSupportedProtocolVersion: 1,
       host: {
+        isInUse() {
+          return connectedIds.length > 0;
+        },
         handleControlConnected(id) {
           connectedIds.push(id);
           server.sendToControl(id, {
@@ -82,13 +84,13 @@ describe("MultiplexerDaemonClient", function () {
           kind: "health-response",
           ok: true,
           protocolVersion: 1,
-          minSupportedProtocolVersion: 1,
+          isInUse: false,
         };
       },
       setDaemonClient(value) {
         this.client = value;
       },
-      async stopDaemonOnConnectorRequest() {},
+      async stopDaemonForDebugging() {},
     };
     client = new MultiplexerDaemonClient({
       daemonManager: manager,
@@ -204,7 +206,7 @@ describe("MultiplexerDaemonClient", function () {
       controlEndpoint: endpoint,
       async ensureDaemon() {},
       setDaemonClient() {},
-      async stopDaemonOnConnectorRequest() {},
+      async stopDaemonForDebugging() {},
     };
     client = new MultiplexerDaemonClient({
       daemonManager: manager,

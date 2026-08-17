@@ -98,7 +98,6 @@ function createIntegrationContext(name, option = {}) {
     readyPollInterval: option.readyPollInterval ?? 25,
     replacementTimeout: option.replacementTimeout ?? 100,
     localProtocolVersion,
-    minSupportedProtocolVersion: option.minSupportedProtocolVersion,
     debugInfo: option.debugInfo,
     legacyDriverDir,
     multiplexerDaemonIdleTimeout:
@@ -142,9 +141,6 @@ function createIntegrationContext(name, option = {}) {
           extra.replacementTimeout ?? option.replacementTimeout ?? 100,
         localProtocolVersion:
           extra.localProtocolVersion ?? localProtocolVersion,
-        minSupportedProtocolVersion:
-          extra.minSupportedProtocolVersion ??
-          option.minSupportedProtocolVersion,
         debugInfo: extra.debugInfo ?? option.debugInfo,
         legacyDriverDir: extra.legacyDriverDir ?? legacyDriverDir,
         multiplexerDaemonIdleTimeout:
@@ -232,7 +228,7 @@ function createIntegrationContext(name, option = {}) {
         for (const client of clients.splice(0)) {
           await client.close().catch(() => {});
         }
-        await manager.stopDaemonOnConnectorRequest().catch(() => {});
+        await manager.stopDaemonForDebugging().catch(() => {});
         await stopLoggedDaemons(paths);
         fs.rmSync(rootDir, { recursive: true, force: true });
       } finally {
@@ -257,7 +253,6 @@ function createManager(option) {
     readyPollInterval: option.readyPollInterval,
     replacementTimeout: option.replacementTimeout,
     localProtocolVersion: option.localProtocolVersion,
-    minSupportedProtocolVersion: option.minSupportedProtocolVersion,
     debugInfo: option.debugInfo,
     legacyDriverDir: option.legacyDriverDir,
     multiplexerDaemonIdleTimeout: option.multiplexerDaemonIdleTimeout,
@@ -632,7 +627,6 @@ function getDiscoveryInfo(discovery) {
   return {
     pid: started.pid,
     protocolVersion: started?.protocolVersion,
-    minSupportedProtocolVersion: started?.minSupportedProtocolVersion,
     debugInfo: started?.debugInfo,
     controlEndpoint: discovery.controlEndpoint,
   };
