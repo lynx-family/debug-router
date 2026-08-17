@@ -154,6 +154,37 @@ describe("MultiplexerControlServer", function () {
     assert.deepStrictEqual(disconnected, [1]);
   });
 
+  it("does not register when sending Register response fails", async function () {
+    const originalSend = MultiplexerControlTransport.prototype.send;
+    const originalRegisterConnection = server.registerConnection;
+    let registerCalls = 0;
+    MultiplexerControlTransport.prototype.send = function (message) {
+      if (message?.kind === "register-response") {
+        throw new Error("register response send failed");
+      }
+      return originalSend.call(this, message);
+    };
+    server.registerConnection = function (transport) {
+      registerCalls += 1;
+      return originalRegisterConnection.call(this, transport);
+    };
+
+    try {
+      await server.start();
+      const transport = await connectTransport(endpoint);
+      transport.send({ kind: "register" });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.strictEqual(registerCalls, 0);
+      assert.deepStrictEqual(connected, []);
+      assert.deepStrictEqual(disconnected, []);
+      assert.strictEqual(server.connections.size, 0);
+    } finally {
+      MultiplexerControlTransport.prototype.send = originalSend;
+      server.registerConnection = originalRegisterConnection;
+    }
+  });
+
   it("dispatches framed RPCs and preserves explicit results", async function () {
     await server.start();
     const transport = await connectTransport(endpoint);

@@ -3,9 +3,13 @@
 // LICENSE file in the root directory of this source tree.
 
 import type { Socket } from "net";
+// @ts-ignore
+import * as bufferpack from "bufferpack";
 import { defaultLogger } from "../../utils/logger";
 
-const FRAME_HEADER_SIZE = 4;
+const FRAME_PREFIX = "$MUX";
+const FRAME_HEADER_FORMAT = "! 4s I";
+const FRAME_HEADER_SIZE = 8;
 export const DEFAULT_MULTIPLEXER_CONTROL_MAX_FRAME_SIZE = 16 * 1024 * 1024;
 export const DEFAULT_MULTIPLEXER_CONTROL_MAX_BUFFER_SIZE = 32 * 1024 * 1024;
 
@@ -34,10 +38,7 @@ export class MultiplexerControlTransport {
   private buffer = Buffer.alloc(0);
   private closeError: Error | undefined;
 
-  constructor(
-    socket: Socket,
-    option: MultiplexerControlTransportOption = {},
-  ) {
+  constructor(socket: Socket, option: MultiplexerControlTransportOption = {}) {
     this.socket = socket;
     this.maxFrameSize =
       option.maxFrameSize ?? DEFAULT_MULTIPLEXER_CONTROL_MAX_FRAME_SIZE;
@@ -77,9 +78,11 @@ export class MultiplexerControlTransport {
       );
     }
 
-    const frame = Buffer.allocUnsafe(FRAME_HEADER_SIZE + payload.length);
-    frame.writeUInt32BE(payload.length, 0);
-    payload.copy(frame, FRAME_HEADER_SIZE);
+    const frame = bufferpack.pack(`${FRAME_HEADER_FORMAT} ${payload.length}A`, [
+      FRAME_PREFIX,
+      payload.length,
+      payload,
+    ]);
     this.socket.write(frame);
   }
 
@@ -149,7 +152,23 @@ export class MultiplexerControlTransport {
 
   private parseFrames(): void {
     while (!this.closed && this.buffer.length >= FRAME_HEADER_SIZE) {
-      const payloadLength = this.buffer.readUInt32BE(0);
+      const frameStart = this.buffer.indexOf(FRAME_PREFIX);
+      if (frameStart < 0) {
+        const discardedLength = this.buffer.length - FRAME_PREFIX.length;
+        this.buffer = this.buffer.subarray(discardedLength);
+        return;
+      }
+      this.buffer = this.buffer.subarray(frameStart);
+
+      if (this.buffer.length < FRAME_HEADER_SIZE) {
+        return;
+      }
+
+      const [, payloadLength] = bufferpack.unpack(
+        FRAME_HEADER_FORMAT,
+        this.buffer,
+        0,
+      );
       if (payloadLength === 0) {
         const error = new MultiplexerControlTransportError(
           "invalid-frame",

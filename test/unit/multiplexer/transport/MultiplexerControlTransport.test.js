@@ -10,6 +10,9 @@ const {
   MultiplexerControlTransportError,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/transport/MultiplexerControlTransport");
 
+const FRAME_PREFIX = Buffer.from("$MUX", "ascii");
+const FRAME_HEADER_SIZE = FRAME_PREFIX.length + 4;
+
 class FakeSocket extends EventEmitter {
   constructor() {
     super();
@@ -43,9 +46,10 @@ class FakeSocket extends EventEmitter {
 
 function frame(value) {
   const payload = Buffer.from(JSON.stringify(value));
-  const result = Buffer.alloc(4 + payload.length);
-  result.writeUInt32BE(payload.length, 0);
-  payload.copy(result, 4);
+  const result = Buffer.alloc(FRAME_HEADER_SIZE + payload.length);
+  FRAME_PREFIX.copy(result, 0);
+  result.writeUInt32BE(payload.length, FRAME_PREFIX.length);
+  payload.copy(result, FRAME_HEADER_SIZE);
   return result;
 }
 
@@ -64,6 +68,40 @@ describe("MultiplexerControlTransport", function () {
     socket.emit("data", Buffer.concat([first.subarray(7), second]));
 
     assert.deepStrictEqual(messages, [{ id: 1 }, { id: 2 }]);
+  });
+
+  it("discards interference before a split frame header", function () {
+    const socket = new FakeSocket();
+    const transport = new MultiplexerControlTransport(socket);
+    const messages = [];
+    transport.onMessage((message) => messages.push(message));
+
+    const validFrame = frame({ id: 1 });
+    socket.emit("data", Buffer.from("interference$M", "ascii"));
+    assert.deepStrictEqual(messages, []);
+    socket.emit("data", validFrame.subarray(2));
+
+    assert.deepStrictEqual(messages, [{ id: 1 }]);
+    assert.strictEqual(transport.closed, false);
+  });
+
+  it("discards interference between valid frames", function () {
+    const socket = new FakeSocket();
+    const transport = new MultiplexerControlTransport(socket);
+    const messages = [];
+    transport.onMessage((message) => messages.push(message));
+
+    socket.emit(
+      "data",
+      Buffer.concat([
+        frame({ id: 1 }),
+        Buffer.from("interference", "ascii"),
+        frame({ id: 2 }),
+      ])
+    );
+
+    assert.deepStrictEqual(messages, [{ id: 1 }, { id: 2 }]);
+    assert.strictEqual(transport.closed, false);
   });
 
   it("hands off the message listener between frames in the same chunk", function () {
@@ -104,7 +142,9 @@ describe("MultiplexerControlTransport", function () {
     zeroLengthTransport.onClose((error) => {
       zeroLengthError = error;
     });
-    zeroLengthSocket.emit("data", Buffer.alloc(4));
+    const zeroLengthFrame = Buffer.alloc(FRAME_HEADER_SIZE);
+    FRAME_PREFIX.copy(zeroLengthFrame, 0);
+    zeroLengthSocket.emit("data", zeroLengthFrame);
 
     assert.strictEqual(zeroLengthTransport.closed, true);
     assert.strictEqual(zeroLengthError.code, "invalid-frame");
@@ -118,8 +158,9 @@ describe("MultiplexerControlTransport", function () {
     oversizedTransport.onClose((error) => {
       oversizedError = error;
     });
-    const oversizedHeader = Buffer.alloc(4);
-    oversizedHeader.writeUInt32BE(5, 0);
+    const oversizedHeader = Buffer.alloc(FRAME_HEADER_SIZE);
+    FRAME_PREFIX.copy(oversizedHeader, 0);
+    oversizedHeader.writeUInt32BE(5, FRAME_PREFIX.length);
     oversizedSocket.emit("data", oversizedHeader);
 
     assert.strictEqual(oversizedTransport.closed, true);
@@ -136,9 +177,10 @@ describe("MultiplexerControlTransport", function () {
       closeError = error;
     });
     const invalidPayload = Buffer.from("{");
-    const invalidFrame = Buffer.alloc(5);
-    invalidFrame.writeUInt32BE(1, 0);
-    invalidPayload.copy(invalidFrame, 4);
+    const invalidFrame = Buffer.alloc(FRAME_HEADER_SIZE + 1);
+    FRAME_PREFIX.copy(invalidFrame, 0);
+    invalidFrame.writeUInt32BE(1, FRAME_PREFIX.length);
+    invalidPayload.copy(invalidFrame, FRAME_HEADER_SIZE);
     socket.emit("data", Buffer.concat([invalidFrame, frame({ id: 1 })]));
 
     assert.deepStrictEqual(messages, []);

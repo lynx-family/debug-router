@@ -110,6 +110,72 @@ export class MultiplexerControlServer {
     }
   }
 
+  private handleSocket(socket: Socket): void {
+    const transport = new MultiplexerControlTransport(socket);
+    this.provisionalTransports.add(transport);
+    let receivedFirstMessage = false;
+
+    const unsubscribeMessage = transport.onMessage((message) => {
+      if (receivedFirstMessage) {
+        return;
+      }
+      receivedFirstMessage = true;
+      unsubscribeMessage();
+
+      if (isMultiplexerHealthRequest(message)) {
+        const debugInfo = this.createDebugInfo();
+        const response: MultiplexerHealthResponse = {
+          kind: "health-response",
+          ok: true,
+          protocolVersion: this.option.protocolVersion,
+          isInUse: this.host.isInUse(),
+          ...(debugInfo ? { debugInfo } : {}),
+        };
+        transport.send(response);
+        void transport.end();
+        return;
+      }
+
+      if (isMultiplexerRegisterRequest(message)) {
+        const response: MultiplexerRegisterResponse = {
+          kind: "register-response",
+          ok: true,
+        };
+        try {
+          transport.send(response);
+        } catch (_error) {
+          transport.destroy(
+            _error instanceof Error ? _error : new Error(String(_error)),
+          );
+          return;
+        }
+        const connection = this.registerConnection(transport);
+        void this.host.handleControlConnected?.(connection.controlId);
+        return;
+      }
+
+      const response: MultiplexerHandshakeErrorResponse = {
+        kind: "handshake-error-response",
+        error: {
+          code: "invalid-control-handshake",
+          message:
+            "First control message must be a valid health or register request",
+        },
+      };
+      if (transport.writable) {
+        transport.send(response);
+        void transport.end();
+      } else {
+        transport.destroy();
+      }
+    });
+
+    transport.onClose(() => {
+      unsubscribeMessage();
+      this.provisionalTransports.delete(transport);
+    });
+  }
+
   registerConnection(
     transport: MultiplexerControlTransport,
   ): MultiplexerControlConnection {
@@ -159,70 +225,6 @@ export class MultiplexerControlServer {
 
   sendToControl(controlId: number, event: ControlEvent): void {
     this.connections.get(controlId)?.send(event);
-  }
-
-  private handleSocket(socket: Socket): void {
-    const transport = new MultiplexerControlTransport(socket);
-    this.provisionalTransports.add(transport);
-    let receivedFirstMessage = false;
-
-    const unsubscribeMessage = transport.onMessage((message) => {
-      if (receivedFirstMessage) {
-        return;
-      }
-      receivedFirstMessage = true;
-      unsubscribeMessage();
-
-      if (isMultiplexerHealthRequest(message)) {
-        const debugInfo = this.createDebugInfo();
-        const response: MultiplexerHealthResponse = {
-          kind: "health-response",
-          ok: true,
-          protocolVersion: this.option.protocolVersion,
-          isInUse: this.host.isInUse(),
-          ...(debugInfo ? { debugInfo } : {}),
-        };
-        transport.send(response);
-        void transport.end();
-        return;
-      }
-
-      if (isMultiplexerRegisterRequest(message)) {
-        const connection = this.registerConnection(transport);
-        const response: MultiplexerRegisterResponse = {
-          kind: "register-response",
-          ok: true,
-        };
-        try {
-          transport.send(response);
-        } catch (_error) {
-          void connection.close();
-          return;
-        }
-        void this.host.handleControlConnected?.(connection.controlId);
-        return;
-      }
-
-      const response: MultiplexerHandshakeErrorResponse = {
-        kind: "handshake-error-response",
-        error: {
-          code: "invalid-control-handshake",
-          message:
-            "First control message must be a valid health or register request",
-        },
-      };
-      if (transport.writable) {
-        transport.send(response);
-        void transport.end();
-      } else {
-        transport.destroy();
-      }
-    });
-
-    transport.onClose(() => {
-      unsubscribeMessage();
-      this.provisionalTransports.delete(transport);
-    });
   }
 
   private createDebugInfo(

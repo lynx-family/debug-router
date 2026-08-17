@@ -21,10 +21,7 @@ const INVALID_MESSAGE_RPC_ID = -1;
 export type MultiplexerControlConnectionOption = {
   controlId: number;
   transport: MultiplexerControlTransport;
-  onMessage: (
-    controlId: number,
-    message: ControlRpcRequest,
-  ) => void | Promise<void>;
+  onMessage: (controlId: number, message: ControlRpcRequest) => Promise<void>;
   onClose: (controlId: number) => void;
   createDebugInfo?: () => MultiplexerDebugInfo | undefined;
 };
@@ -35,10 +32,9 @@ export class MultiplexerControlConnection {
   private readonly onMessage: (
     controlId: number,
     message: ControlRpcRequest,
-  ) => void | Promise<void>;
+  ) => Promise<void>;
   private readonly onClose: (controlId: number) => void;
   private readonly createDebugInfo?: () => MultiplexerDebugInfo | undefined;
-  private subscribedValue = true;
   private closedValue = false;
   private unsubscribeMessage: (() => void) | undefined;
   private unsubscribeClose: (() => void) | undefined;
@@ -55,19 +51,12 @@ export class MultiplexerControlConnection {
     this.unsubscribeClose = this.transport.onClose(this.handleClose);
   }
 
-  get subscribed(): boolean {
-    return this.subscribedValue;
-  }
-
   get closed(): boolean {
     return this.closedValue;
   }
 
   send(message: ControlEvent | ControlRpcResponse): void {
     if (this.closed || !this.transport.writable) {
-      return;
-    }
-    if (message.kind === "event" && !this.subscribed) {
       return;
     }
 
@@ -92,30 +81,6 @@ export class MultiplexerControlConnection {
 
   sendError(rpcId: number, error: ControlRpcError): void {
     this.send({ kind: "rpc-response", id: rpcId, ok: false, error });
-  }
-
-  handleMessage(message: ControlRpcRequest): void {
-    if (this.closed) {
-      return;
-    }
-    try {
-      const result = this.onMessage(this.controlId, message);
-      if (result) {
-        result.catch((error) => {
-          this.sendError(message.id, createDispatchError(error));
-        });
-      }
-    } catch (error) {
-      this.sendError(message.id, createDispatchError(error));
-    }
-  }
-
-  subscribe(): void {
-    this.subscribedValue = true;
-  }
-
-  unsubscribe(): void {
-    this.subscribedValue = false;
   }
 
   close(): Promise<void> {
@@ -152,7 +117,9 @@ export class MultiplexerControlConnection {
       });
       return;
     }
-    this.handleMessage(value);
+    this.onMessage(this.controlId, value).catch((error) => {
+      this.sendError(value.id, createDispatchError(error));
+    });
   };
 }
 

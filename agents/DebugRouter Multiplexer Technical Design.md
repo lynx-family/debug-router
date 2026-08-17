@@ -259,7 +259,7 @@ Host composes its control server and WebSocket controller through small structur
 
 ### 8.1 Transport and First-message Handshake
 
-The internal control plane uses Node.js `node:net`. Because a socket is a byte stream rather than a message transport, every JSON message is framed as a four-byte unsigned big-endian payload length followed by that many UTF-8 JSON bytes. The default maximum payload is 16 MiB and the maximum accumulated receive buffer is 32 MiB. Zero-length payloads, oversized frames/buffers, invalid JSON, and EOF with an incomplete frame close the transport with a diagnostic error.
+The internal control plane uses Node.js `node:net`. Because a socket is a byte stream rather than a message transport, every JSON message is framed as the four ASCII bytes `$MUX`, a four-byte unsigned big-endian payload length, and that many UTF-8 JSON bytes. The transport uses `bufferpack` to encode and decode the header. While reading, it advances through interference bytes until it finds `$MUX`, then parses the length and payload; a header split across socket chunks remains buffered for the next read. The default maximum payload is 16 MiB and the maximum accumulated receive buffer is 32 MiB. Zero-length payloads, oversized frames/buffers, invalid JSON, and EOF with an incomplete frame close the transport with a diagnostic error.
 
 `MultiplexerControlTransport.send()` writes one complete frame with `socket.write()`. It intentionally does not add an application-level write queue or a separate pause/resume backpressure state machine; ordering and system buffering are provided by `net.Socket`, while the control protocol enforces bounded frame and receive-buffer sizes.
 

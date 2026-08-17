@@ -24,6 +24,9 @@ const {
   MULTIPLEXER_PROTOCOL_VERSION,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/protocol");
 
+const FRAME_PREFIX = Buffer.from("$MUX", "ascii");
+const FRAME_HEADER_SIZE = FRAME_PREFIX.length + 4;
+
 function createTempContext() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-health-"));
   return { dir, endpoint: path.join(dir, "control.sock") };
@@ -31,9 +34,10 @@ function createTempContext() {
 
 function frame(value) {
   const payload = Buffer.from(JSON.stringify(value));
-  const result = Buffer.alloc(4 + payload.length);
-  result.writeUInt32BE(payload.length, 0);
-  payload.copy(result, 4);
+  const result = Buffer.alloc(FRAME_HEADER_SIZE + payload.length);
+  FRAME_PREFIX.copy(result, 0);
+  result.writeUInt32BE(payload.length, FRAME_PREFIX.length);
+  payload.copy(result, FRAME_HEADER_SIZE);
   return result;
 }
 
@@ -42,14 +46,24 @@ function receiveFrame(socket) {
     let buffer = Buffer.alloc(0);
     const onData = (chunk) => {
       buffer = Buffer.concat([buffer, chunk]);
-      if (buffer.length < 4) return;
+      if (buffer.length < FRAME_HEADER_SIZE) return;
 
-      const payloadLength = buffer.readUInt32BE(0);
-      if (buffer.length < 4 + payloadLength) return;
+      assert.deepStrictEqual(
+        buffer.subarray(0, FRAME_PREFIX.length),
+        FRAME_PREFIX
+      );
+      const payloadLength = buffer.readUInt32BE(FRAME_PREFIX.length);
+      if (buffer.length < FRAME_HEADER_SIZE + payloadLength) return;
 
       socket.off("data", onData);
       try {
-        resolve(JSON.parse(buffer.subarray(4, 4 + payloadLength).toString()));
+        resolve(
+          JSON.parse(
+            buffer
+              .subarray(FRAME_HEADER_SIZE, FRAME_HEADER_SIZE + payloadLength)
+              .toString()
+          )
+        );
       } catch (error) {
         reject(error);
       }
@@ -248,9 +262,10 @@ describe("MultiplexerDiscovery", function () {
     contexts.push(invalidFrameContext);
     const invalidFrameServer = net.createServer((socket) => {
       socket.once("data", () => {
-        const bad = Buffer.alloc(5);
-        bad.writeUInt32BE(2, 0);
-        bad[4] = "{".charCodeAt(0);
+        const bad = Buffer.alloc(FRAME_HEADER_SIZE + 1);
+        FRAME_PREFIX.copy(bad, 0);
+        bad.writeUInt32BE(2, FRAME_PREFIX.length);
+        bad[FRAME_HEADER_SIZE] = "{".charCodeAt(0);
         socket.end(bad);
       });
     });

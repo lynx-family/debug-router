@@ -57,7 +57,7 @@ function createConnection(overrides = {}) {
     transport,
     onMessage:
       overrides.onMessage ??
-      ((id, message) => {
+      (async (id, message) => {
         messages.push([id, message]);
       }),
     onClose: (id) => closes.push(id),
@@ -100,34 +100,17 @@ describe("MultiplexerControlConnection", function () {
     assert.strictEqual(transport.sent.length, 3);
   });
 
-  it("filters events while unsubscribed but keeps RPC responses", function () {
-    const { connection, transport } = createConnection();
-    connection.unsubscribe();
-    connection.send({ kind: "event", event: "snapshot", data: {} });
-    connection.sendResponse(1, {});
-    assert.strictEqual(transport.sent.length, 1);
-    assert.strictEqual(transport.sent[0].kind, "rpc-response");
-  });
-
-  it("converts sync and async dispatch failures into RPC errors", async function () {
-    const sync = createConnection({
-      onMessage() {
-        throw new Error("sync failed");
-      },
-    });
-    sync.transport.emitMessage(request(1));
-    assert.strictEqual(sync.transport.sent[0].error.message, "sync failed");
-
-    const asyncFailure = createConnection({
+  it("converts dispatch failures into RPC errors", async function () {
+    const failure = createConnection({
       onMessage: async () => {
-        throw new Error("async failed");
+        throw new Error("dispatch failed");
       },
     });
-    asyncFailure.transport.emitMessage(request(2));
+    failure.transport.emitMessage(request(2));
     await new Promise((resolve) => setImmediate(resolve));
     assert.strictEqual(
-      asyncFailure.transport.sent[0].error.message,
-      "async failed"
+      failure.transport.sent[0].error.message,
+      "dispatch failed"
     );
   });
 
