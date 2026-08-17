@@ -21,6 +21,7 @@ Pod::Spec.new do |s|
 
   s.subspec 'Framework' do |ss|
     ss.source_files = 'debug_router/ios/public/*.{h,m,mm}', 'debug_router/ios/public/base/*.{h,m,mm}', 'debug_router/ios/*.{h,m,mm}', 'debug_router/ios/net/*.{h,m,mm}', 'debug_router/ios/report/*.{h,m,mm}', 'debug_router/ios/base/*.{h,m,mm}', 'debug_router/ios/base/report/*.{h,m,mm}', 'debug_router/ios/base/service/*.{h,m,mm}'
+    ss.frameworks = 'Network'
     ss.pod_target_xcconfig  = { "HEADER_SEARCH_PATHS" => "\"${PODS_TARGET_SRCROOT}/debug_router/ios/\"" }
     ss.dependency 'DebugRouter/Native'
     ss.public_header_files = 'debug_router/ios/public/DebugRouter.h', 'debug_router/ios/public/DebugRouterMessageHandler.h', 'debug_router/ios/public/DebugRouterCommon.h', 'debug_router/ios/public/DebugRouterMessageHandleResult.h', "debug_router/ios/public/DebugRouterEventSender.h", "debug_router/ios/public/DebugRouterGlobalHandler.h", "debug_router/ios/public/DebugRouterSlot.h", "debug_router/ios/public/base/DebugRouterReportServiceUtil.h", "debug_router/ios/public/base/DebugRouterToast.h", "debug_router/ios/public/DebugRouterSessionHandler.h", "debug_router/ios/public/base/DebugRouterDefines.h", "debug_router/ios/public/base/DebugRouterReportServiceProtocol.h", "debug_router/ios/public/base/DebugRouterService.h", "debug_router/ios/public/base/DebugRouterServiceProtocol.h", "debug_router/ios/public/LocalNetworkPermissionChecker.h"
