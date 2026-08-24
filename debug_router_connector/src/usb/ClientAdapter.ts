@@ -41,6 +41,9 @@ export default class ClientAdapter {
   private offset: number = 0;
   private end: number = 0;
   protected tcpClient: net.Socket = new net.Socket();
+  private connectionAttempt = 0;
+  private isDisposed = false;
+  protected isConnecting = false;
   protected isConnected: boolean = false;
   protected connection: Connection | null = null;
   protected from?: number;
@@ -57,6 +60,12 @@ export default class ClientAdapter {
   ) {}
 
   protected handleData(client: net.Socket, data: Buffer) {
+    if (
+      client !== this.tcpClient ||
+      (!this.isConnecting && !this.isConnected)
+    ) {
+      return;
+    }
     try {
       this.handleUnpackMessage(data);
     } catch (error: any) {
@@ -72,6 +81,14 @@ export default class ClientAdapter {
   }
 
   protected handleOff(client: net.Socket) {
+    if (
+      client !== this.tcpClient ||
+      (!this.isConnecting && !this.isConnected)
+    ) {
+      return;
+    }
+    const id = this.id;
+    this.isConnecting = false;
     this.isConnected = false;
     client.destroy();
     this.driver.traceRecorder?.recordSocketDisconnected(
@@ -84,11 +101,17 @@ export default class ClientAdapter {
       this.connectionAttemptId,
     );
     this.connectionAttemptId = undefined;
+    this.bufferCapacity = this.initialBufferCapacity;
+    this.buffer = null;
+    this.offset = 0;
+    this.end = 0;
+    this.connection = null;
+    this.id = 0;
     if (this.listener === null) {
       defaultLogger.debug("handleOff: this.listener == null");
       return;
     }
-    this.listener.onConnectionDeleted(this.id);
+    this.listener.onConnectionDeleted(id);
   }
 
   protected handleUnpackMessage(data: any) {
@@ -150,7 +173,10 @@ export default class ClientAdapter {
     }
   }
 
-  onConnect(): void {
+  onConnect(client: net.Socket = this.tcpClient): void {
+    if (client !== this.tcpClient || !this.isConnecting) {
+      return;
+    }
     const initialize: InitializeMessageType = {
       event: "Initialize",
       data: -1,
@@ -164,9 +190,9 @@ export default class ClientAdapter {
       },
     );
     try {
-      if (this.tcpClient.writable && !this.tcpClient.destroyed) {
+      if (client.writable && !client.destroyed) {
         defaultLogger.debug("send Initialize:" + this.port);
-        this.tcpClient.write(packMessage(initialize));
+        client.write(packMessage(initialize));
       }
     } catch (err) {
       defaultLogger.debug("send Initialize error:" + JSON.stringify(err));
@@ -271,6 +297,7 @@ export default class ClientAdapter {
         this.port,
         ClientQuery,
       );
+      this.isConnecting = false;
       this.isConnected = true;
     }
   }
@@ -294,18 +321,24 @@ export default class ClientAdapter {
   }
 
   connect(): void {
-    if (this.isConnected || this.tcpClient.connecting) return;
+    if (this.isDisposed || this.isConnected || this.isConnecting) return;
+    this.isConnecting = true;
+    const attempt = ++this.connectionAttempt;
     const platform = this.type;
     if (platform === "iOS") {
       getTunnel(this.port, { udid: this.device_id })
         .then((tunnel: net.Socket) => {
+          if (attempt !== this.connectionAttempt || !this.isConnecting) {
+            tunnel.destroy();
+            return;
+          }
           this.tcpClient = tunnel;
           this.tcpClient.on("data", (data: Buffer) => {
-            this.handleData(this.tcpClient, data);
+            this.handleData(tunnel, data);
           });
           this.tcpClient.on("close", () => {
             defaultLogger.debug("ios device close:" + this.port);
-            this.handleOff(this.tcpClient);
+            this.handleOff(tunnel);
           });
 
           this.tcpClient.on("usbmux_error", (err: Error) => {
@@ -315,11 +348,15 @@ export default class ClientAdapter {
               msg: msg,
               stage: "client",
             });
-            this.handleOff(this.tcpClient);
+            this.handleOff(tunnel);
           });
-          this.onConnect();
+          this.onConnect(tunnel);
         })
         .catch((err: Error) => {
+          if (attempt !== this.connectionAttempt) {
+            return;
+          }
+          this.isConnecting = false;
           const msg =
             "ios connect error:" + this.port + " error:" + err?.message;
           defaultLogger.debug(msg);
@@ -330,11 +367,12 @@ export default class ClientAdapter {
         });
     } else {
       try {
-        this.tcpClient = new net.Socket();
-        this.tcpClient.on("data", (data: Buffer) => {
-          this.handleData(this.tcpClient, data);
+        const tcpClient = new net.Socket();
+        this.tcpClient = tcpClient;
+        tcpClient.on("data", (data: Buffer) => {
+          this.handleData(tcpClient, data);
         });
-        this.tcpClient.on("error", (err: Error) => {
+        tcpClient.on("error", (err: Error) => {
           const msg =
             platform + " device error:" + err?.message + " " + this.port;
           defaultLogger.debug(msg);
@@ -343,22 +381,23 @@ export default class ClientAdapter {
             msg: msg,
             stage: "client",
           });
-          this.handleOff(this.tcpClient);
+          this.handleOff(tcpClient);
         });
 
-        this.tcpClient.on("close", (hadError: boolean) => {
+        tcpClient.on("close", (hadError: boolean) => {
           defaultLogger.debug(
             platform + " device close:" + this.port + " hadError:" + hadError,
           );
-          this.handleOff(this.tcpClient);
+          this.handleOff(tcpClient);
         });
-        this.tcpClient.on("connect", () => {
+        tcpClient.on("connect", () => {
           defaultLogger.debug(platform + " device onConnect:" + this.port);
-          this.onConnect();
+          this.onConnect(tcpClient);
         });
         const host = this.device_host;
-        this.tcpClient.connect({ host: host, port: this.port });
+        tcpClient.connect({ host: host, port: this.port });
       } catch (err: any) {
+        this.isConnecting = false;
         const msg =
           platform + " connect error:" + this.port + " error:" + err?.message;
         defaultLogger.debug(msg);
@@ -374,6 +413,10 @@ export default class ClientAdapter {
   public destroy() {
     defaultLogger.debug("ClientAdapter destroy");
     this.listener = null;
+    this.connectionAttempt += 1;
+    this.isDisposed = true;
+    this.isConnecting = false;
+    this.isConnected = false;
     this.tcpClient.destroy();
     this.buffer = null;
     this.connection = null;
