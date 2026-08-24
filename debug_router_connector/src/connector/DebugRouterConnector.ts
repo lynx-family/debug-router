@@ -345,7 +345,7 @@ export class DebugRouterConnector {
     defaultLogger.info("disableAllClients");
     // close usb autoConnect
     this.devices.forEach((device) => {
-      device.stopWatchClient();
+      device.closeClientController();
     });
     this.getAllAppClients().forEach((client) => {
       client.close();

@@ -13,9 +13,11 @@ import { defaultLogger } from "../utils/logger";
 
 export class ClientController implements ClientEventsListener {
   private timer: NodeJS.Timeout | undefined;
+  private closed: boolean = false;
   private sockets: Map<number, ClientAdapter> = new Map();
   private ports: Map<number, boolean> = new Map();
   private clientInfos: Map<number, number> = new Map();
+  private readonly portSnapshot: Set<number>;
   connections: Map<number, UsbClient> = new Map();
   driver: DebugRouterConnector;
   device: BaseDevice;
@@ -23,20 +25,20 @@ export class ClientController implements ClientEventsListener {
   constructor(driver: DebugRouterConnector, serverDevice: BaseDevice) {
     this.driver = driver;
     this.device = serverDevice;
+    this.portSnapshot = new Set(this.device.ports);
 
-    this.device.ports.map((port) => {
-      const connectAdapter = new ClientAdapter(
-        this.driver,
-        this,
-        port,
-        this.device.info.title,
-        this.device.info.serial,
-        this.device.info.os,
-        this.device.getHost(),
-      );
-      this.sockets.set(port, connectAdapter);
+    this.portSnapshot.forEach((port) => {
+      this.sockets.set(port, this.createAdapter(port));
       this.ports.set(port, false);
     });
+  }
+
+  matchesPorts(ports: number[]): boolean {
+    const currentPorts = new Set(ports);
+    return (
+      currentPorts.size === this.portSnapshot.size &&
+      [...currentPorts].every((port) => this.portSnapshot.has(port))
+    );
   }
 
   onConnectionDeleted(id: number): void {
@@ -56,6 +58,10 @@ export class ClientController implements ClientEventsListener {
     port: number,
     query: ClientQuery,
   ): number {
+    if (this.closed) {
+      connection.close();
+      return 0;
+    }
     defaultLogger.debug(
       "addConnection port: " + port + " info: " + JSON.stringify(query),
     );
@@ -86,22 +92,21 @@ export class ClientController implements ClientEventsListener {
 
   private removeConnection(id: number) {
     const client = this.connections.get(id);
-    if (client) {
-      this.driver.traceRecorder?.recordUsbClientDisconnected(client);
-      this.connections.delete(id);
+    if (!client) {
+      return;
     }
+
+    this.driver.traceRecorder?.recordUsbClientDisconnected(client);
+    this.connections.delete(id);
     const port = this.clientInfos.get(id);
-    if (port) {
+    if (port !== undefined) {
       this.ports.set(port, false);
       this.clientInfos.delete(id);
     }
     this.driver.unregiserUsbClient(id);
   }
 
-  private createAdapter(
-    connectAdapter: ClientAdapter | undefined,
-    port: number,
-  ): ClientAdapter {
+  private createAdapter(port: number): ClientAdapter {
     return new ClientAdapter(
       this.driver,
       this,
@@ -114,36 +119,46 @@ export class ClientController implements ClientEventsListener {
   }
 
   private watchClient() {
+    if (this.closed) {
+      return;
+    }
     for (const port of this.ports.keys()) {
       if (!this.ports.get(port)) {
-        const connectAdapter = this.sockets.get(port);
-        const newAdapter = this.createAdapter(connectAdapter, port);
-        connectAdapter?.destroy();
-        if (newAdapter === null) {
-          defaultLogger.debug("newAdapter === null:" + port);
-          return;
+        let connectAdapter = this.sockets.get(port);
+        if (connectAdapter?.isAttemptActive()) {
+          continue;
         }
-        this.sockets.set(port, newAdapter);
+        if (!connectAdapter || connectAdapter.isClosed()) {
+          connectAdapter?.destroy();
+          connectAdapter = this.createAdapter(port);
+          this.sockets.set(port, connectAdapter);
+        }
         defaultLogger.debug("watchClient:connect:" + port);
-        newAdapter.connect();
+        connectAdapter.connect();
       }
     }
   }
 
   startWatchClient(): void {
+    if (this.closed) {
+      return;
+    }
     this.watchClient();
     if (process.env.DriverAutoFindClientsEnv === "false") {
       defaultLogger.warn("AutoFinding new client is closed for debug");
       return;
     }
-    this.timer = setInterval(() => {
-      this.watchClient();
-    }, this.driver.usbConnectOpt.retryTime);
+    if (!this.timer) {
+      this.timer = setInterval(() => {
+        this.watchClient();
+      }, this.driver.usbConnectOpt.retryTime);
+    }
   }
 
   stopWatchClient(): void {
     if (this.timer) {
       clearInterval(this.timer);
+      this.timer = undefined;
     }
   }
 
@@ -155,7 +170,15 @@ export class ClientController implements ClientEventsListener {
   }
 
   close() {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
     this.stopWatchClient();
     this.closeAllConnection();
+    this.sockets.forEach((adapter) => adapter.destroy());
+    this.sockets.clear();
+    this.clientInfos.clear();
+    this.ports.clear();
   }
 }
