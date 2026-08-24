@@ -156,6 +156,8 @@ export class ClientController implements ClientEventsListener {
 
   close() {
     this.stopWatchClient();
+    this.sockets.forEach((adapter) => adapter.destroy());
+    this.sockets.clear();
     this.closeAllConnection();
   }
 }
