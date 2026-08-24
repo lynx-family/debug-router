@@ -17,6 +17,9 @@ import child_process, { ExecException } from "child_process";
 import { getDriverReportService } from "../../report/interface/DriverReportService";
 import { DeviceOS } from "../../utils/type";
 import { getAdbToolPath } from "../../utils/adb.validator";
+import ForwardCommand from "@devicefarmer/adbkit/dist/src/adb/command/host-serial/forward";
+import ListForwardsCommand from "@devicefarmer/adbkit/dist/src/adb/command/host-serial/listforwards";
+import { withAdbConnection } from "../../utils/adb.connection";
 
 export default class AndroidDevice extends BaseDevice {
   private adb: ADBClient;
@@ -86,9 +89,14 @@ export default class AndroidDevice extends BaseDevice {
           defaultLogger.debug("adb try hostport:" + hostport);
         } while (this.port.indexOf(hostport) != -1);
         try {
-          const result = await device.forward(
-            `tcp:${hostport}`,
-            `tcp:${remotePort}`,
+          const result = await withAdbConnection(
+            () => this.adb.connection(),
+            (connection) =>
+              new ForwardCommand(connection).execute(
+                this.serial,
+                `tcp:${hostport}`,
+                `tcp:${remotePort}`,
+              ),
           );
           if (result) {
             defaultLogger.debug(
@@ -128,7 +136,11 @@ export default class AndroidDevice extends BaseDevice {
   async adbForwardRemove(device: DeviceClient) {
     defaultLogger.debug("adbForwardRemove");
     return new Promise<void>(async (resolve, reject) => {
-      const forwards: Forward[] = await device.listForwards();
+      const forwards: Forward[] = await withAdbConnection(
+        () => this.adb.connection(),
+        (connection) =>
+          new ListForwardsCommand(connection).execute(this.serial),
+      );
       for (let i = 0; i < forwards.length; i++) {
         const local = forwards[i].local;
         const remote = forwards[i].remote;
