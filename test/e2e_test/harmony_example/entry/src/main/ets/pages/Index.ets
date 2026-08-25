@@ -81,7 +81,7 @@ class testSlotDelegate implements DebugRouterSlotDelegate {
 @Component
 struct Index {
   aboutToAppear() {
-    DebugRouter.createInstance();
+    DebugRouter.ensureInitialized();
     DebugRouter.enableAllSessions();
     DebugRouter.setAppInfo('osType', 'Harmony')
     DebugRouter.setAppInfo('bundle', 'org.lynxjs.debugrouter.testapp')
