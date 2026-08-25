@@ -4,6 +4,8 @@
 
 #include "debug_router/native/harmony/debug_router_harmony.h"
 
+#include <algorithm>
+
 #include "debug_router/native/harmony/base/napi_util.h"
 #include "debug_router/native/harmony/debug_router_state_listener_harmony.h"
 #include "debug_router/native/harmony/native_slot_harmony.h"
@@ -11,22 +13,12 @@
 namespace debugrouter {
 namespace harmony {
 
-std::map<napi_value, int, NapiValueCompare>
-    DebugRouterHarmony::global_handlers_map_;
-std::map<napi_value, int, NapiValueCompare>
-    DebugRouterHarmony::session_handlers_map_;
-std::map<napi_value, std::string, NapiValueCompare>
-    DebugRouterHarmony::message_handlers_map_;
-
-std::map<napi_value, std::shared_ptr<DebugRouterGlobalHandlerHarmony>,
-         NapiValueCompare>
-    DebugRouterHarmony::global_handlers;
-std::map<napi_value, std::shared_ptr<DebugRouterSessionHandlerHarmony>,
-         NapiValueCompare>
-    DebugRouterHarmony::session_handlers;
-std::map<napi_value, std::shared_ptr<DebugRouterMessageHandlerHarmony>,
-         NapiValueCompare>
-    DebugRouterHarmony::message_handlers;
+std::vector<DebugRouterHarmony::GlobalHandlerRegistration>
+    DebugRouterHarmony::global_handlers_;
+std::vector<DebugRouterHarmony::SessionHandlerRegistration>
+    DebugRouterHarmony::session_handlers_;
+std::vector<DebugRouterHarmony::MessageHandlerRegistration>
+    DebugRouterHarmony::message_handlers_;
 
 napi_value DebugRouterHarmony::Init(napi_env env, napi_value exports) {
   napi_property_descriptor properties[] = {
@@ -107,13 +99,17 @@ napi_value DebugRouterHarmony::AddGlobalHandler(napi_env env,
   size_t argc = 1;
   napi_value argv[1];
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
-  if (global_handlers_map_.find(argv[0]) == global_handlers_map_.end()) {
-    auto globalHandler =
+  auto existing = std::find_if(
+      global_handlers_.begin(), global_handlers_.end(),
+      [env, value = argv[0]](const GlobalHandlerRegistration& registration) {
+        return registration.handler->IsSame(env, value);
+      });
+  if (existing == global_handlers_.end()) {
+    auto global_handler =
         std::make_shared<DebugRouterGlobalHandlerHarmony>(env, argv[0]);
-    global_handlers[argv[0]] = globalHandler;
-    int handler_id = core::DebugRouterCore::GetInstance().AddGlobalHandler(
-        globalHandler.get());
-    global_handlers_map_[argv[0]] = handler_id;
+    int handler_id =
+        core::DebugRouterCore::GetInstance().AddGlobalHandler(global_handler);
+    global_handlers_.push_back({handler_id, std::move(global_handler)});
   }
   return nullptr;
 }
@@ -126,12 +122,16 @@ napi_value DebugRouterHarmony::RemoveGlobalHandler(napi_env env,
   napi_value result;
 
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
-  if (global_handlers_map_.find(argv[0]) != global_handlers_map_.end()) {
-    global_handlers.erase(argv[0]);
-    int handler_id = global_handlers_map_[argv[0]];
-    bool res =
-        core::DebugRouterCore::GetInstance().RemoveGlobalHandler(handler_id);
-    global_handlers_map_.erase(argv[0]);
+  auto existing = std::find_if(
+      global_handlers_.begin(), global_handlers_.end(),
+      [env, value = argv[0]](const GlobalHandlerRegistration& registration) {
+        return registration.handler->IsSame(env, value);
+      });
+  if (existing != global_handlers_.end()) {
+    existing->handler->Deactivate();
+    bool res = core::DebugRouterCore::GetInstance().RemoveGlobalHandler(
+        existing->handler_id);
+    global_handlers_.erase(existing);
     napi_get_boolean(env, res, &result);
     return result;
   }
@@ -145,13 +145,17 @@ napi_value DebugRouterHarmony::AddSessionHandler(napi_env env,
   size_t argc = 1;
   napi_value argv[1];
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
-  if (session_handlers_map_.find(argv[0]) == session_handlers_map_.end()) {
-    auto sessionHandler =
+  auto existing = std::find_if(
+      session_handlers_.begin(), session_handlers_.end(),
+      [env, value = argv[0]](const SessionHandlerRegistration& registration) {
+        return registration.handler->IsSame(env, value);
+      });
+  if (existing == session_handlers_.end()) {
+    auto session_handler =
         std::make_shared<DebugRouterSessionHandlerHarmony>(env, argv[0]);
-    session_handlers[argv[0]] = sessionHandler;
-    int handler_id = core::DebugRouterCore::GetInstance().AddSessionHandler(
-        sessionHandler.get());
-    session_handlers_map_[argv[0]] = handler_id;
+    int handler_id =
+        core::DebugRouterCore::GetInstance().AddSessionHandler(session_handler);
+    session_handlers_.push_back({handler_id, std::move(session_handler)});
   }
   return nullptr;
 }
@@ -164,12 +168,16 @@ napi_value DebugRouterHarmony::RemoveSessionHandler(napi_env env,
   napi_value result;
 
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
-  if (session_handlers_map_.find(argv[0]) != session_handlers_map_.end()) {
-    session_handlers.erase(argv[0]);
-    int handler_id = session_handlers_map_[argv[0]];
-    bool res =
-        core::DebugRouterCore::GetInstance().RemoveSessionHandler(handler_id);
-    session_handlers_map_.erase(argv[0]);
+  auto existing = std::find_if(
+      session_handlers_.begin(), session_handlers_.end(),
+      [env, value = argv[0]](const SessionHandlerRegistration& registration) {
+        return registration.handler->IsSame(env, value);
+      });
+  if (existing != session_handlers_.end()) {
+    existing->handler->Deactivate();
+    bool res = core::DebugRouterCore::GetInstance().RemoveSessionHandler(
+        existing->handler_id);
+    session_handlers_.erase(existing);
     napi_get_boolean(env, res, &result);
     return result;
   }
@@ -183,13 +191,48 @@ napi_value DebugRouterHarmony::AddMessageHandler(napi_env env,
   size_t argc = 1;
   napi_value argv[1];
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
-  if (message_handlers_map_.find(argv[0]) == message_handlers_map_.end()) {
-    auto messageHandler =
-        std::make_shared<DebugRouterMessageHandlerHarmony>(env, argv[0]);
-    message_handlers[argv[0]] = messageHandler;
-    core::DebugRouterCore::GetInstance().AddMessageHandler(
-        messageHandler.get());
-    message_handlers_map_[argv[0]] = messageHandler->GetName();
+  auto existing = std::find_if(
+      message_handlers_.begin(), message_handlers_.end(),
+      [env, value = argv[0]](const MessageHandlerRegistration& registration) {
+        return registration.handler->IsSame(env, value);
+      });
+  if (existing != message_handlers_.end()) {
+    return nullptr;
+  }
+
+  napi_value get_name = nullptr;
+  napi_value name_value = nullptr;
+  napi_status status =
+      napi_get_named_property(env, argv[0], "getName", &get_name);
+  if (status == napi_ok) {
+    status =
+        napi_call_function(env, argv[0], get_name, 0, nullptr, &name_value);
+  }
+  if (status != napi_ok || name_value == nullptr) {
+    napi_throw_error(env, nullptr,
+                     "DebugRouter message handler getName() failed");
+    return nullptr;
+  }
+  std::string handler_name = base::NapiUtil::ConvertToString(env, name_value);
+  if (handler_name.empty()) {
+    napi_throw_error(env, nullptr,
+                     "DebugRouter message handler name must not be empty");
+    return nullptr;
+  }
+
+  auto same_name = std::find_if(
+      message_handlers_.begin(), message_handlers_.end(),
+      [&handler_name](const MessageHandlerRegistration& registration) {
+        return registration.handler_name == handler_name;
+      });
+  auto message_handler = std::make_shared<DebugRouterMessageHandlerHarmony>(
+      env, argv[0], handler_name);
+  core::DebugRouterCore::GetInstance().AddMessageHandler(message_handler);
+  if (same_name != message_handlers_.end()) {
+    same_name->handler = std::move(message_handler);
+  } else {
+    message_handlers_.push_back(
+        {std::move(handler_name), std::move(message_handler)});
   }
   return nullptr;
 }
@@ -200,13 +243,21 @@ napi_value DebugRouterHarmony::RemoveMessageHandler(napi_env env,
   size_t argc = 1;
   napi_value argv[1];
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
-  if (message_handlers_map_.find(argv[0]) != message_handlers_map_.end()) {
-    message_handlers.erase(argv[0]);
-    std::string name = message_handlers_map_[argv[0]];
-    core::DebugRouterCore::GetInstance().RemoveMessageHandler(name);
-    message_handlers_map_.erase(argv[0]);
+  napi_value result;
+  auto existing = std::find_if(
+      message_handlers_.begin(), message_handlers_.end(),
+      [env, value = argv[0]](const MessageHandlerRegistration& registration) {
+        return registration.handler->IsSame(env, value);
+      });
+  bool removed = false;
+  if (existing != message_handlers_.end()) {
+    existing->handler->Deactivate();
+    removed = core::DebugRouterCore::GetInstance().RemoveMessageHandler(
+        existing->handler_name);
+    message_handlers_.erase(existing);
   }
-  return nullptr;
+  napi_get_boolean(env, removed, &result);
+  return result;
 }
 
 napi_value DebugRouterHarmony::AddStateListener(napi_env env,

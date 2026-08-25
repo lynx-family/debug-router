@@ -14,20 +14,44 @@ DebugRouterSessionHandlerHarmony::DebugRouterSessionHandlerHarmony(
     napi_env env, napi_value js_this)
     : env_(env), js_this_ref_(nullptr) {
   napi_create_reference(env, js_this, 1, &js_this_ref_);
-  napi_get_uv_event_loop(env, &loop_);
+  uv_loop_t* loop = nullptr;
+  napi_get_uv_event_loop(env, &loop);
+  js_task_runner_ =
+      fml::MessageLoop::EnsureInitializedForCurrentThread(loop).GetTaskRunner();
+}
+
+DebugRouterSessionHandlerHarmony::~DebugRouterSessionHandlerHarmony() {
+  napi_env env = env_;
+  napi_ref reference = js_this_ref_;
+  js_this_ref_ = nullptr;
+  fml::TaskRunner::RunNowOrPostTask(js_task_runner_, [env, reference]() {
+    if (reference != nullptr) {
+      napi_delete_reference(env, reference);
+    }
+  });
+}
+
+bool DebugRouterSessionHandlerHarmony::IsSame(napi_env env,
+                                              napi_value value) const {
+  if (env != env_) {
+    return false;
+  }
+  napi_value object;
+  bool equal = false;
+  return napi_get_reference_value(env_, js_this_ref_, &object) == napi_ok &&
+         napi_strict_equals(env_, object, value, &equal) == napi_ok && equal;
 }
 
 void DebugRouterSessionHandlerHarmony::OnSessionCreate(int session_id,
-                                                       const std::string &url) {
-  auto ui_task_runner =
-      fml::MessageLoop::EnsureInitializedForCurrentThread(loop_)
-          .GetTaskRunner();
-  ui_task_runner->PostTask([weak_ptr = weak_from_this(), session_id, url]() {
-    napi_value js_this;
-    auto handler = weak_ptr.lock();
-    if (!handler) {
+                                                       const std::string& url) {
+  if (!active_.load()) {
+    return;
+  }
+  js_task_runner_->PostTask([handler = shared_from_this(), session_id, url]() {
+    if (!handler->active_.load()) {
       return;
     }
+    napi_value js_this;
     napi_get_reference_value(handler->env_, handler->js_this_ref_, &js_this);
     napi_value onSessionCreate;
     auto status = napi_get_named_property(handler->env_, js_this,
@@ -45,15 +69,14 @@ void DebugRouterSessionHandlerHarmony::OnSessionCreate(int session_id,
 }
 
 void DebugRouterSessionHandlerHarmony::OnSessionDestroy(int session_id) {
-  auto ui_task_runner =
-      fml::MessageLoop::EnsureInitializedForCurrentThread(loop_)
-          .GetTaskRunner();
-  ui_task_runner->PostTask([weak_ptr = weak_from_this(), session_id]() {
-    napi_value js_this;
-    auto handler = weak_ptr.lock();
-    if (!handler) {
+  if (!active_.load()) {
+    return;
+  }
+  js_task_runner_->PostTask([handler = shared_from_this(), session_id]() {
+    if (!handler->active_.load()) {
       return;
     }
+    napi_value js_this;
     napi_get_reference_value(handler->env_, handler->js_this_ref_, &js_this);
     napi_value onSessionDestroy;
     auto status = napi_get_named_property(
@@ -68,19 +91,18 @@ void DebugRouterSessionHandlerHarmony::OnSessionDestroy(int session_id) {
   });
 }
 
-void DebugRouterSessionHandlerHarmony::OnMessage(const std::string &message,
-                                                 const std::string &type,
+void DebugRouterSessionHandlerHarmony::OnMessage(const std::string& message,
+                                                 const std::string& type,
                                                  int session_id) {
-  auto ui_task_runner =
-      fml::MessageLoop::EnsureInitializedForCurrentThread(loop_)
-          .GetTaskRunner();
-  ui_task_runner->PostTask([weak_ptr = weak_from_this(), message, type,
-                            session_id]() {
-    napi_value js_this;
-    auto handler = weak_ptr.lock();
-    if (!handler) {
+  if (!active_.load()) {
+    return;
+  }
+  js_task_runner_->PostTask([handler = shared_from_this(), message, type,
+                             session_id]() {
+    if (!handler->active_.load()) {
       return;
     }
+    napi_value js_this;
     napi_get_reference_value(handler->env_, handler->js_this_ref_, &js_this);
     napi_value onMessage;
     auto status = napi_get_named_property(handler->env_, js_this, "onMessage",

@@ -15,20 +15,27 @@ DebugRouterStateListenerHarmony::DebugRouterStateListenerHarmony(
     napi_env env, napi_value js_this)
     : env_(env), js_this_ref_(nullptr) {
   napi_create_reference(env, js_this, 1, &js_this_ref_);
-  napi_get_uv_event_loop(env, &loop_);
+  uv_loop_t* loop = nullptr;
+  napi_get_uv_event_loop(env, &loop);
+  js_task_runner_ =
+      fml::MessageLoop::EnsureInitializedForCurrentThread(loop).GetTaskRunner();
+}
+
+DebugRouterStateListenerHarmony::~DebugRouterStateListenerHarmony() {
+  napi_env env = env_;
+  napi_ref reference = js_this_ref_;
+  js_this_ref_ = nullptr;
+  fml::TaskRunner::RunNowOrPostTask(js_task_runner_, [env, reference]() {
+    if (reference != nullptr) {
+      napi_delete_reference(env, reference);
+    }
+  });
 }
 
 void DebugRouterStateListenerHarmony::OnOpen(
     debugrouter::core::ConnectionType type) {
-  auto ui_task_runner =
-      fml::MessageLoop::EnsureInitializedForCurrentThread(loop_)
-          .GetTaskRunner();
-  ui_task_runner->PostTask([weak_ptr = weak_from_this(), type]() {
+  js_task_runner_->PostTask([handler = shared_from_this(), type]() {
     napi_value js_this;
-    auto handler = weak_ptr.lock();
-    if (!handler) {
-      return;
-    }
     napi_get_reference_value(handler->env_, handler->js_this_ref_, &js_this);
     napi_value onOpen;
     auto status =
@@ -46,16 +53,9 @@ void DebugRouterStateListenerHarmony::OnOpen(
 }
 
 void DebugRouterStateListenerHarmony::OnClose(int32_t code,
-                                              const std::string &reason) {
-  auto ui_task_runner =
-      fml::MessageLoop::EnsureInitializedForCurrentThread(loop_)
-          .GetTaskRunner();
-  ui_task_runner->PostTask([weak_ptr = weak_from_this(), code, reason]() {
+                                              const std::string& reason) {
+  js_task_runner_->PostTask([handler = shared_from_this(), code, reason]() {
     napi_value js_this;
-    auto handler = weak_ptr.lock();
-    if (!handler) {
-      return;
-    }
     napi_get_reference_value(handler->env_, handler->js_this_ref_, &js_this);
     napi_value onClose;
     auto status =
@@ -72,16 +72,9 @@ void DebugRouterStateListenerHarmony::OnClose(int32_t code,
   });
 }
 
-void DebugRouterStateListenerHarmony::OnMessage(const std::string &message) {
-  auto ui_task_runner =
-      fml::MessageLoop::EnsureInitializedForCurrentThread(loop_)
-          .GetTaskRunner();
-  ui_task_runner->PostTask([weak_ptr = weak_from_this(), message]() {
+void DebugRouterStateListenerHarmony::OnMessage(const std::string& message) {
+  js_task_runner_->PostTask([handler = shared_from_this(), message]() {
     napi_value js_this;
-    auto handler = weak_ptr.lock();
-    if (!handler) {
-      return;
-    }
     napi_get_reference_value(handler->env_, handler->js_this_ref_, &js_this);
     napi_value onMessage;
     auto status = napi_get_named_property(handler->env_, js_this, "onMessage",
@@ -97,16 +90,9 @@ void DebugRouterStateListenerHarmony::OnMessage(const std::string &message) {
   });
 }
 
-void DebugRouterStateListenerHarmony::OnError(const std::string &error) {
-  auto ui_task_runner =
-      fml::MessageLoop::EnsureInitializedForCurrentThread(loop_)
-          .GetTaskRunner();
-  ui_task_runner->PostTask([weak_ptr = weak_from_this(), error]() {
+void DebugRouterStateListenerHarmony::OnError(const std::string& error) {
+  js_task_runner_->PostTask([handler = shared_from_this(), error]() {
     napi_value js_this;
-    auto handler = weak_ptr.lock();
-    if (!handler) {
-      return;
-    }
     napi_get_reference_value(handler->env_, handler->js_this_ref_, &js_this);
     napi_value onError;
     auto status =

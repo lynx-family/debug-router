@@ -42,7 +42,7 @@ class MessageHandlerCore : public processor::MessageHandler {
 
   std::unordered_map<int, std::string> GetSessionList() override {
     std::unordered_map<int, std::string> session_list;
-    auto &core = DebugRouterCore::GetInstance();
+    auto& core = DebugRouterCore::GetInstance();
     const bool enable_all_sessions =
         core.enable_all_sessions_.load(std::memory_order_relaxed);
     std::unordered_set<int32_t> enabled_session_ids;
@@ -52,7 +52,7 @@ class MessageHandlerCore : public processor::MessageHandler {
     }
 
     std::shared_lock lock(core.slots_mutex_);
-    for (const auto &slot : core.slots_) {
+    for (const auto& slot : core.slots_) {
       if (!enable_all_sessions && enabled_session_ids.count(slot.first) == 0) {
         continue;
       }
@@ -64,10 +64,17 @@ class MessageHandlerCore : public processor::MessageHandler {
     return session_list;
   }
 
-  std::string HandleAppAction(const std::string &method,
-                              const std::string &params) override {
-    DebugRouterMessageHandler *handler =
-        DebugRouterCore::GetInstance().message_handlers_[method];
+  std::string HandleAppAction(const std::string& method,
+                              const std::string& params) override {
+    std::shared_ptr<DebugRouterMessageHandler> handler;
+    {
+      auto& core = DebugRouterCore::GetInstance();
+      std::shared_lock lock(core.message_handler_mutex_);
+      auto it = core.message_handlers_.find(method);
+      if (it != core.message_handlers_.end()) {
+        handler = it->second;
+      }
+    }
     if (handler) {
       return handler->Handle(params);
     } else {
@@ -76,21 +83,21 @@ class MessageHandlerCore : public processor::MessageHandler {
     }
   }
 
-  void OnMessage(const std::string &type, int session_id,
-                 const std::string &message) override {
+  void OnMessage(const std::string& type, int session_id,
+                 const std::string& message) override {
     if (session_id < 0) {
-      std::vector<DebugRouterGlobalHandler *> handlers;
+      std::vector<std::shared_ptr<DebugRouterGlobalHandler>> handlers;
       {
         std::shared_lock lock(
             DebugRouterCore::GetInstance().global_handler_mutex_);
-        const auto &global_handler_map =
+        const auto& global_handler_map =
             DebugRouterCore::GetInstance().global_handler_map_;
         handlers.reserve(global_handler_map.size());
         for (auto it : global_handler_map) {
           handlers.push_back(it.second);
         }
       }
-      for (auto *handler : handlers) {
+      for (const auto& handler : handlers) {
         handler->OnMessage(message, type);
       }
       return;
@@ -107,18 +114,18 @@ class MessageHandlerCore : public processor::MessageHandler {
     }
 
     {
-      std::vector<DebugRouterSessionHandler *> handlers;
+      std::vector<std::shared_ptr<DebugRouterSessionHandler>> handlers;
       {
         std::shared_lock lock(
             DebugRouterCore::GetInstance().session_handler_mutex_);
-        const auto &session_handler_map =
+        const auto& session_handler_map =
             DebugRouterCore::GetInstance().session_handler_map_;
         handlers.reserve(session_handler_map.size());
         for (auto it : session_handler_map) {
           handlers.push_back(it.second);
         }
       }
-      for (auto *handler : handlers) {
+      for (const auto& handler : handlers) {
         handler->OnMessage(message, type, session_id);
       }
     }
@@ -129,7 +136,7 @@ class MessageHandlerCore : public processor::MessageHandler {
     std::shared_ptr<core::NativeSlot> slot;
     {
       std::shared_lock lock(DebugRouterCore::GetInstance().slots_mutex_);
-      const auto &slots = DebugRouterCore::GetInstance().slots_;
+      const auto& slots = DebugRouterCore::GetInstance().slots_;
       auto it = slots.find(session_id);
       if (it != slots.end()) {
         slot = it->second;
@@ -140,36 +147,36 @@ class MessageHandlerCore : public processor::MessageHandler {
     }
   }
 
-  void SendMessage(const std::string &message) override {
+  void SendMessage(const std::string& message) override {
     DebugRouterCore::GetInstance().Send(message);
   }
 
-  void OpenCard(const std::string &url) override {
-    std::vector<DebugRouterGlobalHandler *> handlers;
+  void OpenCard(const std::string& url) override {
+    std::vector<std::shared_ptr<DebugRouterGlobalHandler>> handlers;
     {
       std::shared_lock lock(
           DebugRouterCore::GetInstance().global_handler_mutex_);
-      const auto &global_handler_map_ =
+      const auto& global_handler_map_ =
           DebugRouterCore::GetInstance().global_handler_map_;
       handlers.reserve(global_handler_map_.size());
       for (auto it : global_handler_map_) {
         handlers.push_back(it.second);
       }
     }
-    for (auto *handler : handlers) {
+    for (const auto& handler : handlers) {
       handler->OpenCard(url);
     }
   }
 
-  void ChangeRoomServer(const std::string &url,
-                        const std::string &room) override {
+  void ChangeRoomServer(const std::string& url,
+                        const std::string& room) override {
     DebugRouterCore::GetInstance().Connect(url, room);
   }
 
-  void ReportError(const std::string &error) override {}
+  void ReportError(const std::string& error) override {}
 };
 
-DebugRouterCore &DebugRouterCore::GetInstance() {
+DebugRouterCore& DebugRouterCore::GetInstance() {
   static base::NoDestructor<DebugRouterCore> instance;
   return *instance;
 }
@@ -210,7 +217,7 @@ void DebugRouterCore::SetReportDelegate(
   report_ = std::move(report);
 }
 
-void DebugRouterCore::Connect(const std::string &url, const std::string &room) {
+void DebugRouterCore::Connect(const std::string& url, const std::string& room) {
   Connect(url, room, false);
 }
 
@@ -228,8 +235,8 @@ void DebugRouterCore::Disconnect() {
   }
 }
 
-void DebugRouterCore::ConnectAsync(const std::string &url,
-                                   const std::string &room) {
+void DebugRouterCore::ConnectAsync(const std::string& url,
+                                   const std::string& room) {
   thread::DebugRouterExecutor::GetInstance().Post(
       [=]() { Connect(url, room); });
 }
@@ -247,7 +254,7 @@ void DebugRouterCore::Reconnect() {
   }
 }
 
-void DebugRouterCore::Connect(const std::string &url, const std::string &room,
+void DebugRouterCore::Connect(const std::string& url, const std::string& room,
                               bool is_reconnect) {
   std::string curr_host_ = "";
   std::size_t pos = url.find("page/android");
@@ -296,20 +303,20 @@ void DebugRouterCore::Connect(const std::string &url, const std::string &room,
   room_id_ = room;
 }
 
-void DebugRouterCore::Send(const std::string &message) {
+void DebugRouterCore::Send(const std::string& message) {
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     current_transceiver_->Send(message);
   }
 }
 
-void DebugRouterCore::SendAsync(const std::string &message) {
+void DebugRouterCore::SendAsync(const std::string& message) {
   if (connection_state_.load(std::memory_order_relaxed) != CONNECTED) {
     return;
   }
   thread::DebugRouterExecutor::GetInstance().Post([=]() { Send(message); });
 }
 
-void DebugRouterCore::SendData(const std::string &data, const std::string &type,
+void DebugRouterCore::SendData(const std::string& data, const std::string& type,
                                int32_t session, int32_t mark, bool is_object) {
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     if (!enable_all_sessions_.load(std::memory_order_relaxed) && session > 0 &&
@@ -322,8 +329,8 @@ void DebugRouterCore::SendData(const std::string &data, const std::string &type,
   }
 }
 
-void DebugRouterCore::SendDataAsync(const std::string &data,
-                                    const std::string &type, int32_t session,
+void DebugRouterCore::SendDataAsync(const std::string& data,
+                                    const std::string& type, int32_t session,
                                     int32_t mark, bool is_object) {
   if (connection_state_.load(std::memory_order_relaxed) != CONNECTED) {
     return;
@@ -332,7 +339,7 @@ void DebugRouterCore::SendDataAsync(const std::string &data,
       [=]() { SendData(data, type, session, mark, is_object); });
 }
 
-int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
+int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot>& slot) {
   {
     std::unique_lock lock(slots_mutex_);
     max_session_id_++;
@@ -344,7 +351,7 @@ int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
   }
   NotifyConnectStateByMessage(GetConnectionState());
   {
-    std::vector<DebugRouterSessionHandler *> handlers;
+    std::vector<std::shared_ptr<DebugRouterSessionHandler>> handlers;
     {
       std::shared_lock lock(session_handler_mutex_);
       handlers.reserve(session_handler_map_.size());
@@ -352,7 +359,7 @@ int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
         handlers.push_back(it.second);
       }
     }
-    for (auto *handler : handlers) {
+    for (const auto& handler : handlers) {
       handler->OnSessionCreate(max_session_id_, slot->GetUrl());
     }
   }
@@ -412,7 +419,7 @@ void DebugRouterCore::Pull(int32_t session_id_) {
     processor_->FlushSessionList();
   }
   {
-    std::vector<DebugRouterSessionHandler *> handlers;
+    std::vector<std::shared_ptr<DebugRouterSessionHandler>> handlers;
     {
       std::shared_lock lock(session_handler_mutex_);
       handlers.reserve(session_handler_map_.size());
@@ -420,15 +427,15 @@ void DebugRouterCore::Pull(int32_t session_id_) {
         handlers.push_back(it.second);
       }
     }
-    for (auto *handler : handlers) {
+    for (const auto& handler : handlers) {
       handler->OnSessionDestroy(session_id_);
     }
   }
 }
 
 void DebugRouterCore::OnInit(
-    const std::shared_ptr<MessageTransceiver> &transceiver, int32_t code,
-    const std::string &info) {
+    const std::shared_ptr<MessageTransceiver>& transceiver, int32_t code,
+    const std::string& info) {
   if (code != 0) {
     return;
   }
@@ -441,17 +448,17 @@ void DebugRouterCore::OnInit(
   usb_port_.store(std::stoi(port), std::memory_order_relaxed);
 }
 
-void DebugRouterCore::Report(const std::string &eventName,
-                             const std::string &category,
-                             const std::string &metric,
-                             const std::string &extra) {
+void DebugRouterCore::Report(const std::string& eventName,
+                             const std::string& category,
+                             const std::string& metric,
+                             const std::string& extra) {
   if (report_ != nullptr) {
     report_->report(eventName, category, metric, extra);
   }
 }
 
 void DebugRouterCore::OnOpen(
-    const std::shared_ptr<MessageTransceiver> &transceiver) {
+    const std::shared_ptr<MessageTransceiver>& transceiver) {
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
     if (current_transceiver_ == transceiver) {
       return;
@@ -493,13 +500,13 @@ void DebugRouterCore::OnOpen(
     listeners = state_listeners_;
   }
 
-  for (const auto &listener : listeners) {
+  for (const auto& listener : listeners) {
     listener->OnOpen(connect_type);
   }
 }
 
 void DebugRouterCore::OnClosed(
-    const std::shared_ptr<MessageTransceiver> &transceiver) {
+    const std::shared_ptr<MessageTransceiver>& transceiver) {
   LOGI("DebugRouterCore: onClosed.");
   if (transceiver != current_transceiver_ ||
       connection_state_.load(std::memory_order_relaxed) == DISCONNECTED) {
@@ -517,7 +524,7 @@ void DebugRouterCore::OnClosed(
       listeners = state_listeners_;
     }
 
-    for (const auto &listener : listeners) {
+    for (const auto& listener : listeners) {
       listener->OnClose(-1, "unknown reason");
     }
   }
@@ -537,8 +544,8 @@ void DebugRouterCore::OnClosed(
 }
 
 void DebugRouterCore::OnFailure(
-    const std::shared_ptr<MessageTransceiver> &transceiver,
-    const std::string &error_message, int error_code) {
+    const std::shared_ptr<MessageTransceiver>& transceiver,
+    const std::string& error_message, int error_code) {
   LOGI("DebugRouterCore: onFailure. errorcode: " << error_code);
   if ((current_transceiver_ != nullptr &&
        transceiver != current_transceiver_) ||
@@ -587,7 +594,7 @@ void DebugRouterCore::OnFailure(
       listeners = state_listeners_;
     }
 
-    for (const auto &listener : listeners) {
+    for (const auto& listener : listeners) {
       // TODO(zhoumingsong.smile): add more details
       listener->OnError(error_message);
     }
@@ -602,8 +609,8 @@ void DebugRouterCore::OnFailure(
 }
 
 void DebugRouterCore::OnMessage(
-    const std::string &message,
-    const std::shared_ptr<MessageTransceiver> &transceiver) {
+    const std::string& message,
+    const std::shared_ptr<MessageTransceiver>& transceiver) {
   if (transceiver != current_transceiver_) {
     return;
   }
@@ -615,20 +622,35 @@ void DebugRouterCore::OnMessage(
     listeners = state_listeners_;
   }
 
-  for (const auto &listener : listeners) {
+  for (const auto& listener : listeners) {
     listener->OnMessage(message);
   }
 }
+
+#ifdef TESTING
+void DebugRouterCore::ProcessMessageForTest(const std::string& message) {
+  processor_->Process(message);
+}
+#endif
 
 DebugRouterCore::~DebugRouterCore() {
   // TODO(zhoumingsong.smile): Stop websocketClient's thread
   // It's not a good way to do this
 }
 
-int DebugRouterCore::AddGlobalHandler(DebugRouterGlobalHandler *handler) {
+int DebugRouterCore::AddGlobalHandler(DebugRouterGlobalHandler* handler) {
+  return AddGlobalHandler(std::shared_ptr<DebugRouterGlobalHandler>(
+      handler, [](DebugRouterGlobalHandler*) {}));
+}
+
+int DebugRouterCore::AddGlobalHandler(
+    const std::shared_ptr<DebugRouterGlobalHandler>& handler) {
+  if (!handler) {
+    return -1;
+  }
   std::unique_lock lock(global_handler_mutex_);
-  for (auto key : global_handler_map_) {
-    if (key.second == handler) {
+  for (const auto& key : global_handler_map_) {
+    if (key.second.get() == handler.get()) {
       return key.first;
     }
   }
@@ -638,35 +660,72 @@ int DebugRouterCore::AddGlobalHandler(DebugRouterGlobalHandler *handler) {
 }
 
 bool DebugRouterCore::RemoveGlobalHandler(int handler_id) {
-  std::unique_lock lock(global_handler_mutex_);
-  auto it = global_handler_map_.find(handler_id);
-  if (it != global_handler_map_.end()) {
+  std::shared_ptr<DebugRouterGlobalHandler> removed_handler;
+  {
+    std::unique_lock lock(global_handler_mutex_);
+    auto it = global_handler_map_.find(handler_id);
+    if (it == global_handler_map_.end()) {
+      return false;
+    }
+    removed_handler = std::move(it->second);
     global_handler_map_.erase(it);
-    return true;
   }
-  return false;
+  return true;
 }
 
-void DebugRouterCore::AddMessageHandler(DebugRouterMessageHandler *handler) {
+void DebugRouterCore::AddMessageHandler(DebugRouterMessageHandler* handler) {
+  AddMessageHandler(std::shared_ptr<DebugRouterMessageHandler>(
+      handler, [](DebugRouterMessageHandler*) {}));
+}
+
+void DebugRouterCore::AddMessageHandler(
+    const std::shared_ptr<DebugRouterMessageHandler>& handler) {
   if (!handler) {
     return;
   }
   std::string handler_name = handler->GetName();
-  if (message_handlers_.find(handler_name) != message_handlers_.end()) {
-    LOGW("DebugRouterCore: " << handler_name << " handler has been override.");
+  std::shared_ptr<DebugRouterMessageHandler> replaced_handler;
+  {
+    std::unique_lock lock(message_handler_mutex_);
+    auto it = message_handlers_.find(handler_name);
+    if (it != message_handlers_.end()) {
+      LOGW("DebugRouterCore: " << handler_name
+                               << " handler has been override.");
+      replaced_handler = std::move(it->second);
+      it->second = handler;
+    } else {
+      message_handlers_.emplace(handler_name, handler);
+    }
   }
-  message_handlers_[handler_name] = handler;
 }
 
-bool DebugRouterCore::RemoveMessageHandler(const std::string &handler_name) {
-  size_t erased_count = message_handlers_.erase(handler_name);
-  return erased_count > 0;
+bool DebugRouterCore::RemoveMessageHandler(const std::string& handler_name) {
+  std::shared_ptr<DebugRouterMessageHandler> removed_handler;
+  {
+    std::unique_lock lock(message_handler_mutex_);
+    auto it = message_handlers_.find(handler_name);
+    if (it == message_handlers_.end()) {
+      return false;
+    }
+    removed_handler = std::move(it->second);
+    message_handlers_.erase(it);
+  }
+  return true;
 }
 
-int DebugRouterCore::AddSessionHandler(DebugRouterSessionHandler *handler) {
+int DebugRouterCore::AddSessionHandler(DebugRouterSessionHandler* handler) {
+  return AddSessionHandler(std::shared_ptr<DebugRouterSessionHandler>(
+      handler, [](DebugRouterSessionHandler*) {}));
+}
+
+int DebugRouterCore::AddSessionHandler(
+    const std::shared_ptr<DebugRouterSessionHandler>& handler) {
+  if (!handler) {
+    return -1;
+  }
   std::unique_lock lock(session_handler_mutex_);
-  for (auto key : session_handler_map_) {
-    if (key.second == handler) {
+  for (const auto& key : session_handler_map_) {
+    if (key.second.get() == handler.get()) {
       return key.first;
     }
   }
@@ -676,23 +735,27 @@ int DebugRouterCore::AddSessionHandler(DebugRouterSessionHandler *handler) {
 }
 
 bool DebugRouterCore::RemoveSessionHandler(int handler_id) {
-  std::unique_lock lock(session_handler_mutex_);
-  auto it = session_handler_map_.find(handler_id);
-  if (it != session_handler_map_.end()) {
+  std::shared_ptr<DebugRouterSessionHandler> removed_handler;
+  {
+    std::unique_lock lock(session_handler_mutex_);
+    auto it = session_handler_map_.find(handler_id);
+    if (it == session_handler_map_.end()) {
+      return false;
+    }
+    removed_handler = std::move(it->second);
     session_handler_map_.erase(it);
-    return true;
   }
-  return false;
+  return true;
 }
 
-bool DebugRouterCore::IsValidSchema(const std::string &schema) {
+bool DebugRouterCore::IsValidSchema(const std::string& schema) {
   return schema.find("remote_debug_lynx") != std::string::npos;
 }
 
 std::string DebugRouterCore::GetRoomId() { return room_id_; }
 std::string DebugRouterCore::GetServerUrl() { return server_url_; }
 
-bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
+bool DebugRouterCore::HandleSchema(const std::string& encode_schema) {
   std::string url, room;
   std::string schema = util::decodeURIComponent(encode_schema);
   Json::Value catagaryJson;
@@ -771,7 +834,7 @@ bool DebugRouterCore::HandleSchema(const std::string &encode_schema) {
 }
 
 void DebugRouterCore::AddStateListener(
-    const std::shared_ptr<DebugRouterStateListener> &listener) {
+    const std::shared_ptr<DebugRouterStateListener>& listener) {
   if (listener == nullptr) {
     return;
   }
@@ -796,18 +859,18 @@ bool DebugRouterCore::IsConnected() {
 }
 
 void DebugRouterCore::SetAppInfo(
-    const std::unordered_map<std::string, std::string> &app_info) {
+    const std::unordered_map<std::string, std::string>& app_info) {
   for (auto it = app_info.begin(); it != app_info.end(); ++it) {
     app_info_[it->first] = it->second;
   }
 }
 
-void DebugRouterCore::SetAppInfo(const std::string &key,
-                                 const std::string &value) {
+void DebugRouterCore::SetAppInfo(const std::string& key,
+                                 const std::string& value) {
   app_info_[key] = value;
 }
 
-std::string DebugRouterCore::GetAppInfoByKey(const std::string &key) {
+std::string DebugRouterCore::GetAppInfoByKey(const std::string& key) {
   auto it = app_info_.find(key);
   if (it != app_info_.end()) {
     return it->second;

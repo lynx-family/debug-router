@@ -81,13 +81,13 @@ class testSlotDelegate implements DebugRouterSlotDelegate {
 @Component
 struct Index {
   aboutToAppear() {
-    DebugRouter.createInstance();
+    DebugRouter.ensureInitialized();
     DebugRouter.enableAllSessions();
     DebugRouter.setAppInfo('bundle', 'org.lynxjs.debugrouter.testapp')
     DebugRouter.setAppInfo('App', 'DebugRouter')
     DebugRouter.setAppInfo('debugRouterVersion', '0.0.1')
     DebugRouter.setAppInfo(new Map([['testkey', 'testvalue']]));
-    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testkey: ' + DebugRouter.getAppInfoBykey('testkey'));
+    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testkey: ' + DebugRouter.getAppInfoByKey('testkey'));
 
     // test DebugRouterStateListener
     DebugRouter.addStateListener(new testStateListener());

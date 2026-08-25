@@ -15,20 +15,31 @@ NativeSlotHarmony::NativeSlotHarmony(napi_env env, napi_value js_this,
                                      const std::string& type)
     : NativeSlot(type, url), env_(env), js_this_ref_(nullptr) {
   napi_create_reference(env, js_this, 1, &js_this_ref_);
-  napi_get_uv_event_loop(env, &loop_);
+  uv_loop_t* loop = nullptr;
+  napi_get_uv_event_loop(env, &loop);
+  js_task_runner_ =
+      fml::MessageLoop::EnsureInitializedForCurrentThread(loop).GetTaskRunner();
+}
+
+NativeSlotHarmony::~NativeSlotHarmony() {
+  napi_env env = env_;
+  napi_ref reference = js_this_ref_;
+  js_this_ref_ = nullptr;
+  fml::TaskRunner::RunNowOrPostTask(js_task_runner_, [env, reference]() {
+    if (reference != nullptr) {
+      napi_delete_reference(env, reference);
+    }
+  });
 }
 
 void NativeSlotHarmony::OnMessage(const std::string& message,
                                   const std::string& type) {
-  auto ui_task_runner =
-      fml::MessageLoop::EnsureInitializedForCurrentThread(loop_)
-          .GetTaskRunner();
-  ui_task_runner->PostTask([weak_ptr = weak_from_this(), message, type]() {
-    napi_value js_this;
+  js_task_runner_->PostTask([weak_ptr = weak_from_this(), message, type]() {
     auto handler = weak_ptr.lock();
     if (!handler) {
       return;
     }
+    napi_value js_this;
     napi_get_reference_value(handler->env_, handler->js_this_ref_, &js_this);
     napi_value onMessage;
     auto status = napi_get_named_property(handler->env_, js_this, "onMessage",
