@@ -8,9 +8,9 @@
 #include <node_api.h>
 #include <uv.h>
 
-#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "debug_router/native/core/debug_router_core.h"
 #include "debug_router/native/harmony/debug_router_global_handler_harmony.h"
@@ -21,12 +21,6 @@ namespace debugrouter {
 namespace harmony {
 
 typedef enum { Unknown = -1, WebSocket = 0, USB } ConnectionType;
-
-struct NapiValueCompare {
-  bool operator()(const napi_value& lhs, const napi_value& rhs) const {
-    return lhs < rhs;
-  }
-};
 
 class DebugRouterHarmony {
  public:
@@ -59,8 +53,7 @@ class DebugRouterHarmony {
                               napi_callback_info info);  // message
   static napi_value SendDataAsync(
       napi_env env,
-      napi_callback_info
-          info);  // data, type, session_id(, is_object) 大部分都是前三个参数
+      napi_callback_info info);  // type, session_id, data
 
   static napi_value Plug(
       napi_env env,
@@ -88,20 +81,22 @@ class DebugRouterHarmony {
   static napi_value IsDebugChannelEnabled(napi_env env,
                                           napi_callback_info info);
 
-  static std::map<napi_value, int, NapiValueCompare> global_handlers_map_;
-  static std::map<napi_value, int, NapiValueCompare> session_handlers_map_;
-  static std::map<napi_value, std::string, NapiValueCompare>
-      message_handlers_map_;
-  // 保留强引用，否则DebugRouterGlobalHandlerHarmony会被销毁
-  static std::map<napi_value, std::shared_ptr<DebugRouterGlobalHandlerHarmony>,
-                  NapiValueCompare>
-      global_handlers;
-  static std::map<napi_value, std::shared_ptr<DebugRouterSessionHandlerHarmony>,
-                  NapiValueCompare>
-      session_handlers;
-  static std::map<napi_value, std::shared_ptr<DebugRouterMessageHandlerHarmony>,
-                  NapiValueCompare>
-      message_handlers;
+  struct GlobalHandlerRegistration {
+    int handler_id;
+    std::shared_ptr<DebugRouterGlobalHandlerHarmony> handler;
+  };
+  struct SessionHandlerRegistration {
+    int handler_id;
+    std::shared_ptr<DebugRouterSessionHandlerHarmony> handler;
+  };
+  struct MessageHandlerRegistration {
+    std::string handler_name;
+    std::shared_ptr<DebugRouterMessageHandlerHarmony> handler;
+  };
+
+  static std::vector<GlobalHandlerRegistration> global_handlers_;
+  static std::vector<SessionHandlerRegistration> session_handlers_;
+  static std::vector<MessageHandlerRegistration> message_handlers_;
 };
 
 }  // namespace harmony

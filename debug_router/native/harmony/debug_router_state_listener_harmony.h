@@ -9,6 +9,7 @@
 #include <uv.h>
 
 #include "debug_router/native/core/debug_router_state_listener.h"
+#include "debug_router/native/harmony/base/fml/task_runner.h"
 
 namespace debugrouter {
 namespace harmony {
@@ -18,21 +19,19 @@ class DebugRouterStateListenerHarmony
       public std::enable_shared_from_this<DebugRouterStateListenerHarmony> {
  public:
   DebugRouterStateListenerHarmony(napi_env env, napi_value js_object);
-  virtual ~DebugRouterStateListenerHarmony() {
-    napi_delete_reference(env_, js_this_ref_);
-  };
+  virtual ~DebugRouterStateListenerHarmony();
 
   void OnOpen(core::ConnectionType type) override;
-  void OnClose(int32_t code, const std::string &reason) override;
-  void OnMessage(const std::string &message) override;
-  void OnError(const std::string &error) override;
+  void OnClose(int32_t code, const std::string& reason) override;
+  void OnMessage(const std::string& message) override;
+  void OnError(const std::string& error) override;
 
  private:
   static napi_value Constructor(napi_env env, napi_callback_info info);
 
   napi_env env_;
   napi_ref js_this_ref_;
-  uv_loop_t *loop_;
+  fml::RefPtr<fml::TaskRunner> js_task_runner_;
 };
 
 }  // namespace harmony

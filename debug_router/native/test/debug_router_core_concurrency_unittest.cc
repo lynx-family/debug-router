@@ -3,6 +3,9 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <thread>
 #include <vector>
 
@@ -17,18 +20,60 @@ namespace core {
 class TestGlobalHandler : public DebugRouterGlobalHandler {
  public:
   virtual ~TestGlobalHandler() = default;
-  void OpenCard(const std::string &url) override {}
-  void OnMessage(const std::string &message, const std::string &type) override {
+  void OpenCard(const std::string& url) override {}
+  void OnMessage(const std::string& message, const std::string& type) override {
   }
 };
 
 class TestSessionHandler : public DebugRouterSessionHandler {
  public:
   virtual ~TestSessionHandler() = default;
-  void OnSessionCreate(int session_id, const std::string &url) override {}
+  void OnSessionCreate(int session_id, const std::string& url) override {}
   void OnSessionDestroy(int session_id) override {}
-  void OnMessage(const std::string &message, const std::string &type,
+  void OnMessage(const std::string& message, const std::string& type,
                  int session_id) override {}
+};
+
+class BlockingGlobalHandler final : public DebugRouterGlobalHandler {
+ public:
+  void OpenCard(const std::string& url) override {
+    std::unique_lock lock(mutex_);
+    callback_started_ = true;
+    condition_.notify_all();
+    condition_.wait(lock, [this]() { return callback_can_finish_; });
+  }
+
+  void OnMessage(const std::string& message, const std::string& type) override {
+  }
+
+  bool WaitForCallbackToStart() {
+    std::unique_lock lock(mutex_);
+    return condition_.wait_for(lock, std::chrono::seconds(5),
+                               [this]() { return callback_started_; });
+  }
+
+  void AllowCallbackToFinish() {
+    std::lock_guard lock(mutex_);
+    callback_can_finish_ = true;
+    condition_.notify_all();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  bool callback_started_ = false;
+  bool callback_can_finish_ = false;
+};
+
+class DestructionCallbackGlobalHandler final : public TestGlobalHandler {
+ public:
+  explicit DestructionCallbackGlobalHandler(std::function<void()> callback)
+      : callback_(std::move(callback)) {}
+
+  ~DestructionCallbackGlobalHandler() override { callback_(); }
+
+ private:
+  std::function<void()> callback_;
 };
 
 class DebugRouterCoreConcurrencyTest : public ::testing::Test {
@@ -64,7 +109,7 @@ class DebugRouterCoreConcurrencyTest : public ::testing::Test {
     return core_->session_handler_map_.size();
   }
 
-  DebugRouterCore *core_;
+  DebugRouterCore* core_;
 };
 
 TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddSameGlobalHandler) {
@@ -82,7 +127,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddSameGlobalHandler) {
     });
   }
 
-  for (auto &t : threads) {
+  for (auto& t : threads) {
     t.join();
   }
 
@@ -110,7 +155,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddDifferentGlobalHandlers) {
         [&, i, this]() { core_->AddGlobalHandler(handlers[i].get()); });
   }
 
-  for (auto &t : threads) {
+  for (auto& t : threads) {
     t.join();
   }
 
@@ -134,13 +179,65 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentRemoveGlobalHandler) {
     });
   }
 
-  for (auto &t : threads) {
+  for (auto& t : threads) {
     t.join();
   }
 
   EXPECT_EQ(success_count.load(std::memory_order_relaxed), 1);
 
   EXPECT_EQ(GetGlobalHandlerCount(), static_cast<size_t>(0));
+}
+
+TEST_F(DebugRouterCoreConcurrencyTest,
+       SharedGlobalHandlerLivesUntilDispatchedCallbackCompletes) {
+  auto handler = std::make_shared<BlockingGlobalHandler>();
+  BlockingGlobalHandler* handler_ptr = handler.get();
+  std::weak_ptr<BlockingGlobalHandler> weak_handler = handler;
+  int handler_id = core_->AddGlobalHandler(handler);
+  handler.reset();
+
+  const std::string message = R"({
+    "event":"Customized",
+    "data":{
+      "type":"OpenCard",
+      "sender":8901,
+      "data":{
+        "type":"url",
+        "url":"https://example.com"
+      }
+    }
+  })";
+  std::thread dispatch_thread(
+      [this, &message]() { core_->ProcessMessageForTest(message); });
+
+  bool callback_started = handler_ptr->WaitForCallbackToStart();
+  if (!callback_started) {
+    handler_ptr->AllowCallbackToFinish();
+    dispatch_thread.join();
+  }
+  ASSERT_TRUE(callback_started);
+  EXPECT_TRUE(core_->RemoveGlobalHandler(handler_id));
+  EXPECT_FALSE(weak_handler.expired());
+  handler_ptr->AllowCallbackToFinish();
+  dispatch_thread.join();
+  EXPECT_TRUE(weak_handler.expired());
+}
+
+TEST_F(DebugRouterCoreConcurrencyTest,
+       RemovedGlobalHandlerIsDestroyedAfterReleasingContainerLock) {
+  bool destroyed = false;
+  size_t handler_count_during_destruction = 1;
+  auto handler = std::make_shared<DestructionCallbackGlobalHandler>(
+      [this, &destroyed, &handler_count_during_destruction]() {
+        handler_count_during_destruction = GetGlobalHandlerCount();
+        destroyed = true;
+      });
+  int handler_id = core_->AddGlobalHandler(handler);
+  handler.reset();
+
+  EXPECT_TRUE(core_->RemoveGlobalHandler(handler_id));
+  EXPECT_TRUE(destroyed);
+  EXPECT_EQ(handler_count_during_destruction, static_cast<size_t>(0));
 }
 
 TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveGlobalHandlers) {
@@ -150,7 +247,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveGlobalHandlers) {
   }
 
   std::vector<int> handler_ids;
-  for (auto &h : handlers) {
+  for (auto& h : handlers) {
     handler_ids.push_back(core_->AddGlobalHandler(h.get()));
   }
 
@@ -171,7 +268,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveGlobalHandlers) {
     }
   }
 
-  for (auto &t : threads) {
+  for (auto& t : threads) {
     t.join();
   }
 
@@ -202,7 +299,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddSameSessionHandler) {
     });
   }
 
-  for (auto &t : threads) {
+  for (auto& t : threads) {
     t.join();
   }
 
@@ -230,7 +327,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddDifferentSessionHandlers) {
         [&, i, this]() { core_->AddSessionHandler(handlers[i].get()); });
   }
 
-  for (auto &t : threads) {
+  for (auto& t : threads) {
     t.join();
   }
 
@@ -254,7 +351,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentRemoveSessionHandler) {
     });
   }
 
-  for (auto &t : threads) {
+  for (auto& t : threads) {
     t.join();
   }
 
@@ -270,7 +367,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveSessionHandlers) {
   }
 
   std::vector<int> handler_ids;
-  for (auto &h : handlers) {
+  for (auto& h : handlers) {
     handler_ids.push_back(core_->AddSessionHandler(h.get()));
   }
 
@@ -291,7 +388,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveSessionHandlers) {
     }
   }
 
-  for (auto &t : threads) {
+  for (auto& t : threads) {
     t.join();
   }
 

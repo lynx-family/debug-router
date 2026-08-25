@@ -9,6 +9,7 @@
 #include <uv.h>
 
 #include "debug_router/native/core/native_slot.h"
+#include "debug_router/native/harmony/base/fml/task_runner.h"
 
 namespace debugrouter {
 namespace harmony {
@@ -20,9 +21,7 @@ class NativeSlotHarmony
   NativeSlotHarmony(napi_env env, napi_value js_this, const std::string& url,
                     const std::string& type);
 
-  virtual ~NativeSlotHarmony() override {
-    napi_delete_reference(env_, js_this_ref_);
-  };
+  virtual ~NativeSlotHarmony() override;
 
   void OnMessage(const std::string& message, const std::string& type) override;
 
@@ -31,7 +30,7 @@ class NativeSlotHarmony
 
   napi_env env_;
   napi_ref js_this_ref_;
-  uv_loop_t* loop_;
+  fml::RefPtr<fml::TaskRunner> js_task_runner_;
 };
 
 }  // namespace harmony

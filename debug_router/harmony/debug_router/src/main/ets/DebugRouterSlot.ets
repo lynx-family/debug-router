@@ -32,11 +32,11 @@ export class DebugRouterSlot {
     }
   }
 
-  public SendAsync(message: string): void {
+  public sendAsync(message: string): void {
     DebugRouter.sendAsync(message);
   }
 
-  public SendDataAsync(data: string, type:string): void {
+  public sendDataAsync(data: string, type: string): void {
     DebugRouter.sendDataAsync(type, this.sessionId, data);
   }
 

@@ -3,20 +3,46 @@
 // LICENSE file in the root directory of this source tree.
 
 import util from '@ohos.util';
+import deviceInfo from '@ohos.deviceInfo';
 import type { DebugRouterGlobalHandlerHarmony, DebugRouterSessionHandlerHarmony, DebugRouterMessageHandlerHarmony, DebugRouterStateListenerHarmony } from 'libdebugrouter.so';
 import { DebugRouterHarmony } from 'libdebugrouter.so';
 import { DebugRouterSlot } from './DebugRouterSlot';
+import BuildProfile from '../../../BuildProfile';
 
 export class DebugRouter {
   // Keep DebugRouter independent of the concrete UI framework while retaining
   // object identity for view-to-session mapping.
   private static viewMap: Map<Object, number> = new Map<Object, number>();
+  private static initialized: boolean = false;
+
+  static {
+    DebugRouter.ensureInitialized();
+  }
+
+  public static ensureInitialized(): void {
+    if (DebugRouter.initialized) {
+      return;
+    }
+    const uuid: string = util.generateRandomUUID(true);
+    const productModel: string = deviceInfo.productModel;
+    let displayVersion: string = deviceInfo.displayVersion;
+    const modelIndex: number = displayVersion.indexOf(productModel);
+    if (modelIndex !== -1) {
+      displayVersion = displayVersion.slice(modelIndex + productModel.length);
+    }
+    DebugRouterHarmony.createInstance();
+    DebugRouter.setAppInfo(new Map<string, string>([
+      ['osType', 'Harmony'],
+      ['osVersion', displayVersion],
+      ['deviceModel', productModel],
+      ['debugRouterVersion', BuildProfile.HAR_VERSION],
+      ['debugRouterId', uuid]
+    ]));
+    DebugRouter.initialized = true;
+  }
 
   public static createInstance(): void {
-    let uuid: string = util.generateRandomUUID(true);
-    DebugRouterHarmony.createInstance();
-    DebugRouter.setAppInfo("osType", "Harmony");
-    DebugRouter.setAppInfo("debugRouterId", uuid);
+    DebugRouter.ensureInitialized();
   }
 
   public static getSessionIdByView(view: Object): number {
@@ -27,7 +53,7 @@ export class DebugRouter {
   public static getViewBySessionId(sessionId: number): Object | null {
     let result: Object | null = null;
     DebugRouter.viewMap.forEach((id, view) => {
-      if (id == sessionId) {
+      if (id === sessionId) {
         result = view;
       }
     });
@@ -96,6 +122,11 @@ export class DebugRouter {
 
   public static pull(sessionId: number): void {
     DebugRouterHarmony.pull(sessionId);
+    DebugRouter.viewMap.forEach((id, view) => {
+      if (id === sessionId) {
+        DebugRouter.viewMap.delete(view);
+      }
+    });
   }
 
   public static isValidSchema(schema: string): boolean {
@@ -118,7 +149,7 @@ export class DebugRouter {
     }
   }
 
-  public static getAppInfoBykey(key: string): string {
+  public static getAppInfoByKey(key: string): string {
     return DebugRouterHarmony.getAppInfoByKey(key);
   }
 

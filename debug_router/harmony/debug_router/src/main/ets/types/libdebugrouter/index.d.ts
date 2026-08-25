@@ -26,7 +26,7 @@ export interface DebugRouterStateListenerHarmony {
 }
 
 export interface NativeSlotHarmony {
-  onMessage: (message: string, type: string, session_id: number) => void;
+  onMessage: (message: string, type: string) => void;
 }
 
 export declare class DebugRouterHarmony {

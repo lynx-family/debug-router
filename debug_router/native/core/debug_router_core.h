@@ -83,6 +83,10 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   virtual void OnInit(const std::shared_ptr<MessageTransceiver> &transceiver,
                       int32_t code, const std::string &info) override;
 
+#ifdef TESTING
+  void ProcessMessageForTest(const std::string &message);
+#endif
+
   void Connect(const std::string &url, const std::string &room);
   void ConnectAsync(const std::string &url, const std::string &room);
 
@@ -125,12 +129,18 @@ class DebugRouterCore : public MessageTransceiverDelegate {
               const std::string &metric, const std::string &extra);
 
   int AddGlobalHandler(DebugRouterGlobalHandler *handler);
+  int AddGlobalHandler(
+      const std::shared_ptr<DebugRouterGlobalHandler> &handler);
   bool RemoveGlobalHandler(int handler_id);
 
   void AddMessageHandler(DebugRouterMessageHandler *handler);
+  void AddMessageHandler(
+      const std::shared_ptr<DebugRouterMessageHandler> &handler);
   bool RemoveMessageHandler(const std::string &handler_name);
 
   int AddSessionHandler(DebugRouterSessionHandler *handler);
+  int AddSessionHandler(
+      const std::shared_ptr<DebugRouterSessionHandler> &handler);
   bool RemoveSessionHandler(int handler_id);
 
   bool IsValidSchema(const std::string &schema);
@@ -177,19 +187,22 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   std::shared_mutex state_listeners_mutex_;
   std::shared_mutex global_handler_mutex_;
   std::shared_mutex session_handler_mutex_;
+  std::shared_mutex message_handler_mutex_;
   friend class MessageHandlerCore;
   std::unordered_map<int32_t, std::shared_ptr<core::NativeSlot> > slots_;
   std::string room_id_;
   std::string server_url_;
   std::string host_url_;
-  std::unordered_map<std::string, DebugRouterMessageHandler *>
+  std::unordered_map<std::string, std::shared_ptr<DebugRouterMessageHandler> >
       message_handlers_;
   std::unordered_map<std::string, std::string> app_info_;
 
   // for add global handler and session handler, judge if handler is valid
   // for remove global handler and session handler
-  std::unordered_map<int, DebugRouterGlobalHandler *> global_handler_map_;
-  std::unordered_map<int, DebugRouterSessionHandler *> session_handler_map_;
+  std::unordered_map<int, std::shared_ptr<DebugRouterGlobalHandler> >
+      global_handler_map_;
+  std::unordered_map<int, std::shared_ptr<DebugRouterSessionHandler> >
+      session_handler_map_;
 
  private:
   bool ShouldServerRun();
