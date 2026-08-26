@@ -269,7 +269,6 @@ class UsbReconnectIntegrationTest : public testing::Test {
   void TearDown() override {
     if (server_) {
       server_->StopServer();
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
       server_.reset();
     }
   }

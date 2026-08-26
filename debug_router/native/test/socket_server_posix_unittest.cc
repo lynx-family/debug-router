@@ -18,6 +18,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 
 #include "debug_router/native/base/socket_guard.h"
 #include "debug_router/native/socket/count_down_latch.h"
@@ -33,12 +34,60 @@ class SocketServerPosixTestPeer {
     server.socket_fd_.store(socket_fd, std::memory_order_release);
   }
 
-  static void AcceptOnce(SocketServerPosix &server) { server.Start(); }
+  static void AcceptOnce(SocketServerPosix &server) {
+    {
+      std::lock_guard<std::mutex> lock(server.running_mutex_);
+      server.is_running_.store(true, std::memory_order_relaxed);
+      ++server.server_generation_;
+      server.listener_generation_ = server.server_generation_;
+    }
+    server.Start();
+  }
 
   static void SetTemporaryClient(SocketServerPosix &server,
                                  std::shared_ptr<UsbClient> client) {
     std::lock_guard<std::mutex> lock(server.client_lock_);
     server.temp_usb_client_ = std::move(client);
+  }
+
+  static void SetCurrentClient(SocketServerPosix &server,
+                               std::shared_ptr<UsbClient> client) {
+    std::lock_guard<std::mutex> lock(server.client_lock_);
+    server.usb_client_ = std::move(client);
+  }
+
+  static std::shared_ptr<UsbClient> CurrentClient(SocketServerPosix &server) {
+    std::lock_guard<std::mutex> lock(server.client_lock_);
+    return server.usb_client_;
+  }
+
+  static void SetLifecycleLatches(SocketServerPosix &server,
+                                  CountDownLatch *created_latch,
+                                  CountDownLatch *release_latch,
+                                  CountDownLatch *stop_latch) {
+    server.client_listener_created_latch_for_test_ = created_latch;
+    server.release_client_listener_latch_for_test_ = release_latch;
+    server.stop_requested_latch_for_test_ = stop_latch;
+  }
+
+  static void BeginGeneration(SocketServerPosix &server) {
+    std::lock_guard<std::mutex> lock(server.running_mutex_);
+    server.listener_should_exit_ = false;
+    server.is_running_.store(true, std::memory_order_relaxed);
+    ++server.server_generation_;
+    server.listener_generation_ = server.server_generation_;
+  }
+
+  static bool SnapshotClientForDisconnect(SocketServerPosix &server,
+                                          uint64_t *generation,
+                                          std::shared_ptr<UsbClient> *target) {
+    return server.SnapshotClientForDisconnect(generation, target);
+  }
+
+  static std::shared_ptr<UsbClient> TakeClientForDisconnect(
+      SocketServerPosix &server, uint64_t generation,
+      const std::shared_ptr<UsbClient> &target) {
+    return server.TakeClientForDisconnect(generation, target);
   }
 
   static void SubmitClientWork(const std::shared_ptr<UsbClient> &client,
@@ -182,6 +231,72 @@ TEST(SocketServerPosixTestSuite,
 
   EXPECT_TRUE(accepted_before_cleanup);
   EXPECT_TRUE(old_client_weak.expired());
+}
+
+TEST(SocketServerPosixTestSuite,
+     AcceptedClientListenerDoesNotOwnServerDuringTeardown) {
+  auto listener = std::make_shared<NoopListener>();
+  CountDownLatch client_listener_created(1);
+  CountDownLatch release_client_listener(1);
+  CountDownLatch stop_requested(1);
+  auto base_server = SocketServer::CreateSocketServer(listener);
+  auto server = std::static_pointer_cast<SocketServerPosix>(base_server);
+  base_server.reset();
+  std::weak_ptr<SocketServerPosix> weak_server = server;
+
+  uint16_t port = 0;
+  const int listener_socket = CreateLoopbackListener(port);
+  ASSERT_GE(listener_socket, 0);
+  SocketServerPosixTestPeer::AdoptListeningSocket(*server, listener_socket);
+
+  SocketServerPosixTestPeer::SetLifecycleLatches(
+      *server, &client_listener_created, &release_client_listener,
+      &stop_requested);
+
+  server->Init();
+  server->StartServer();
+  const int peer_socket = ConnectToPort(port);
+  ASSERT_GE(peer_socket, 0);
+  base::SocketGuard peer(peer_socket);
+  client_listener_created.Await();
+
+  EXPECT_EQ(server.use_count(), 1);
+  if (server.use_count() != 1) {
+    release_client_listener.CountDown();
+    server->StopServer();
+    return;
+  }
+
+  std::thread reset_thread(
+      [owned_server = std::move(server)]() mutable { owned_server.reset(); });
+  stop_requested.Await();
+  release_client_listener.CountDown();
+  reset_thread.join();
+
+  EXPECT_TRUE(weak_server.expired());
+}
+
+TEST(SocketServerPosixTestSuite,
+     StaleDisconnectDoesNotClearClientFromNewGeneration) {
+  auto listener = std::make_shared<NoopListener>();
+  auto server = std::make_shared<SocketServerPosix>(listener);
+  auto old_client = std::make_shared<UsbClient>(kInvalidSocket);
+
+  SocketServerPosixTestPeer::BeginGeneration(*server);
+  SocketServerPosixTestPeer::SetCurrentClient(*server, old_client);
+  uint64_t old_generation = 0;
+  std::shared_ptr<UsbClient> old_target;
+  ASSERT_TRUE(SocketServerPosixTestPeer::SnapshotClientForDisconnect(
+      *server, &old_generation, &old_target));
+
+  SocketServerPosixTestPeer::BeginGeneration(*server);
+  auto new_client = std::make_shared<UsbClient>(kInvalidSocket);
+  SocketServerPosixTestPeer::SetCurrentClient(*server, new_client);
+
+  EXPECT_EQ(SocketServerPosixTestPeer::TakeClientForDisconnect(
+                *server, old_generation, old_target),
+            nullptr);
+  EXPECT_EQ(SocketServerPosixTestPeer::CurrentClient(*server), new_client);
 }
 
 }  // namespace

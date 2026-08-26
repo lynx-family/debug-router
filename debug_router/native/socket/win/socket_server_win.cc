@@ -7,6 +7,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <memory>
 #include <mutex>
 
 #include "debug_router/native/core/util.h"
@@ -21,7 +22,7 @@ SocketServerWin::SocketServerWin(
     const std::shared_ptr<SocketServerConnectionListener> &listener)
     : SocketServer(listener) {}
 
-SocketServerWin::~SocketServerWin() { Close(); }
+SocketServerWin::~SocketServerWin() { StopServer(); }
 
 int32_t SocketServerWin::InitSocket() {
   LOGI("SocketServerWin::InitSocket");
@@ -34,7 +35,6 @@ int32_t SocketServerWin::InitSocket() {
   }
 
   const SocketType socket_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-  socket_fd_.store(socket_fd, std::memory_order_release);
   if (socket_fd == kInvalidSocket) {
     LOGE("create socket error:" << GetErrorMessage());
     NotifyInit(GetErrorMessage(), "create socket error");
@@ -60,7 +60,7 @@ int32_t SocketServerWin::InitSocket() {
            GetErrorMessage() == WSAEADDRINUSE);
 
   if (!flag) {
-    Close();
+    CloseSocket(socket_fd);
     LOGE("bind address error:" << GetErrorMessage());
     NotifyInit(GetErrorMessage(), "bind address error");
     return kInvalidPort;
@@ -69,9 +69,13 @@ int32_t SocketServerWin::InitSocket() {
   LOGI("bind port:" << port);
 
   if (listen(socket_fd, kConnectionQueueMaxLength) == SOCKET_ERROR) {
-    Close();
+    CloseSocket(socket_fd);
     LOGE("listen error:" << GetErrorMessage());
     NotifyInit(GetErrorMessage(), "listen error");
+    return kInvalidPort;
+  }
+  if (!TryPublishSocket(socket_fd)) {
+    CloseSocket(socket_fd);
     return kInvalidPort;
   }
   return port;
@@ -93,26 +97,28 @@ void SocketServerWin::Start() {
   LOGI("server socket:" << socket_fd);
   SocketType accept_socket_fd = accept(socket_fd, NULL, NULL);
   if (accept_socket_fd == kInvalidSocket) {
+    const int error = GetErrorMessage();
     Close();
-    LOGE("accept socket error:" << GetErrorMessage());
-    NotifyInit(GetErrorMessage(), "accept socket error");
+    LOGE("accept socket error:" << error);
+    NotifyInit(error, "accept socket error");
     return;
   }
   std::shared_ptr<UsbClient> old_client;
   auto new_client = std::make_shared<UsbClient>(accept_socket_fd);
-  {
-    std::lock_guard<std::mutex> lock(client_lock_);
-    old_client = temp_usb_client_;
-    temp_usb_client_ = new_client;
+  if (!TryInstallPendingClient(new_client, &old_client)) {
+    return;
   }
   if (old_client) {
     LOGI("close last connector, destroy temp_usb_client_.");
     ScheduleClientStop(old_client);
   }
   std::shared_ptr<ClientListener> listener =
-      std::make_shared<ClientListener>(shared_from_this());
+      std::make_shared<ClientListener>(weak_from_this());
   new_client->Init();
   new_client->StartUp(listener);
+#if defined(TESTING)
+  WaitForClientListenerReleaseForTest();
+#endif
 }
 
 void SocketServerWin::CloseSocket(int socket_fd) {

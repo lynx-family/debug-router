@@ -6,6 +6,8 @@
 #define DEBUGROUTER_NATIVE_SOCKET_SOCKET_SERVER_API_H
 
 #include <atomic>
+#include <cstdint>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -57,11 +59,21 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   void StopServer();
 
  protected:
+  // SocketServer is an internal platform abstraction. Callers must use
+  // CreateSocketServer(), whose deleter stops the listener before object
+  // destruction starts. Built-in destructors repeat StopServer() idempotently
+  // for direct internal construction after an explicit stop.
   static void ThreadFunc(std::shared_ptr<SocketServer> socket_server);
 
   virtual void Start() = 0;
   virtual int GetErrorMessage() = 0;
   virtual void CloseSocket(int socket_fd) = 0;
+  bool TryPublishSocket(SocketType socket_fd);
+  bool TryInstallPendingClient(const std::shared_ptr<UsbClient> &client,
+                               std::shared_ptr<UsbClient> *old_client);
+#if defined(TESTING)
+  void WaitForClientListenerReleaseForTest();
+#endif
   void Close();
   void NotifyInit(int32_t code, const std::string &info);
 
@@ -80,15 +92,39 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   std::atomic<SocketType> socket_fd_{kInvalidSocket};
 
  private:
+#if defined(TESTING)
+  friend class SocketServerPosixTestPeer;
+#endif
+
+  static void ListenerThreadFunc(SocketServer *socket_server);
+  bool IsListenerGenerationActive(uint64_t generation);
+  bool SnapshotClientForDisconnect(uint64_t *generation,
+                                   std::shared_ptr<UsbClient> *target);
+  std::shared_ptr<UsbClient> TakeClientForDisconnect(
+      uint64_t generation, const std::shared_ptr<UsbClient> &target);
+
   std::atomic<bool> is_running_{false};
   std::condition_variable running_condition_;
   std::mutex running_mutex_;
+  std::mutex server_operation_mutex_;
+  std::thread listen_thread_;
+  bool initialized_{false};
+  bool listener_should_exit_{false};
+  uint64_t server_generation_{0};
+  uint64_t listener_generation_{0};
+#if defined(TESTING)
+  CountDownLatch *client_listener_created_latch_for_test_{nullptr};
+  CountDownLatch *release_client_listener_latch_for_test_{nullptr};
+  CountDownLatch *stop_requested_latch_for_test_{nullptr};
+#endif
 };
 
 // ClientListener
 class ClientListener : public UsbClientListener {
  public:
   ClientListener(std::shared_ptr<SocketServer> socket_server)
+      : socket_server_(socket_server) {}
+  explicit ClientListener(std::weak_ptr<SocketServer> socket_server)
       : socket_server_(socket_server) {}
 
   virtual ~ClientListener() = default;
