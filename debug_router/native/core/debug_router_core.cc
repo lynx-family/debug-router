@@ -39,15 +39,24 @@ class MessageHandlerCore : public processor::MessageHandler {
 
   std::unordered_map<int, std::string> GetSessionList() override {
     std::unordered_map<int, std::string> session_list;
-    std::shared_lock lock(DebugRouterCore::GetInstance().slots_mutex_);
-    const auto &slots = DebugRouterCore::GetInstance().slots_;
-    if (!slots.empty()) {
-      for (auto it = slots.begin(); it != slots.end(); ++it) {
-        Json::Value session_info;
-        session_info["type"] = it->second->GetType();
-        session_info["url"] = it->second->GetUrl();
-        session_list[it->first] = session_info.toStyledString();
+    auto &core = DebugRouterCore::GetInstance();
+    const bool enable_all_sessions =
+        core.enable_all_sessions_.load(std::memory_order_relaxed);
+    std::unordered_set<int32_t> enabled_session_ids;
+    if (!enable_all_sessions) {
+      std::shared_lock lock(core.enabled_sessions_mutex_);
+      enabled_session_ids = core.enabled_session_ids_;
+    }
+
+    std::shared_lock lock(core.slots_mutex_);
+    for (const auto &slot : core.slots_) {
+      if (!enable_all_sessions && enabled_session_ids.count(slot.first) == 0) {
+        continue;
       }
+      Json::Value session_info;
+      session_info["type"] = slot.second->GetType();
+      session_info["url"] = slot.second->GetUrl();
+      session_list[slot.first] = session_info.toStyledString();
     }
     return session_list;
   }
