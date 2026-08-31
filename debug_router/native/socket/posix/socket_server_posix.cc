@@ -42,13 +42,18 @@ int32_t SocketServerPosix::InitSocket() {
   }
 
   bool flag = false;
-  PORT_TYPE port = kStartPort;
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+  const PORT_TYPE start_port = GetStartPort();
+#else
+  const PORT_TYPE start_port = kStartPort;
+#endif
+  int32_t port = start_port;
   do {
     struct sockaddr_in addr;
     bzero((char *)&addr, sizeof(addr));
 
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
+    addr.sin_port = htons(static_cast<PORT_TYPE>(port));
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(socket_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
@@ -56,7 +61,7 @@ int32_t SocketServerPosix::InitSocket() {
       break;
     }
     port = port + 1;
-  } while ((port < kStartPort + kTryPortCount) &&
+  } while ((port < start_port + kTryPortCount) &&
            (GetErrorMessage() == EADDRINUSE));
 
   if (!flag) {

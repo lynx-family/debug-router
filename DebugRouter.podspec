@@ -18,11 +18,15 @@ Pod::Spec.new do |s|
 
   s.ios.deployment_target = '10.0'
   s.default_subspecs = 'Framework', 'Native', 'third_party'
+  ios_usb_start_port_definition = "DEBUGROUTER_ENABLE_IOS_USB_START_PORT=1 $(inherited)"
 
   s.subspec 'Framework' do |ss|
     ss.source_files = 'debug_router/ios/public/*.{h,m,mm}', 'debug_router/ios/public/base/*.{h,m,mm}', 'debug_router/ios/*.{h,m,mm}', 'debug_router/ios/net/*.{h,m,mm}', 'debug_router/ios/report/*.{h,m,mm}', 'debug_router/ios/base/*.{h,m,mm}', 'debug_router/ios/base/report/*.{h,m,mm}', 'debug_router/ios/base/service/*.{h,m,mm}'
     ss.frameworks = 'Network'
-    ss.pod_target_xcconfig  = { "HEADER_SEARCH_PATHS" => "\"${PODS_TARGET_SRCROOT}/debug_router/ios/\"" }
+    ss.pod_target_xcconfig  = {
+      "HEADER_SEARCH_PATHS" => "\"${PODS_TARGET_SRCROOT}/debug_router/ios/\"",
+      "GCC_PREPROCESSOR_DEFINITIONS" => ios_usb_start_port_definition
+    }
     ss.dependency 'DebugRouter/Native'
     ss.public_header_files = 'debug_router/ios/public/DebugRouter.h', 'debug_router/ios/public/DebugRouterMessageHandler.h', 'debug_router/ios/public/DebugRouterCommon.h', 'debug_router/ios/public/DebugRouterMessageHandleResult.h', "debug_router/ios/public/DebugRouterEventSender.h", "debug_router/ios/public/DebugRouterGlobalHandler.h", "debug_router/ios/public/DebugRouterSlot.h", "debug_router/ios/public/base/DebugRouterReportServiceUtil.h", "debug_router/ios/public/base/DebugRouterToast.h", "debug_router/ios/public/DebugRouterSessionHandler.h", "debug_router/ios/public/base/DebugRouterDefines.h", "debug_router/ios/public/base/DebugRouterReportServiceProtocol.h", "debug_router/ios/public/base/DebugRouterService.h", "debug_router/ios/public/base/DebugRouterServiceProtocol.h", "debug_router/ios/public/LocalNetworkPermissionChecker.h"
   end
@@ -31,7 +35,10 @@ Pod::Spec.new do |s|
     ss.header_mappings_dir  = "."
     ss.source_files = 'debug_router/native/**/*'
     ss.exclude_files = 'debug_router/native/android/**/*','debug_router/native/test/*','debug_router/native/socket/win/*', 'debug_router/native/harmony/**/*'
-    ss.pod_target_xcconfig  = { "HEADER_SEARCH_PATHS" =>  "\"${PODS_TARGET_SRCROOT}\" \"${PODS_TARGET_SRCROOT}/third_party/jsoncpp/include\""}
+    ss.pod_target_xcconfig  = {
+      "HEADER_SEARCH_PATHS" =>  "\"${PODS_TARGET_SRCROOT}\" \"${PODS_TARGET_SRCROOT}/third_party/jsoncpp/include\"",
+      "GCC_PREPROCESSOR_DEFINITIONS" => ios_usb_start_port_definition
+    }
     ss.dependency 'DebugRouter/third_party'
     ss.private_header_files = 'debug_router/native/**/*.{h}'
   end

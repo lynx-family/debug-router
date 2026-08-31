@@ -37,6 +37,9 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   void Init();
   bool Send(const std::string &message);
   void Disconnect();
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+  bool SetStartPort(int32_t start_port);
+#endif
 
   void HandleOnOpenStatus(std::shared_ptr<UsbClient> client, int32_t code,
                           const std::string &reason);
@@ -64,6 +67,9 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   virtual void CloseSocket(int socket_fd) = 0;
   void Close();
   void NotifyInit(int32_t code, const std::string &info);
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+  PORT_TYPE GetStartPort();
+#endif
 
   void setEnableServer(bool enable);
 
@@ -80,9 +86,15 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   std::atomic<SocketType> socket_fd_{kInvalidSocket};
 
  private:
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+  std::atomic<PORT_TYPE> start_port_{kStartPort};
+#endif
   std::atomic<bool> is_running_{false};
   std::condition_variable running_condition_;
   std::mutex running_mutex_;
+  bool is_serving_{false};
+  std::condition_variable serving_condition_;
+  std::mutex serving_mutex_;
 };
 
 // ClientListener

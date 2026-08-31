@@ -39,6 +39,9 @@ typedef enum : NSUInteger { ConnectionTypeWebSocket, ConnectionTypeUSB, Unknown 
     __attribute__((deprecated("will remove")));
 
 + (nonnull DebugRouter *)instance;
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
++ (BOOL)setUSBStartPort:(int)startPort;
+#endif
 
 - (void)disconnect;
 - (void)connect:(nonnull NSString *)url ToRoom:(nonnull NSString *)room;

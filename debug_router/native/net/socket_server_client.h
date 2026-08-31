@@ -23,6 +23,9 @@ class SocketServerClient : public core::MessageTransceiver {
 
   void StartServer() override;
   void StopServer() override;
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+  bool SetStartPort(int32_t start_port);
+#endif
 
  private:
   std::shared_ptr<debugrouter::socket_server::SocketServer> socket_server_;

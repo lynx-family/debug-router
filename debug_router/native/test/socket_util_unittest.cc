@@ -56,6 +56,36 @@ std::set<int32_t> ScanOccupiedDebugRouterPorts() {
   return ports;
 }
 
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+bool CanBindPort(int32_t port) {
+  const int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (socket_fd < 0) {
+    return false;
+  }
+  int on = 1;
+  setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(static_cast<uint16_t>(port));
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+  const bool can_bind =
+      bind(socket_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
+  close(socket_fd);
+  return can_bind;
+}
+
+int32_t FindAvailablePort(int32_t start_port, int32_t end_port) {
+  for (int32_t port = start_port; port <= end_port; ++port) {
+    if (CanBindPort(port)) {
+      return port;
+    }
+  }
+  return debugrouter::socket_server::kInvalidPort;
+}
+#endif
+
 template <class Predicate>
 bool WaitUntil(Predicate predicate, int timeout_ms = 2000) {
   const auto deadline =
@@ -171,6 +201,46 @@ TEST(SocketUtilTestSuite, TestCheckHeader) {
 }
 
 #ifndef _WIN32
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+TEST(SocketUtilTestSuite, SettingUsbStartPortRestartsRunningDebugChannel) {
+  auto& core = debugrouter::core::DebugRouterCore::GetInstance();
+  core.DisableDebugChannel();
+
+  const int32_t first_port = FindAvailablePort(19101, 19200);
+  ASSERT_NE(first_port, debugrouter::socket_server::kInvalidPort);
+  ASSERT_TRUE(core.SetUSBStartPort(first_port));
+  core.EnableDebugChannel();
+
+  int first_client_socket = -1;
+  ASSERT_TRUE(WaitUntil([&]() {
+    if (core.GetUSBPort() != first_port) {
+      return false;
+    }
+    first_client_socket = ConnectToLocalUsbPort(first_port);
+    return first_client_socket >= 0;
+  }));
+  close(first_client_socket);
+
+  const int32_t second_port = FindAvailablePort(first_port + 1, 19250);
+  ASSERT_NE(second_port, debugrouter::socket_server::kInvalidPort);
+  ASSERT_TRUE(core.SetUSBStartPort(second_port));
+
+  int second_client_socket = -1;
+  ASSERT_TRUE(WaitUntil([&]() {
+    if (core.GetUSBPort() != second_port) {
+      return false;
+    }
+    second_client_socket = ConnectToLocalUsbPort(second_port);
+    return second_client_socket >= 0;
+  }));
+  EXPECT_EQ(core.GetUSBPort(), second_port);
+
+  close(second_client_socket);
+  core.DisableDebugChannel();
+  ASSERT_TRUE(core.SetUSBStartPort(debugrouter::socket_server::kStartPort));
+}
+#endif
+
 TEST(SocketUtilTestSuite, SendNoSigPipeFailsWithoutTerminatingOnClosedPeer) {
   int sockets[2] = {-1, -1};
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);

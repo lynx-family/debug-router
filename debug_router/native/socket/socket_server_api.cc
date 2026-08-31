@@ -50,6 +50,21 @@ bool SocketServer::Send(const std::string &message) {
   return client->Send(message);
 }
 
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+bool SocketServer::SetStartPort(int32_t start_port) {
+  if (start_port <= 0 || start_port > UINT16_MAX - kTryPortCount + 1) {
+    return false;
+  }
+  start_port_.store(static_cast<PORT_TYPE>(start_port),
+                    std::memory_order_relaxed);
+  return true;
+}
+
+PORT_TYPE SocketServer::GetStartPort() {
+  return start_port_.load(std::memory_order_relaxed);
+}
+#endif
+
 void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
                                       int32_t code, const std::string &reason) {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
@@ -213,7 +228,13 @@ void SocketServer::NotifyInit(int32_t code, const std::string &info) {
 void SocketServer::setEnableServer(bool enable) {
   LOGI("SocketServer::setEnableServer:" << enable);
   // notify only when transition from false to true
-  if (!is_running_.exchange(enable, std::memory_order_relaxed) && enable) {
+  bool should_notify = false;
+  {
+    std::lock_guard<std::mutex> lock(running_mutex_);
+    should_notify =
+        !is_running_.exchange(enable, std::memory_order_relaxed) && enable;
+  }
+  if (should_notify) {
     running_condition_.notify_one();
   }
 }
@@ -236,6 +257,10 @@ void SocketServer::StopServer() {
 
   Close();
   {
+    std::unique_lock<std::mutex> lock(serving_mutex_);
+    serving_condition_.wait(lock, [this]() { return !is_serving_; });
+  }
+  {
     std::lock_guard<std::mutex> lock(client_lock_);
     current_client = usb_client_;
     pending_client = temp_usb_client_;
@@ -254,14 +279,21 @@ void SocketServer::ThreadFunc(std::shared_ptr<SocketServer> socket_server) {
   int count = 0;
   while (true) {
     {
-      std::unique_lock lock(socket_server->running_mutex_);
-      socket_server->running_condition_.wait(lock, [=]() {
+      std::unique_lock running_lock(socket_server->running_mutex_);
+      socket_server->running_condition_.wait(running_lock, [=]() {
         return socket_server->is_running_.load(std::memory_order_relaxed) ==
                true;
       });
+      std::lock_guard<std::mutex> serving_lock(socket_server->serving_mutex_);
+      socket_server->is_serving_ = true;
     }
     LOGI("Init start:" << count);
     socket_server->Start();
+    {
+      std::lock_guard<std::mutex> lock(socket_server->serving_mutex_);
+      socket_server->is_serving_ = false;
+    }
+    socket_server->serving_condition_.notify_all();
     count++;
   }
 }
