@@ -195,6 +195,7 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 - (void)handleDidBecomeActive:(NSNotification *)notification;
 - (void)handleEnterBackground:(NSNotification *)notification;
 @end
+
 @implementation DebugRouter {
   bool recordAppIdleTimerDisabledStatus;
   AppState appState_;
@@ -211,6 +212,12 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   });
   return instance_;
 }
+
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
++ (BOOL)setUSBStartPort:(int)startPort {
+  return debugrouter::core::DebugRouterCore::GetInstance().SetUSBStartPort(startPort);
+}
+#endif
 
 - (instancetype)init {
   self = [super init];

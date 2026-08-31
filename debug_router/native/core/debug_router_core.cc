@@ -18,6 +18,9 @@
 #include "debug_router/native/net/websocket_client.h"
 #include "debug_router/native/processor/message_handler.h"
 #include "debug_router/native/processor/processor.h"
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+#include "debug_router/native/socket/socket_server_type.h"
+#endif
 #include "debug_router/native/thread/debug_router_executor.h"
 #include "json/value.h"
 
@@ -184,8 +187,13 @@ DebugRouterCore::DebugRouterCore()
   size_t transceiver_count = 0;
   message_transceivers_[transceiver_count++] =
       std::make_shared<net::WebSocketClient>();
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+  socket_server_client_ = std::make_shared<net::SocketServerClient>();
+  message_transceivers_[transceiver_count++] = socket_server_client_;
+#else
   message_transceivers_[transceiver_count++] =
       std::make_shared<net::SocketServerClient>();
+#endif
 #endif
   for (size_t i = 0; i < kTransceiverCount; ++i) {
     message_transceivers_[i]->Init();
@@ -354,6 +362,39 @@ int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot> &slot) {
 int32_t DebugRouterCore::GetUSBPort() {
   return usb_port_.load(std::memory_order_relaxed);
 }
+
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+bool DebugRouterCore::SetUSBStartPort(int32_t start_port) {
+  if (start_port <= 0 ||
+      start_port > UINT16_MAX - socket_server::kTryPortCount + 1) {
+    LOGW("SetUSBStartPort ignored invalid start port: " << start_port);
+    return false;
+  }
+  LOGI("SetUSBStartPort: " << start_port);
+  if (!socket_server_client_) {
+    LOGW("SetUSBStartPort ignored because usb server is unavailable.");
+    return false;
+  }
+  if (server_running_.load(std::memory_order_relaxed)) {
+    thread::DebugRouterExecutor::GetInstance().Post([this, start_port]() {
+      const bool should_run = ShouldServerRun();
+      if (current_transceiver_ != nullptr &&
+          current_transceiver_->GetType() == ConnectionType::kUsb) {
+        current_transceiver_->Disconnect();
+      }
+      usb_port_.store(socket_server::kInvalidPort, std::memory_order_relaxed);
+      socket_server_client_->StopServer();
+      socket_server_client_->SetStartPort(start_port);
+      if (should_run) {
+        socket_server_client_->StartServer();
+      }
+    });
+  } else {
+    socket_server_client_->SetStartPort(start_port);
+  }
+  return true;
+}
+#endif
 
 void DebugRouterCore::Pull(int32_t session_id_) {
   LOGI("pull session: " << session_id_);

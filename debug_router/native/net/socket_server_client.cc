@@ -101,5 +101,11 @@ void SocketServerClient::StopServer() {
   }
 }
 
+#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+bool SocketServerClient::SetStartPort(int32_t start_port) {
+  return socket_server_ && socket_server_->SetStartPort(start_port);
+}
+#endif
+
 }  // namespace net
 }  // namespace debugrouter
