@@ -877,9 +877,17 @@ void DebugRouterCore::EnableSingleSession(int32_t session_id) {
     return;
   }
   LOGI("enableSingleSession: " << session_id);
+  bool newly_enabled = false;
   {
     std::unique_lock lock(enabled_sessions_mutex_);
-    enabled_session_ids_.insert(session_id);
+    newly_enabled = enabled_session_ids_.insert(session_id).second;
+  }
+  // Visibility only flips here in single-session mode: Plug()'s flush runs
+  // before enable and GetSessionList() filters out not-yet-enabled ids.
+  // Push the list when connected, mirroring Pull()'s flush on removal.
+  if (newly_enabled &&
+      connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
+    processor_->FlushSessionList();
   }
 }
 
