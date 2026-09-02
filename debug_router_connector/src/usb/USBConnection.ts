@@ -51,6 +51,18 @@ export class USBConnection extends Connection {
       this.socket.write(packMessage(data));
     }
   }
+
+  trySend(data: any): boolean {
+    if (!this.socket.writable) {
+      return false;
+    }
+    try {
+      this.send(data);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   sendExpectResponse(
     require: RequireMessageType,
   ): Promise<ResponseMessageType> {
