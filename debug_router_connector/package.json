@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node bin/driver.js start",
     "build": "rm -rf dist && bash ./scripts/build.sh",
+    "test": "npm run build && node --test test/*.test.js",
     "types": "rm -rf lib && rm -rf typings && tsc -p tsconfig.prod.json",
     "test:multiplexer": "npm run build && mocha \"../test/unit/multiplexer/**/*.test.js\" \"../test/unit/physical/**/*.test.js\"",
     "format": "prettier --write ."

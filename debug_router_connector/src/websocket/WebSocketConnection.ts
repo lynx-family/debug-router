@@ -54,6 +54,10 @@ export class WebSocketClient extends Client {
     this.socket.send(message);
   }
 
+  canSendMessage(): boolean {
+    return this.socket.readyState === WebSocket.OPEN;
+  }
+
   close() {
     this.socket.close();
   }
@@ -174,7 +178,7 @@ export class WebSocketClient extends Client {
       if (id == -1) {
         return;
       }
-      this.server.sendMessageToApp(id, message);
+      this.server.sendMessageToApp(id, message, this.clientId());
     } else {
       // message from app, only send to web
       const id = data.data?.sender ?? -1;
