@@ -2,14 +2,14 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { DebugRouterConnector } from "../connector";
+import { PhysicalConnector } from "../physical";
 import { ClientController } from "../usb/ClientController";
 import { defaultLogger } from "../utils/logger";
 import { DeviceDescription } from "../utils/type";
 
 export abstract class BaseDevice {
   readonly info: DeviceDescription;
-  protected readonly driver: DebugRouterConnector;
+  protected readonly driver: PhysicalConnector;
   protected connected: boolean;
   protected clientController?: ClientController;
 
@@ -20,7 +20,7 @@ export abstract class BaseDevice {
     ...Array(BaseDevice.monitorCount).keys(),
   ].map((i) => i + BaseDevice.remoteBasePort);
   protected port: number[];
-  constructor(driver: DebugRouterConnector, info: DeviceDescription) {
+  constructor(driver: PhysicalConnector, info: DeviceDescription) {
     this.info = info;
     this.driver = driver;
     this.connected = true;

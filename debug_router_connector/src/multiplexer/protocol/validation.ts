@@ -10,6 +10,8 @@ import type {
   MultiplexerHandshakeErrorResponse,
   MultiplexerHealthRequest,
   MultiplexerHealthResponse,
+  MultiplexerRegisterRequest,
+  MultiplexerRegisterResponse,
 } from "./control";
 import type { MultiplexerDebugInfo } from "./debuginfo";
 import type { ControlEvent } from "./event";
@@ -25,6 +27,7 @@ type JsonRecord = Record<string, unknown>;
 const CONTROL_RPC_METHODS: ControlRpcMethod[] = [
   "connectDevices",
   "connectUsbClients",
+  "watchNetworkDeviceAtIp",
   "startDeviceClientWatcher",
   "stopDeviceClientWatcher",
   "disconnectDevice",
@@ -198,6 +201,25 @@ export function isMultiplexerHandshakeErrorResponse(
   );
 }
 
+export function isMultiplexerRegisterRequest(
+  value: unknown,
+): value is MultiplexerRegisterRequest {
+  return (
+    isRecord(value) &&
+    value.kind === "register" &&
+    isBoolean(value.reportServiceEnabled) &&
+    isOptional(value.debugInfo, isMultiplexerDebugInfo)
+  );
+}
+
+export function isMultiplexerRegisterResponse(
+  value: unknown,
+): value is MultiplexerRegisterResponse {
+  return (
+    isRecord(value) && value.kind === "register-response" && value.ok === true
+  );
+}
+
 export function isControlRpcRequest(
   value: unknown,
 ): value is ControlRpcRequest {
@@ -246,6 +268,13 @@ export function isControlEvent(value: unknown): value is ControlEvent {
   }
 
   switch (value.event) {
+    case "report":
+      return (
+        isRecord(value.data) &&
+        isString(value.data.eventName) &&
+        Object.prototype.hasOwnProperty.call(value.data, "metrics") &&
+        Object.prototype.hasOwnProperty.call(value.data, "categories")
+      );
     case "snapshot":
       return isSnapshot(value.data);
     case "legacy-ownership-changed":
@@ -285,6 +314,13 @@ export function isControlRpcParams(
         isOptional(params.timeout, isNumber) &&
         isOptional(params.waitTimeout, isBoolean) &&
         isOptionalStringOrNull(params.clientName)
+      );
+    case "watchNetworkDeviceAtIp":
+      return (
+        isString(params.ip) &&
+        params.ip.length > 0 &&
+        isNumberArray(params.port) &&
+        Object.keys(params).length === 2
       );
     case "startDeviceClientWatcher":
     case "stopDeviceClientWatcher":
@@ -336,6 +372,7 @@ function isControlRpcResult(
       return isResponseMessage(result);
     case "startWSServer":
       return isWebSocketServerInfo(result);
+    case "watchNetworkDeviceAtIp":
     case "startDeviceClientWatcher":
     case "stopDeviceClientWatcher":
     case "startAllDeviceClientWatchers":

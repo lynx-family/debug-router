@@ -12,7 +12,15 @@ export type ControlEventEnvelope<Event extends string, Data> = {
   debugInfo?: MultiplexerDebugInfo;
 };
 
+export type ReportEventData = {
+  eventName: string;
+  metrics: unknown;
+  categories: unknown;
+};
+
 export type ControlEvent =
+  // Shared daemon telemetry is sent to exactly one enabled control client.
+  | ControlEventEnvelope<"report", ReportEventData>
   /**
    * Carries the daemon's authoritative device and client state.
    * The daemon sends an initial snapshot when a control connection is created

@@ -17,10 +17,38 @@ import com.lynx.debugrouter.DebugRouterSessionHandler;
 import com.lynx.debugrouter.DebugRouterSlot;
 import com.lynx.debugrouter.DebugRouterSlotDelegate;
 import com.lynx.debugrouter.StateListener;
+import com.lynx.debugrouter.app.MessageHandleResult;
+import com.lynx.debugrouter.app.MessageHandler;
 import com.lynx.debugrouter.log.LLog;
+import java.util.HashMap;
+import java.util.Map;
+import org.json.JSONObject;
 
 public class MainActivity extends AppCompatActivity implements StateListener {
   private static final String TAG = "MainActivity";
+  private static final String E2E_PING_METHOD = "ConnectorRealDeviceE2E.Ping";
+  private static final String E2E_CDP_PING_METHOD = "ConnectorRealDeviceE2E.CDP.Ping";
+  private static final String E2E_CDP_NOTIFICATION_METHOD =
+      "ConnectorRealDeviceE2E.CDP.Notification";
+  private static boolean sE2EPingHandlerRegistered = false;
+
+  private static final MessageHandler E2E_PING_HANDLER = new MessageHandler() {
+    @Override
+    public MessageHandleResult handle(Map<String, String> params) {
+      Map<String, Object> data = new HashMap<>();
+      data.put("ok", true);
+      data.put("method", getName());
+      data.put(
+          "params",
+          params == null ? new JSONObject() : new JSONObject(params));
+      return new MessageHandleResult(data);
+    }
+
+    @Override
+    public String getName() {
+      return E2E_PING_METHOD;
+    }
+  };
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -29,6 +57,7 @@ public class MainActivity extends AppCompatActivity implements StateListener {
     StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
     StrictMode.setThreadPolicy(policy);
     DebugRouter.getInstance().enableAllSessions();
+    registerE2EPingHandler();
 
     testAddSessionHandlerJNI();
 
@@ -54,6 +83,14 @@ public class MainActivity extends AppCompatActivity implements StateListener {
     }
   }
 
+  private static void registerE2EPingHandler() {
+    if (sE2EPingHandlerRegistered) {
+      return;
+    }
+    DebugRouter.getInstance().addMessageHandler(E2E_PING_HANDLER);
+    sE2EPingHandlerRegistered = true;
+  }
+
   private void testAddSessionHandlerJNI() {
     DebugRouter.getInstance().addSessionHandler(new DebugRouterSessionHandler() {
       @Override
@@ -70,6 +107,7 @@ public class MainActivity extends AppCompatActivity implements StateListener {
       }
     });
 
+    final DebugRouterSlot[] slotHolder = new DebugRouterSlot[1];
     DebugRouterSlot slot = new DebugRouterSlot(new DebugRouterSlotDelegate() {
       @Override
       public String getTemplateUrl() {
@@ -78,8 +116,33 @@ public class MainActivity extends AppCompatActivity implements StateListener {
       @Override
       public void onMessage(String type, String message) {
         LLog.i(TAG, "onMessage:" + type + message);
+        if (!"CDP".equals(type)) {
+          return;
+        }
+        try {
+          JSONObject request = new JSONObject(message);
+          if (!E2E_CDP_PING_METHOD.equals(request.optString("method"))) {
+            return;
+          }
+          JSONObject notification = new JSONObject();
+          notification.put("method", E2E_CDP_NOTIFICATION_METHOD);
+          notification.put("params", request.optJSONObject("params"));
+          slotHolder[0].sendData("CDP", notification.toString());
+
+          JSONObject result = new JSONObject();
+          result.put("ok", true);
+          result.put("method", E2E_CDP_PING_METHOD);
+          result.put("params", request.optJSONObject("params"));
+          JSONObject response = new JSONObject();
+          response.put("id", request.getInt("id"));
+          response.put("result", result);
+          slotHolder[0].sendData("CDP", response.toString());
+        } catch (Exception error) {
+          LLog.e(TAG, "failed to handle E2E CDP ping:" + error.getMessage());
+        }
       }
     });
+    slotHolder[0] = slot;
 
     int sessionId = DebugRouter.getInstance().plug(slot);
     // // 2. enable single session test

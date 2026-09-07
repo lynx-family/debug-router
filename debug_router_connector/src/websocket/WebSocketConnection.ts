@@ -6,14 +6,6 @@ import { WebSocket } from "ws";
 import { WebSocketController } from "./WebSocketServer";
 import { defaultLogger } from "../utils/logger";
 import { Client } from "../connector/Client";
-import {
-  CustomizedEventType,
-  CustomizeResponseType,
-  isCustomizedEventType,
-  RequireMessageType,
-  ResponseMessageType,
-  SocketEvent,
-} from "../utils/type";
 
 export type WebSocketClientInfo = {
   id: number;
@@ -28,10 +20,6 @@ export type WebSocketClientInfo = {
 };
 
 export class WebSocketClient extends Client {
-  private pendingRequests: Map<
-    string,
-    { resolve: (message: string) => void; reject: (err: Error) => void }
-  > = new Map();
   constructor(
     private readonly server: WebSocketController,
     readonly info: WebSocketClientInfo,
@@ -121,49 +109,32 @@ export class WebSocketClient extends Client {
   }
 
   private handleMessage(data: any): void {
-    let dataString = "";
-    if (this.isBufferClass(data)) {
-      dataString = data.toString();
-    } else if (typeof data === "string") {
-      dataString = data;
-      defaultLogger.debug("handleMessage received data with type 'string'");
-    }
-    const message = JSON.parse(dataString);
-    if (this.type() === "Driver") {
-      this.server.emitEvent("ws-web-message", this.clientId(), dataString);
-    } else {
-      this.server.emitEvent("ws-client-message", this.clientId(), dataString);
-    }
-    if (message.event === "ListClients") {
-      this.handleListClients();
-    } else if (message.event === "Ping") {
-      this.handlePing();
-    } else if (message.event === "Customized") {
-      this.handleCustomizedMessage(message, dataString);
-      try {
-        const payload = message?.data?.data?.message;
-        if (typeof payload === "string") {
-          const cdpMessage = JSON.parse(payload);
-          if (cdpMessage?.id) {
-            const key = cdpMessage.id.toString();
-            const pending = this.pendingRequests.get(key);
-            if (pending) {
-              this.pendingRequests.delete(key);
-              pending.resolve(payload);
-            }
-          }
-        } else {
-          defaultLogger.debug(
-            "webSocketClient handleCustomizedMessage invalid message:" +
-              JSON.stringify(message),
-          );
-        }
-      } catch (error: any) {
-        defaultLogger.debug(
-          "webSocketClient handleCustomizedMessage parse error:" +
-            error?.message,
-        );
+    try {
+      let dataString = "";
+      if (this.isBufferClass(data)) {
+        dataString = data.toString();
+      } else if (typeof data === "string") {
+        dataString = data;
+        defaultLogger.debug("handleMessage received data with type 'string'");
       }
+      const message = JSON.parse(dataString);
+      if (this.type() === "Driver") {
+        this.server.emitEvent("ws-web-message", this.clientId(), dataString);
+      } else if (message.event !== "Customized") {
+        this.server.emitEvent("ws-client-message", this.clientId(), dataString);
+      }
+      if (message.event === "ListClients") {
+        this.handleListClients();
+      } else if (message.event === "Ping") {
+        this.handlePing();
+      } else if (message.event === "Customized") {
+        this.handleCustomizedMessage(message, dataString);
+      }
+    } catch (error: any) {
+      defaultLogger.debug(
+        "webSocketClient handleCustomizedMessage parse error:" +
+          error?.message,
+      );
     }
   }
 
@@ -174,14 +145,14 @@ export class WebSocketClient extends Client {
       if (id == -1) {
         return;
       }
-      this.server.sendMessageToApp(id, message);
+      this.server.sendMessageToApp(id, message, this.clientId());
     } else {
-      // message from app, only send to web
+      // message from app, let the server/host decide whether to route or broadcast
       const id = data.data?.sender ?? -1;
       if (id == -1) {
         return;
       }
-      this.server.sendMessageToWeb(message);
+      this.server.handleWebSocketAppMessage(this.clientId(), message);
     }
   }
 
@@ -194,54 +165,14 @@ export class WebSocketClient extends Client {
     };
     this.socket.send(JSON.stringify(response));
   }
-  // send sendCustomizedMessage and wait result
+
   sendCustomizedMessage(
     method: string,
     params: Object = "",
     sessionId: number = -1,
     type: string = "CDP",
   ): Promise<string> {
-    const id = Client.messageIdCounter++;
-    const msg: RequireMessageType = {
-      event: SocketEvent.Customized,
-      data: {
-        type: type,
-        data: {
-          client_id: -1,
-          session_id: sessionId,
-          message: {
-            id: id,
-            method: method,
-            params: params,
-          },
-        },
-        sender: 0,
-      },
-    };
-
-    return new Promise((resolve, reject) => {
-      const key = id.toString();
-      const timer = setTimeout(() => {
-        this.pendingRequests.delete(key);
-        reject(
-          new Error(
-            `Timeout: 5s no response for message-id ${JSON.stringify(msg)}`,
-          ),
-        );
-      }, 5000);
-
-      this.pendingRequests.set(key, {
-        resolve: (message: string) => {
-          clearTimeout(timer);
-          resolve(message);
-        },
-        reject: (err: Error) => {
-          clearTimeout(timer);
-          reject(err);
-        },
-      });
-
-      this.socket.send(JSON.stringify(msg));
-    });
+    // This functionality has moved to the corresponding multiplexer mirror.
+    return Promise.resolve("");
   }
 }

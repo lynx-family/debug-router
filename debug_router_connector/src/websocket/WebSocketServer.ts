@@ -4,14 +4,30 @@
 
 import { WebSocket, WebSocketServer } from "ws";
 import { WebSocketClientInfo, WebSocketClient } from "./WebSocketConnection";
-import { DebugRouterConnector } from "../connector";
 import { UsbClient } from "../usb/Client";
 import { BaseDevice } from "../device/BaseDevice";
 import { getDriverReportService } from "../report/interface/DriverReportService";
 import { DebugerRouterDriverEvents } from "../utils/type";
 
+export type WebSocketControllerHost = {
+  createClientId(): number;
+  getAllUsbClients(): UsbClient[];
+  getDevices(): Promise<BaseDevice[]>;
+  emit<Event extends keyof DebugerRouterDriverEvents>(
+    event: Event,
+    payload: DebugerRouterDriverEvents[Event],
+  ): void;
+  handleWsMessage?(id: number, message: string): void;
+  handleWebSocketDriverMessage?(
+    webClientId: number,
+    targetClientId: number,
+    message: string,
+  ): void;
+  handleWebSocketAppMessage?(appClientId: number, message: string): void;
+};
+
 export class WebSocketController {
-  private driver: DebugRouterConnector;
+  private controllerHost: WebSocketControllerHost;
   private port: number;
   private host: string;
   private roomId: string;
@@ -23,7 +39,7 @@ export class WebSocketController {
   private webClients: Map<number, WebSocketClient> = new Map();
 
   constructor(
-    driver: DebugRouterConnector,
+    host: WebSocketControllerHost,
     option: {
       port: number;
       host: string;
@@ -31,7 +47,7 @@ export class WebSocketController {
       callback?: () => void;
     },
   ) {
-    this.driver = driver;
+    this.controllerHost = host;
     this.port = option.port;
     this.host = option.host;
     this.wssPath = `ws://${this.host}/mdevices/page/android`;
@@ -72,13 +88,13 @@ export class WebSocketController {
     const client = this.websocketAppClients.get(id);
     if (client) {
       this.websocketAppClients.delete(id);
-      this.driver.emit("websocket-app-client-disconnected", id);
-      this.driver.emit("app-client-disconnected", id);
+      this.controllerHost.emit("websocket-app-client-disconnected", id);
+      this.controllerHost.emit("app-client-disconnected", id);
     }
     const webClient = this.webClients.get(id);
     if (webClient) {
       this.webClients.delete(id);
-      this.driver.emit("websocket-web-client-disconnected", id);
+      this.controllerHost.emit("websocket-web-client-disconnected", id);
     }
 
     this.sendClientList();
@@ -103,18 +119,18 @@ export class WebSocketController {
 
     if (info.type === "Driver") {
       this.webClients.set(info.id, client);
-      this.driver.emit("websocket-web-client-connected", client);
+      this.controllerHost.emit("websocket-web-client-connected", client);
     } else {
       this.websocketAppClients.set(info.id, client);
-      this.driver.emit("websocket-app-client-connected", client);
-      this.driver.emit("app-client-connected", client);
+      this.controllerHost.emit("websocket-app-client-connected", client);
+      this.controllerHost.emit("app-client-connected", client);
     }
     this.sendClientList();
   }
 
   onConnection(socket: WebSocket): Promise<WebSocketClientInfo | undefined> {
     return new Promise((resolve) => {
-      const client_id = this.driver.createClientId();
+      const client_id = this.controllerHost.createClientId();
       const initMessage = {
         event: "Initialize",
         data: client_id,
@@ -155,15 +171,40 @@ export class WebSocketController {
     });
   }
 
-  sendMessageToApp(id: number, message: string) {
+  sendMessageToWebClient(id: number, message: string) {
+    this.webClients.get(id)?.sendMessage(message);
+  }
+
+  sendMessageToApp(id: number, message: string, fromWebClientId?: number) {
+    if (
+      fromWebClientId !== undefined &&
+      this.controllerHost.handleWebSocketDriverMessage
+    ) {
+      this.controllerHost.handleWebSocketDriverMessage(
+        fromWebClientId,
+        id,
+        message,
+      );
+      return;
+    }
+
     const client = this.websocketAppClients.get(id);
     if (client) {
       // send to ws client app
       client.sendMessage(message);
     } else {
       // send to usb client app
-      this.driver.handleWsMessage(id, message);
+      this.controllerHost.handleWsMessage?.(id, message);
     }
+  }
+
+  handleWebSocketAppMessage(id: number, message: string) {
+    if (this.controllerHost.handleWebSocketAppMessage) {
+      this.controllerHost.handleWebSocketAppMessage(id, message);
+      return;
+    }
+
+    this.sendMessageToWeb(message);
   }
 
   sendClientList() {
@@ -172,18 +213,12 @@ export class WebSocketController {
     });
   }
 
-  sendDeviceList() {
-    this.webClients.forEach((client) => {
-      client.handleListClients();
-    });
-  }
-
   getAllUsbClients(): UsbClient[] {
-    return this.driver.getAllUsbClients();
+    return this.controllerHost.getAllUsbClients();
   }
 
   getAllDevices(): Promise<BaseDevice[]> {
-    return this.driver.getDevices();
+    return this.controllerHost.getDevices();
   }
 
   // return all websocket app clients
@@ -200,6 +235,6 @@ export class WebSocketController {
     id: number,
     message: string,
   ) {
-    this.driver.emit(event, { id, message });
+    this.controllerHost.emit(event, { id, message });
   }
 }

@@ -15,6 +15,8 @@ const {
   isMultiplexerHealthRequest,
   isMultiplexerHealthResponse,
   isMultiplexerHandshakeErrorResponse,
+  isMultiplexerRegisterRequest,
+  isMultiplexerRegisterResponse,
   isNumberArray,
   isSnapshot,
   isStringArray,
@@ -291,7 +293,7 @@ describe("multiplexer protocol validation", function () {
     );
   });
 
-  it("validates Health DTOs without PID or versioned requests", function () {
+  it("validates Health and Register DTOs without PID or versioned requests", function () {
     assert.strictEqual(
       isMultiplexerHealthRequest({
         kind: "health",
@@ -356,6 +358,22 @@ describe("multiplexer protocol validation", function () {
       false
     );
     assert.strictEqual(
+      isMultiplexerRegisterRequest({ kind: "register" }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerRegisterResponse({ kind: "register-response", ok: true }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerRegisterResponse({
+        kind: "register-response",
+        ok: false,
+        error: { code: "bad", message: "bad register" },
+      }),
+      false
+    );
+    assert.strictEqual(
       isMultiplexerHandshakeErrorResponse({
         kind: "handshake-error-response",
         error: { code: "bad", message: "bad handshake" },
@@ -387,6 +405,11 @@ describe("multiplexer protocol validation", function () {
         },
       ],
       ["connectUsbClients", { deviceId: "device-1", clientName: "demo" }],
+      [
+        "watchNetworkDeviceAtIp",
+        { ip: "127.0.0.1", port: [8901, 0, -1, 65536, 1.5] },
+      ],
+      ["watchNetworkDeviceAtIp", { ip: "127.0.0.2", port: [] }],
       ["startDeviceClientWatcher", { deviceId: "device-1" }],
       ["stopDeviceClientWatcher", { deviceId: "device-1" }],
       ["disconnectDevice", { deviceId: "device-1" }],
@@ -475,6 +498,14 @@ describe("multiplexer protocol validation", function () {
         action: "start",
         deviceId: "device-1",
       }),
+      ...[
+        {},
+        { ip: "", port: [8901] },
+        { ip: 1, port: [8901] },
+        { ip: "127.0.0.1", port: "8901" },
+        { ip: "127.0.0.1", port: ["8901"] },
+        { ip: "127.0.0.1", port: [8901], extra: true },
+      ].map((params) => createRpcRequest("watchNetworkDeviceAtIp", params)),
       createRpcRequest("startDeviceClientWatcher", {}),
       createRpcRequest("startDeviceClientWatcher", { deviceId: 1 }),
       createRpcRequest("startDeviceClientWatcher", { deviceId: "" }),
@@ -570,6 +601,7 @@ describe("multiplexer protocol validation", function () {
         },
       }),
       createRpcResponse([createClientSnapshot()], "connectUsbClients"),
+      createRpcResponse({}, "watchNetworkDeviceAtIp"),
       createRpcResponse({}, "startDeviceClientWatcher"),
       createRpcResponse({}, "stopDeviceClientWatcher"),
       createRpcResponse({}, "startAllDeviceClientWatchers"),
@@ -808,6 +840,45 @@ describe("multiplexer protocol validation", function () {
 
     for (const event of invalidEvents) {
       assert.strictEqual(isControlEvent(event), false);
+    }
+  });
+  it("validates reporting registration and report event envelopes", function () {
+    for (const flag of [true, false]) {
+      assert.strictEqual(
+        isMultiplexerRegisterRequest({
+          kind: "register",
+          reportServiceEnabled: flag,
+        }),
+        true
+      );
+    }
+    for (const flag of [undefined, null, 1, "true", {}]) {
+      assert.strictEqual(
+        isMultiplexerRegisterRequest({
+          kind: "register",
+          reportServiceEnabled: flag,
+        }),
+        false
+      );
+    }
+    const event = {
+      kind: "event",
+      event: "report",
+      data: {
+        eventName: "ready",
+        metrics: null,
+        categories: { serial: "device" },
+      },
+    };
+    assert.strictEqual(isControlEvent(event), true);
+    for (const data of [
+      null,
+      {},
+      { ...event.data, eventName: 1 },
+      { eventName: "ready", metrics: null },
+      { eventName: "ready", categories: {} },
+    ]) {
+      assert.strictEqual(isControlEvent({ ...event, data }), false);
     }
   });
 });

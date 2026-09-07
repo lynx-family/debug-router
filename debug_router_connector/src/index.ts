@@ -2,7 +2,22 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-export * from "./connector";
+export { DebugRouterConnector } from "./connector";
+export type {
+  DebugRouterConnectorOption,
+  devOption,
+} from "./connector";
+export { MultiplexerDevice, MultiplexerUsbClient } from "./multiplexer";
+export type {
+  ClientSnapshot,
+  ControlEvent,
+  ControlEventEnvelope,
+  DeviceSnapshot,
+  MultiplexerDeviceOption,
+  MultiplexerUsbClientOption,
+  Snapshot,
+  WebSocketClientSnapshot,
+} from "./multiplexer";
 // enum
 export { SocketEvent } from "./utils/type";
 export { MultiOpenStatus } from "./connector/MultiOpenCallBack";
@@ -24,5 +39,6 @@ export { BaseDevice } from "./device/BaseDevice";
 export { DeviceManager } from "./device/DeviceManager";
 
 // methods
+export { startMultiplexerDaemonEntry } from "./multiplexer/daemon/entry";
 export { defaultLogger } from "./utils/logger";
 export { getDriverReportService } from "./report/interface/DriverReportService";

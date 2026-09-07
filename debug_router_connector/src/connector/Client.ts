@@ -6,6 +6,7 @@ export abstract class Client {
   protected static messageIdCounter = 1;
   abstract clientId(): number;
   abstract close(): void;
+  // This functionality has moved to the corresponding multiplexer mirror.
   abstract sendCustomizedMessage(
     method: string,
     params: Object,

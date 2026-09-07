@@ -57,6 +57,17 @@ export type MultiplexerHandshakeErrorResponse = {
   error: ControlRpcError;
 };
 
+export type MultiplexerRegisterRequest = {
+  kind: "register";
+  reportServiceEnabled: boolean;
+  debugInfo?: MultiplexerDebugInfo;
+};
+
+export type MultiplexerRegisterResponse = {
+  kind: "register-response";
+  ok: true;
+};
+
 export type WebSocketServerInfo = {
   port: number;
   host: string;
@@ -66,6 +77,7 @@ export type WebSocketServerInfo = {
 export type ControlRpcMethod =
   | "connectDevices"
   | "connectUsbClients"
+  | "watchNetworkDeviceAtIp"
   | "startDeviceClientWatcher"
   | "stopDeviceClientWatcher"
   | "disconnectDevice"
@@ -88,6 +100,10 @@ export type ControlRpcParams = {
     timeout?: number;
     waitTimeout?: boolean;
     clientName?: string | null;
+  };
+  watchNetworkDeviceAtIp: {
+    ip: string;
+    port: number[];
   };
   startDeviceClientWatcher: {
     deviceId: string;
@@ -138,6 +154,7 @@ export type ControlRpcParams = {
 export type ControlRpcResult = {
   connectDevices: DeviceSnapshot[];
   connectUsbClients: ClientSnapshot[];
+  watchNetworkDeviceAtIp: {};
   startDeviceClientWatcher: {};
   stopDeviceClientWatcher: {};
   disconnectDevice: {};

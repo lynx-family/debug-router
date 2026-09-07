@@ -13,6 +13,8 @@
     "build": "rm -rf dist && bash ./scripts/build.sh",
     "types": "rm -rf lib && rm -rf typings && tsc -p tsconfig.prod.json",
     "test:multiplexer": "npm run build && mocha \"../test/unit/multiplexer/**/*.test.js\" \"../test/unit/physical/**/*.test.js\"",
+    "test:message": "mocha \"../test/message/**/*.test.js\"",
+    "test:physical": "npm run build && mocha \"../test/unit/physical/**/*.test.js\"",
     "format": "prettier --write ."
   },
   "keywords": [
@@ -46,6 +48,7 @@
     "chalk": "^4.1.2",
     "debug": "4.3.4",
     "detect-port": "^1.5.1",
+    "find-process": "1.4.7",
     "fs-extra": "^11.1.0",
     "plist": "3.0.6",
     "q": "1.5.1",
