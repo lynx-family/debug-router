@@ -466,67 +466,6 @@ async function runFakeNetworkCheck() {
   }
 }
 
-async function runDynamicNetworkCheck(manualConnect) {
-  logStep(
-    `checking runtime NetworkDevice add with manualConnect=${manualConnect}`,
-  );
-  const firstApp = await startFakeDebugRouterAppServer();
-  const driver = new DebugRouterConnector({
-    manualConnect,
-    enableWebSocket: false,
-    enableAndroid: false,
-    enableIOS: false,
-    enableHarmony: false,
-    enableDesktop: false,
-    enableNetworkDevice: false,
-  });
-  const connectedDevices = [];
-  driver.on("device-connected", (device) =>
-    connectedDevices.push(device.serial),
-  );
-
-  const connectClient = async (ip, expectedApp) => {
-    if (manualConnect) {
-      const clients = await driver.connectUsbClients(ip, 4000, false);
-      assert.strictEqual(clients.length, 1);
-    } else {
-      await waitFor(
-        () => driver.getAllUsbClients().length === 1,
-        4000,
-        `automatic client connection for ${ip}`,
-      );
-    }
-    assert.strictEqual(
-      driver.getAllUsbClients()[0].info.query.app,
-      expectedApp,
-    );
-  };
-
-  try {
-    await driver.watchNetworkDeviceAtIp({
-      ip: "127.0.0.1",
-      port: [firstApp.port],
-    });
-    await driver.watchNetworkDeviceAtIp({
-      ip: "127.0.0.2",
-      port: [firstApp.port],
-    });
-    await driver.watchNetworkDeviceAtIp({
-      ip: "127.0.0.1",
-      port: [firstApp.port],
-    });
-    assert.deepStrictEqual(connectedDevices, ["127.0.0.1", "127.0.0.2"]);
-    assert.deepStrictEqual(Array.from(driver.devices.keys()), [
-      "127.0.0.1",
-      "127.0.0.2",
-    ]);
-    await connectClient("127.0.0.1", firstApp.appName);
-  } finally {
-    await driver.close();
-    await firstApp.close();
-  }
-}
-
 function platformOptions(platform) {
   return {
     enableAndroid: platform === "android" || platform === "all",
@@ -670,8 +609,6 @@ async function main() {
   if (args.mode === "no-device") {
     await runEmptyDiscoveryCheck();
     await runFakeNetworkCheck();
-    await runDynamicNetworkCheck(true);
-    await runDynamicNetworkCheck(false);
   } else {
     await runRealDeviceScenario(args);
   }

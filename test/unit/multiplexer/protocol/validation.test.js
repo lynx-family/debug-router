@@ -15,6 +15,8 @@ const {
   isMultiplexerHealthRequest,
   isMultiplexerHealthResponse,
   isMultiplexerHandshakeErrorResponse,
+  isMultiplexerRegisterRequest,
+  isMultiplexerRegisterResponse,
   isNumberArray,
   isSnapshot,
   isStringArray,
@@ -291,7 +293,7 @@ describe("multiplexer protocol validation", function () {
     );
   });
 
-  it("validates Health DTOs without PID or versioned requests", function () {
+  it("validates Health and Register DTOs without PID or versioned requests", function () {
     assert.strictEqual(
       isMultiplexerHealthRequest({
         kind: "health",
@@ -352,6 +354,22 @@ describe("multiplexer protocol validation", function () {
         ok: true,
         protocolVersion: 1,
         isInUse: "false",
+      }),
+      false
+    );
+    assert.strictEqual(
+      isMultiplexerRegisterRequest({ kind: "register" }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerRegisterResponse({ kind: "register-response", ok: true }),
+      true
+    );
+    assert.strictEqual(
+      isMultiplexerRegisterResponse({
+        kind: "register-response",
+        ok: false,
+        error: { code: "bad", message: "bad register" },
       }),
       false
     );

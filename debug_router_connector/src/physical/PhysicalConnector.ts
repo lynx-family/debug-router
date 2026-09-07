@@ -14,7 +14,6 @@ import iOSDeviceManager from "../device/ios/iOSDeviceManager";
 import HarmonyDeviceManager from "../device/Harmony/HarmonyDeviceManager";
 import { defaultLogger } from "../utils/logger";
 import { getDriverReportService } from "../report/interface/DriverReportService";
-import type { DebugRouterConnector } from "../connector/DebugRouterConnector";
 import { PhysicalConnectorEvent } from "../utils/type";
 import {
   monitorUnregisterClient,
@@ -121,36 +120,25 @@ export class PhysicalConnector {
     if (this.usbConnectOpt.retryTime < 3000) {
       this.usbConnectOpt.retryTime = 3000;
     }
-    this.setOptionByEnv();
     this.traceRecorder = option.traceRecorder ?? null;
     this.devicesManager = new Set<DeviceManager>();
-    // Now DebugRouterConnector is still using the legacy logic right now,
-    // and devicesManager only accepts a DebugRouterConnector object,
-    // so `legacyDriver` is a temporary workaround to keep the project buildable.
-    // After mux is fully integrated, devicesManager will accept a physicalConnector
-    // and we’ll be able to pass `this` instead of `legacyDriver` directly here.
-    const legacyDriver = (this as unknown) as DebugRouterConnector;
     if (this.enableAndroid) {
-      this.devicesManager.add(
-        new AndroidDeviceManager(legacyDriver, this.adbOption),
-      );
+      this.devicesManager.add(new AndroidDeviceManager(this, this.adbOption));
     }
     if (this.enableIOS) {
-      this.devicesManager.add(new iOSDeviceManager(legacyDriver));
+      this.devicesManager.add(new iOSDeviceManager(this));
     }
     if (this.enableHarmony) {
-      this.devicesManager.add(
-        new HarmonyDeviceManager(legacyDriver, this.hdcOption),
-      );
+      this.devicesManager.add(new HarmonyDeviceManager(this, this.hdcOption));
     }
     if (this.enableDesktop) {
-      this.devicesManager.add(new DesktopDeviceManager(legacyDriver));
+      this.devicesManager.add(new DesktopDeviceManager(this));
     }
     if (this.enableNetworkDevice) {
       if (this.networkDeviceOpt) {
         // NetWorkDevices use ip as their serial.
         this.devicesManager.add(
-          new NetworkDeviceManager(legacyDriver, this.networkDeviceOpt),
+          new NetworkDeviceManager(this, this.networkDeviceOpt),
         );
       } else {
         getDriverReportService()?.report("network_connect_error", null, {
@@ -360,21 +348,6 @@ export class PhysicalConnector {
       return true;
     }
     return false;
-  }
-
-  private setOptionByEnv() {
-    if (process.env.DriverEnableAndroid === "false") {
-      this.enableAndroid = false;
-      defaultLogger.warn("set DriverEnableAndroid === false");
-    }
-    if (process.env.DriverEnableIOS === "false") {
-      this.enableIOS = false;
-      defaultLogger.warn("set DriverEnableIOS === false");
-    }
-    if (process.env.DriverEnableDesktop === "false") {
-      this.enableDesktop = false;
-      defaultLogger.warn("set DriverEnableDesktop === false");
-    }
   }
 
   // ======================================

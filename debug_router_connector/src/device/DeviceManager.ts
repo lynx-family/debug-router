@@ -2,12 +2,12 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import { DebugRouterConnector } from "../connector";
+import { PhysicalConnector } from "../physical";
 
 export abstract class DeviceManager {
-  protected readonly driver: DebugRouterConnector;
+  protected readonly driver: PhysicalConnector;
 
-  constructor(driver: DebugRouterConnector) {
+  constructor(driver: PhysicalConnector) {
     this.driver = driver;
   }
 

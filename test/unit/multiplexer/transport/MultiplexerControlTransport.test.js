@@ -70,6 +70,40 @@ describe("MultiplexerControlTransport", function () {
     assert.deepStrictEqual(messages, [{ id: 1 }, { id: 2 }]);
   });
 
+  it("discards interference before a split frame header", function () {
+    const socket = new FakeSocket();
+    const transport = new MultiplexerControlTransport(socket);
+    const messages = [];
+    transport.onMessage((message) => messages.push(message));
+
+    const validFrame = frame({ id: 1 });
+    socket.emit("data", Buffer.from("interference$M", "ascii"));
+    assert.deepStrictEqual(messages, []);
+    socket.emit("data", validFrame.subarray(2));
+
+    assert.deepStrictEqual(messages, [{ id: 1 }]);
+    assert.strictEqual(transport.closed, false);
+  });
+
+  it("discards interference between valid frames", function () {
+    const socket = new FakeSocket();
+    const transport = new MultiplexerControlTransport(socket);
+    const messages = [];
+    transport.onMessage((message) => messages.push(message));
+
+    socket.emit(
+      "data",
+      Buffer.concat([
+        frame({ id: 1 }),
+        Buffer.from("interference", "ascii"),
+        frame({ id: 2 }),
+      ])
+    );
+
+    assert.deepStrictEqual(messages, [{ id: 1 }, { id: 2 }]);
+    assert.strictEqual(transport.closed, false);
+  });
+
   it("hands off the message listener between frames in the same chunk", function () {
     const socket = new FakeSocket();
     const transport = new MultiplexerControlTransport(socket);
@@ -152,40 +186,6 @@ describe("MultiplexerControlTransport", function () {
     assert.deepStrictEqual(messages, []);
     assert.strictEqual(transport.closed, true);
     assert.strictEqual(closeError.code, "invalid-frame");
-  });
-
-  it("discards interference before a split frame header", function () {
-    const socket = new FakeSocket();
-    const transport = new MultiplexerControlTransport(socket);
-    const messages = [];
-    transport.onMessage((message) => messages.push(message));
-
-    const validFrame = frame({ id: 1 });
-    socket.emit("data", Buffer.from("interference$M", "ascii"));
-    assert.deepStrictEqual(messages, []);
-    socket.emit("data", validFrame.subarray(2));
-
-    assert.deepStrictEqual(messages, [{ id: 1 }]);
-    assert.strictEqual(transport.closed, false);
-  });
-
-  it("discards interference between valid frames", function () {
-    const socket = new FakeSocket();
-    const transport = new MultiplexerControlTransport(socket);
-    const messages = [];
-    transport.onMessage((message) => messages.push(message));
-
-    socket.emit(
-      "data",
-      Buffer.concat([
-        frame({ id: 1 }),
-        Buffer.from("interference", "ascii"),
-        frame({ id: 2 }),
-      ])
-    );
-
-    assert.deepStrictEqual(messages, [{ id: 1 }, { id: 2 }]);
-    assert.strictEqual(transport.closed, false);
   });
 
   it("rejects oversized outgoing frames", function () {

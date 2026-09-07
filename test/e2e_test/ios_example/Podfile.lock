@@ -21,7 +21,7 @@ EXTERNAL SOURCES:
     :path: "../../../"
 
 SPEC CHECKSUMS:
-  DebugRouter: 87b467f011414bea61bff7e8a93f0012bedee427
+  DebugRouter: a7adbd11023ce0e7d49ed4288e4dca23e6b41a25
 
 PODFILE CHECKSUM: 95db8d786fa131f2ac73661e12bc6e3a4b4fe16b
 

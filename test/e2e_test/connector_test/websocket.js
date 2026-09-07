@@ -10,7 +10,7 @@ async function main() {
   const driver = new DebugRouterConnector({
     manualConnect: false,
     enableWebSocket: true,
-    enableAndroid: false,
+    enableAndroid: true,
     enableIOS: false,
     enableDesktop: false,
     websocketOption: {
