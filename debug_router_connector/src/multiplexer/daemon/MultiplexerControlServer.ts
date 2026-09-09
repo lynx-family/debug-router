@@ -153,7 +153,10 @@ export class MultiplexerControlServer {
           return;
         }
         const connection = this.registerConnection(transport);
-        void this.host.handleControlConnected?.(connection.controlId);
+        void this.host.handleControlConnected?.(
+          connection.controlId,
+          message.reportServiceEnabled,
+        );
         return;
       }
 

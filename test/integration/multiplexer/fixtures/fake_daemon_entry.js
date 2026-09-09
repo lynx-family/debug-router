@@ -5,6 +5,10 @@
 const fs = require("fs");
 const path = require("path");
 const { EventEmitter } = require("events");
+const {
+  getDriverReportService,
+  setDriverReportService,
+} = require("../../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportService");
 
 const {
   parseEntryOption,
@@ -421,6 +425,14 @@ class FakePhysicalConnector {
   handleCommand(command) {
     this.record("command", command);
     switch (command.type) {
+      case "report":
+        getDriverReportService()?.report(
+          command.eventName,
+          command.metrics,
+          command.categories
+        );
+        this.record("report-processed", { eventName: command.eventName });
+        break;
       case "add-device":
         this.addDevice(command.device, true);
         break;
@@ -507,10 +519,11 @@ async function main() {
     physicalConnector,
   });
   physicalConnector.traceRecorder = host.connectionTraceRecorder;
+  getDriverReportService()?.report("fixture-startup-report", null, {});
   const handleControlConnected = host.handleControlConnected.bind(host);
   const handleControlDisconnected = host.handleControlDisconnected.bind(host);
-  host.handleControlConnected = (controlId) => {
-    handleControlConnected(controlId);
+  host.handleControlConnected = (controlId, reportServiceEnabled) => {
+    handleControlConnected(controlId, reportServiceEnabled);
     appendJsonLine(daemonLogPath, {
       event: "control-connected-callback",
       pid: process.pid,

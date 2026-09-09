@@ -9,7 +9,11 @@ import {
   PhysicalConnector,
   PhysicalConnectorOption,
 } from "../../physical/PhysicalConnector";
-import { getDriverReportService } from "../../report/interface/DriverReportService";
+import {
+  getDriverReportService,
+  setDriverReportService,
+} from "../../report/interface/DriverReportService";
+import { DaemonReportServiceBridge } from "./DaemonReportServiceBridge";
 import { UsbClient } from "../../usb/Client";
 import { defaultLogger } from "../../utils/logger";
 import { WebSocketController } from "../../websocket/WebSocketServer";
@@ -163,6 +167,14 @@ export class MultiplexerDaemonHost {
    * - activeWebSocketDriverIds: WebSocket frontends that also keep the daemon alive.
    */
   private readonly activeControlIds = new Set<number>();
+  // Connected controls with reporting enabled, in registration order.
+  // The first entry receives reports; disconnecting it selects the next entry.
+  private readonly reportControlIds = new Set<number>();
+  private readonly reportBridge = new DaemonReportServiceBridge(
+    (controlId, data) => {
+      this.sendToControl(controlId, { kind: "event", event: "report", data });
+    },
+  );
   private readonly webSocketRequesterControlIds = new Set<number>();
   private readonly activeWebSocketDriverIds = new Set<number>();
   private readonly legacyOwnershipGuard: LegacyOwnershipGuard;
@@ -193,6 +205,8 @@ export class MultiplexerDaemonHost {
       option.connectionTrace,
       process.env.DriverConnectionTracePath,
     );
+    // Install before physical construction so its startup reports are queued.
+    setDriverReportService(this.reportBridge);
     this.physicalConnector =
       option.physicalConnector ??
       new PhysicalConnector({
@@ -271,6 +285,9 @@ export class MultiplexerDaemonHost {
       return;
     }
     this.lifecycleStatus = "closed";
+    this.reportBridge.close();
+    this.reportControlIds.clear();
+    setDriverReportService(null);
 
     // Serialize shutdown after any in-flight startup so stop cannot race controlServer.start().
     if (this.startingPromise) {
@@ -446,8 +463,14 @@ export class MultiplexerDaemonHost {
   }
 
   // Initializes a newly connected Connector with the current snapshot and ownership state.
-  handleControlConnected(controlId: number): void {
+  handleControlConnected(
+    controlId: number,
+    reportServiceEnabled = false,
+  ): void {
     this.activeControlIds.add(controlId);
+    if (reportServiceEnabled) {
+      this.reportControlIds.add(controlId);
+    }
     this.connectionTraceRecorder?.recordControlSocketConnected(controlId, {
       activeControlCount: this.activeControlIds.size,
     });
@@ -468,10 +491,23 @@ export class MultiplexerDaemonHost {
         },
       });
     }
+    this.updateReportStatus();
+  }
+
+  private updateReportStatus(): void {
+    // Take the first value in the Set, or null when the Set is empty.
+    const [controlId = null] = this.reportControlIds;
+    this.reportBridge.updateStatus(
+      controlId !== null
+        ? { type: "forward", controlId }
+        : { type: "disconnected" },
+    );
   }
 
   handleControlDisconnected(controlId: number): void {
     this.activeControlIds.delete(controlId);
+    this.reportControlIds.delete(controlId);
+    this.updateReportStatus();
     this.connectionTraceRecorder?.recordControlSocketDisconnected(controlId, {
       activeControlCount: this.activeControlIds.size,
     });

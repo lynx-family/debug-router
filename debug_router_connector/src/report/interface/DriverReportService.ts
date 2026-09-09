@@ -9,6 +9,18 @@ export interface DriverReportService {
 
 let reportService: DriverReportService | null = null;
 
+export function initDriverReportService(
+  service: DriverReportService | null | undefined,
+  manualConnect: boolean | undefined,
+): DriverReportService | null {
+  if (service == null) {
+    return null;
+  }
+
+  service.init(manualConnect);
+  return service;
+}
+
 export function setDriverReportService(service: DriverReportService | null) {
   reportService = service;
 }

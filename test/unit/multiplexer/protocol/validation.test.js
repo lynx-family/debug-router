@@ -392,7 +392,7 @@ describe("multiplexer protocol validation", function () {
     );
     assert.strictEqual(
       isMultiplexerRegisterRequest({ kind: "register" }),
-      true
+      false
     );
     assert.strictEqual(
       isMultiplexerRegisterResponse({ kind: "register-response", ok: true }),
@@ -859,6 +859,45 @@ describe("multiplexer protocol validation", function () {
 
     for (const event of invalidEvents) {
       assert.strictEqual(isControlEvent(event), false);
+    }
+  });
+  it("validates reporting registration and report event envelopes", function () {
+    for (const flag of [true, false]) {
+      assert.strictEqual(
+        isMultiplexerRegisterRequest({
+          kind: "register",
+          reportServiceEnabled: flag,
+        }),
+        true
+      );
+    }
+    for (const flag of [undefined, null, 1, "true", {}]) {
+      assert.strictEqual(
+        isMultiplexerRegisterRequest({
+          kind: "register",
+          reportServiceEnabled: flag,
+        }),
+        false
+      );
+    }
+    const event = {
+      kind: "event",
+      event: "report",
+      data: {
+        eventName: "ready",
+        metrics: null,
+        categories: { serial: "device" },
+      },
+    };
+    assert.strictEqual(isControlEvent(event), true);
+    for (const data of [
+      null,
+      {},
+      { ...event.data, eventName: 1 },
+      { eventName: "ready", metrics: null },
+      { eventName: "ready", categories: {} },
+    ]) {
+      assert.strictEqual(isControlEvent({ ...event, data }), false);
     }
   });
 });

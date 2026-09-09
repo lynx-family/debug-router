@@ -59,6 +59,7 @@ export type MultiplexerHandshakeErrorResponse = {
 
 export type MultiplexerRegisterRequest = {
   kind: "register";
+  reportServiceEnabled: boolean;
   debugInfo?: MultiplexerDebugInfo;
 };
 

@@ -206,6 +206,7 @@ export function isMultiplexerRegisterRequest(
   return (
     isRecord(value) &&
     value.kind === "register" &&
+    isBoolean(value.reportServiceEnabled) &&
     isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
 }
@@ -266,6 +267,13 @@ export function isControlEvent(value: unknown): value is ControlEvent {
   }
 
   switch (value.event) {
+    case "report":
+      return (
+        isRecord(value.data) &&
+        isString(value.data.eventName) &&
+        Object.prototype.hasOwnProperty.call(value.data, "metrics") &&
+        Object.prototype.hasOwnProperty.call(value.data, "categories")
+      );
     case "snapshot":
       return isSnapshot(value.data);
     case "legacy-ownership-changed":

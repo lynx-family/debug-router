@@ -4,6 +4,11 @@
 
 const assert = require("assert");
 const { EventEmitter } = require("events");
+const {
+  getDriverReportService,
+  setDriverReportService,
+} = require("../../../../debug_router_connector/dist/cjs/src/report/interface/DriverReportService");
+
 const path = require("path");
 const rewire = require(require.resolve("rewire", {
   paths: [path.join(__dirname, "../../../../debug_router_connector")],
@@ -733,6 +738,7 @@ describe("MultiplexerDaemonHost", function () {
 
   afterEach(function () {
     Date.now = originalNow;
+    setDriverReportService(null);
     defaultLogger.setOutput(() => {});
   });
 
@@ -1351,7 +1357,7 @@ describe("MultiplexerDaemonHost", function () {
       ["snapshot", "legacy-ownership-changed"]
     );
     assert.deepStrictEqual(controlServer.broadcasts[0].data, {
-      protocolVersion: 1,
+      protocolVersion: MULTIPLEXER_PROTOCOL_VERSION,
       generatedAt: 3000,
       devices: [],
       clients: [],
@@ -4433,5 +4439,77 @@ describe("MultiplexerDaemonHost", function () {
     const { host } = createHost();
 
     assert.doesNotThrow(() => host.handleControlDisconnected(123));
+  });
+  it("routes reports to one enabled control and updates selection on disconnect", async function () {
+    const { host } = createHost();
+    const server = attachControlServer(host);
+    const service = getDriverReportService();
+    const report = (name) => service.report(name, null, {});
+    const delivered = () =>
+      server.targeted
+        .filter((item) => item.event.event === "report")
+        .map((item) => [item.controlId, item.event.data.eventName]);
+    report("startup");
+    host.handleControlConnected(1);
+    assert.deepStrictEqual(delivered(), []);
+    host.handleControlConnected(2, true);
+    host.handleControlConnected(3, true);
+    host.handleControlConnected(4, false);
+    report("first");
+    host.handleControlDisconnected(2);
+    report("second");
+    host.handleControlDisconnected(3);
+    report("disabled");
+    host.handleControlDisconnected(1);
+    host.handleControlDisconnected(4);
+    report("queued");
+    host.handleControlConnected(5, true);
+    assert.deepStrictEqual(delivered(), [
+      [2, "startup"],
+      [2, "first"],
+      [3, "second"],
+      [5, "disabled"],
+      [5, "queued"],
+    ]);
+    assert.strictEqual(
+      server.broadcasts.some((event) => event.event === "report"),
+      false
+    );
+    await host.stop();
+    assert.strictEqual(getDriverReportService(), null);
+    report("after-stop");
+    assert.strictEqual(delivered().length, 5);
+  });
+
+  it("captures physical constructor reports before the first control registers", async function () {
+    const host = new MultiplexerDaemonHost({
+      controlEndpoint: "/tmp/report-startup.sock",
+      protocolVersion: MULTIPLEXER_PROTOCOL_VERSION,
+      multiplexerDaemonIdleTimeout: -1,
+      physicalConnectorOption: {
+        manualConnect: true,
+        enableAndroid: false,
+        enableIOS: false,
+        enableHarmony: false,
+        enableDesktop: false,
+        enableNetworkDevice: false,
+      },
+    });
+    const server = attachControlServer(host);
+    host.handleControlConnected(1, true);
+    const reports = server.targeted.filter(
+      (item) => item.event.event === "report"
+    );
+    assert.deepStrictEqual(
+      reports.map((item) => item.event.data.eventName),
+      ["PhysicalConnectorInit"]
+    );
+    assert(reports.every((item) => isControlEvent(item.event)));
+    host.handleControlConnected(2, true);
+    assert.strictEqual(
+      server.targeted.filter((item) => item.event.event === "report").length,
+      1
+    );
+    await host.stop();
   });
 });
