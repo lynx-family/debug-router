@@ -88,6 +88,7 @@ function parseArgs(argv) {
     recovery: false,
     churn: true,
     legacyPreemption: false,
+    bail: false,
     report: "",
   };
 
@@ -158,6 +159,8 @@ function parseArgs(argv) {
       args.legacyPreemption = true;
     } else if (arg === "--no-legacy-preemption") {
       args.legacyPreemption = false;
+    } else if (arg === "--bail") {
+      args.bail = true;
     } else if (arg === "--report") {
       args.report = readValue();
     } else if (arg === "--help") {
@@ -251,6 +254,7 @@ Options:
   --no-churn
   --legacy-preemption                Enable legacy owner preemption probe (default: off)
   --no-legacy-preemption
+  --bail                            Stop after the first failure and clean up
   --report <path>
 `);
 }
@@ -408,6 +412,9 @@ async function runPlatformStressScenario(platform, args) {
     );
 
     await runStressRounds(context, state, args, report);
+    if (args.bail && totalFailures(report) > 0) {
+      return report;
+    }
 
     if (args.recovery) {
       await runRecoveryProbe(context, state, args, report);
@@ -703,10 +710,16 @@ async function runStressRounds(context, state, args, report) {
       tasks,
       args.concurrency,
       async (task) => {
+        if (args.bail && totalFailures(report) > 0) {
+          return;
+        }
         await runMessageTask(task, args, report);
       },
       args.sendIntervalMs
     );
+    if (args.bail && totalFailures(report) > 0) {
+      return;
+    }
     scheduled += tasks.length;
 
     if (args.churn && round < args.rounds - 1) {
@@ -2223,7 +2236,11 @@ async function main() {
   const reports = [];
 
   for (const platform of platforms) {
-    reports.push(await runPlatformStressScenario(platform, args));
+    const report = await runPlatformStressScenario(platform, args);
+    reports.push(report);
+    if (args.bail && totalFailures(report) > 0) {
+      break;
+    }
   }
 
   writeReports(args.report, reports);

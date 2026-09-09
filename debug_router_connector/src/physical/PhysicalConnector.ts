@@ -85,7 +85,6 @@ export class PhysicalConnector {
       traceRecorder: null,
     },
   ) {
-    getDriverReportService()?.init(option.manualConnect);
     const msg = "PhysicalConnectorOption:" + JSON.stringify(option);
     defaultLogger.debug(msg);
     getDriverReportService()?.report(

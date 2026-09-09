@@ -34,12 +34,14 @@ describe("MultiplexerDaemonClient", function () {
   let client;
   let ensureCalls;
   let connectedIds;
+  let reportFlags;
 
   beforeEach(function () {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-client-"));
     endpoint = path.join(tempDir, "control.sock");
     ensureCalls = 0;
     connectedIds = [];
+    reportFlags = [];
   });
 
   afterEach(async function () {
@@ -56,8 +58,9 @@ describe("MultiplexerDaemonClient", function () {
         isInUse() {
           return connectedIds.length > 0;
         },
-        handleControlConnected(id) {
+        handleControlConnected(id, reportEnabled) {
           connectedIds.push(id);
+          reportFlags.push(reportEnabled);
           server.sendToControl(id, {
             kind: "event",
             event: "snapshot",
@@ -97,6 +100,7 @@ describe("MultiplexerDaemonClient", function () {
       daemonManager: manager,
       controlEndpoint: endpoint,
       rpcTimeout: option.rpcTimeout ?? 100,
+      reportServiceEnabled: option.reportServiceEnabled,
       debugInfo: option.debugInfo,
       now: () => 123,
     });
@@ -629,5 +633,31 @@ describe("MultiplexerDaemonClient", function () {
     );
     assert.deepStrictEqual(firstStates, []);
     assert.deepStrictEqual(secondStates, ["connected", "disconnected"]);
+  });
+  it("advertises the report flag on every registration, including reconnect", async function () {
+    await start({ reportServiceEnabled: true });
+    await client.connect();
+    // close() is terminal in MR6; simulate a remote disconnect to reconnect.
+    const disconnected = new Promise((resolve) => {
+      client.subscribeConnectionEvent((event) => {
+        if (event.state === "disconnected") resolve();
+      });
+    });
+    await server.connections.get(connectedIds[0]).close();
+    await disconnected;
+    await client.connect();
+    assert.deepStrictEqual(reportFlags, [true, true]);
+    const report = {
+      kind: "event",
+      event: "report",
+      data: { eventName: "ready", metrics: null, categories: {} },
+    };
+    const received = new Promise((resolve) =>
+      client.subscribe((event) => {
+        if (event.event === "report") resolve(event);
+      })
+    );
+    server.sendToControl(connectedIds[1], report);
+    assert.deepStrictEqual(await received, report);
   });
 });
