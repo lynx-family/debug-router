@@ -19,6 +19,7 @@ import {
   MultiplexerDiscovery,
   MultiplexerDiscoveryValidation,
 } from "./MultiplexerDiscovery";
+import type { MultiplexerDaemonClient } from "./MultiplexerDaemonClient";
 
 export const DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT = 5000;
 export const DEFAULT_MULTIPLEXER_READY_POLL_INTERVAL = 50;
@@ -39,14 +40,6 @@ export type MultiplexerDaemonSpawn = (
   args: string[],
   options: SpawnOptions,
 ) => SpawnedDaemonProcess;
-
-type MultiplexerDaemonControlClient = {
-  call(
-    method: "shutdownDaemon",
-    params: { reason?: string },
-    ensureDaemon?: boolean,
-  ): Promise<unknown>;
-};
 
 export type MultiplexerDaemonManagerOption = {
   // Required daemon lifecycle dependencies.
@@ -112,7 +105,7 @@ export class MultiplexerDaemonManager {
   private readonly isProcessAlive: (pid: number) => boolean;
   private readonly sleepFor: (duration: number) => Promise<void>;
   private readonly now: () => number;
-  private daemonClient?: MultiplexerDaemonControlClient;
+  private daemonClient?: MultiplexerDaemonClient;
 
   constructor(option: MultiplexerDaemonManagerOption) {
     this.discovery = option.discovery;
@@ -147,7 +140,7 @@ export class MultiplexerDaemonManager {
     this.now = option.now ?? Date.now;
   }
 
-  setDaemonClient(daemonClient: MultiplexerDaemonControlClient): void {
+  setDaemonClient(daemonClient: MultiplexerDaemonClient): void {
     this.daemonClient = daemonClient;
   }
 
