@@ -2,7 +2,12 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import type { ControlRpcRequest, MultiplexerDebugInfo } from "../protocol";
+import type {
+  ControlRpcMethod,
+  ControlRpcRequest,
+  ControlRpcResult,
+  MultiplexerDebugInfo,
+} from "../protocol";
 import type {
   PhysicalConnector,
   PhysicalConnectorOption,
@@ -51,7 +56,7 @@ export class MultiplexerDaemonHost {
   async handleControlRpc(
     _controlId: number,
     _message: ControlRpcRequest,
-  ): Promise<unknown> {
+  ): Promise<ControlRpcResult[ControlRpcMethod] | void> {
     return undefined;
   }
 }

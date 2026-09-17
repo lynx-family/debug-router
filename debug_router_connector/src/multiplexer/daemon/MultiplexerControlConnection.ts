@@ -4,8 +4,10 @@
 
 import {
   ControlRpcError,
+  ControlRpcMethod,
   ControlRpcRequest,
   ControlRpcResponse,
+  ControlRpcResult,
 } from "../protocol/control";
 import type { MultiplexerDebugInfo } from "../protocol/debuginfo";
 import { ControlEvent } from "../protocol/event";
@@ -66,7 +68,10 @@ export class MultiplexerControlConnection {
     }
   }
 
-  sendResponse(rpcId: number, result: unknown): void {
+  sendResponse(
+    rpcId: number,
+    result: ControlRpcResult[ControlRpcMethod] | void,
+  ): void {
     this.send({
       kind: "rpc-response",
       id: rpcId,
