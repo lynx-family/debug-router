@@ -2,7 +2,12 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-import type { MultiplexerDebugInfo } from "../protocol";
+import type {
+  ControlRpcMethod,
+  ControlRpcRequest,
+  ControlRpcResult,
+  MultiplexerDebugInfo,
+} from "../protocol";
 import type {
   PhysicalConnector,
   PhysicalConnectorOption,
@@ -39,4 +44,19 @@ export class MultiplexerDaemonHost {
   setIdleTimeoutHandler(_handler: () => void | Promise<void>): void {}
 
   setShutdownHandler(_handler: () => void | Promise<void>): void {}
+
+  isInUse(): boolean {
+    return false;
+  }
+
+  handleControlConnected(_controlId: number): void {}
+
+  handleControlDisconnected(_controlId: number): void {}
+
+  async handleControlRpc(
+    _controlId: number,
+    _message: ControlRpcRequest,
+  ): Promise<ControlRpcResult[ControlRpcMethod] | void> {
+    return undefined;
+  }
 }

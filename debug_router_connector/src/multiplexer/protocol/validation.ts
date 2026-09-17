@@ -10,6 +10,8 @@ import type {
   MultiplexerHandshakeErrorResponse,
   MultiplexerHealthRequest,
   MultiplexerHealthResponse,
+  MultiplexerRegisterRequest,
+  MultiplexerRegisterResponse,
 } from "./control";
 import type { MultiplexerDebugInfo } from "./debuginfo";
 import type { ControlEvent } from "./event";
@@ -195,6 +197,24 @@ export function isMultiplexerHandshakeErrorResponse(
     isRecord(value) &&
     value.kind === "handshake-error-response" &&
     isControlRpcError(value.error)
+  );
+}
+
+export function isMultiplexerRegisterRequest(
+  value: unknown,
+): value is MultiplexerRegisterRequest {
+  return (
+    isRecord(value) &&
+    value.kind === "register" &&
+    isOptional(value.debugInfo, isMultiplexerDebugInfo)
+  );
+}
+
+export function isMultiplexerRegisterResponse(
+  value: unknown,
+): value is MultiplexerRegisterResponse {
+  return (
+    isRecord(value) && value.kind === "register-response" && value.ok === true
   );
 }
 

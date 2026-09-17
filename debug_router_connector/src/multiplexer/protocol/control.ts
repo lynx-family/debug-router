@@ -57,6 +57,16 @@ export type MultiplexerHandshakeErrorResponse = {
   error: ControlRpcError;
 };
 
+export type MultiplexerRegisterRequest = {
+  kind: "register";
+  debugInfo?: MultiplexerDebugInfo;
+};
+
+export type MultiplexerRegisterResponse = {
+  kind: "register-response";
+  ok: true;
+};
+
 export type WebSocketServerInfo = {
   port: number;
   host: string;

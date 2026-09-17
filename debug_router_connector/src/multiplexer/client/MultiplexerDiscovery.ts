@@ -95,13 +95,11 @@ export class MultiplexerDiscovery {
           kind: "health",
           ...(debugInfo ? { debugInfo } : {}),
         };
-        try {
-          transport.send(request);
-        } catch (error) {
+        if (!transport.send(request)) {
           finish({
             status: "unusable",
             reason: "unreachable",
-            error: error instanceof Error ? error : new Error(String(error)),
+            error: new Error("Failed to send multiplexer health request"),
           });
         }
       };

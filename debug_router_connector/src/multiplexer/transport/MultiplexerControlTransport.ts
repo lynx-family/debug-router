@@ -10,6 +10,7 @@ import { defaultLogger } from "../../utils/logger";
 const FRAME_PREFIX = "$MUX";
 const FRAME_HEADER_FORMAT = "! 4s I";
 const FRAME_HEADER_SIZE = 8;
+const CONTROL_TRANSPORT_END_TIMEOUT = 1000;
 export const DEFAULT_MULTIPLEXER_CONTROL_MAX_FRAME_SIZE = 16 * 1024 * 1024;
 export const DEFAULT_MULTIPLEXER_CONTROL_MAX_BUFFER_SIZE = 32 * 1024 * 1024;
 
@@ -60,30 +61,47 @@ export class MultiplexerControlTransport {
     return !this.closed && this.socket.writable;
   }
 
-  send(message: unknown): void {
-    if (!this.writable) {
-      throw new Error("Multiplexer control transport is not writable");
-    }
+  send(message: unknown): boolean {
+    // Returns whether the frame was accepted for writing.
+    let payload: Buffer;
+    try {
+      const serialized = JSON.stringify(message);
+      if (serialized === undefined) {
+        throw new Error("Multiplexer control message is not JSON serializable");
+      }
 
-    const serialized = JSON.stringify(message);
-    if (serialized === undefined) {
-      throw new Error("Multiplexer control message is not JSON serializable");
-    }
-
-    const payload = Buffer.from(serialized, "utf8");
-    if (payload.length > this.maxFrameSize) {
-      throw new MultiplexerControlTransportError(
-        "frame-too-large",
-        `Multiplexer control frame exceeds ${this.maxFrameSize} bytes`,
+      payload = Buffer.from(serialized, "utf8");
+      if (payload.length > this.maxFrameSize) {
+        throw new MultiplexerControlTransportError(
+          "frame-too-large",
+          `Multiplexer control frame exceeds ${this.maxFrameSize} bytes`,
+        );
+      }
+    } catch (error) {
+      defaultLogger.warn(
+        error instanceof Error ? error.message : String(error),
       );
+      return false;
     }
 
-    const frame = bufferpack.pack(`${FRAME_HEADER_FORMAT} ${payload.length}A`, [
-      FRAME_PREFIX,
-      payload.length,
-      payload,
-    ]);
-    this.socket.write(frame);
+    try {
+      if (!this.writable) {
+        throw new Error("Multiplexer control transport is not writable");
+      }
+
+      const frame = bufferpack.pack(
+        `${FRAME_HEADER_FORMAT} ${payload.length}A`,
+        [FRAME_PREFIX, payload.length, payload],
+      );
+      this.socket.write(frame);
+      return true;
+    } catch (error) {
+      const sendError =
+        error instanceof Error ? error : new Error(String(error));
+      defaultLogger.warn(sendError.message);
+      this.destroy(sendError);
+      return false;
+    }
   }
 
   onConnect(listener: () => void): () => void {
@@ -116,7 +134,15 @@ export class MultiplexerControlTransport {
     }
 
     return new Promise((resolve) => {
-      this.onClose(() => resolve());
+      // Set a cleanup timeout to prevent the socket from remaining stuck open.
+      const timer = setTimeout(
+        () => this.destroy(),
+        CONTROL_TRANSPORT_END_TIMEOUT,
+      );
+      this.onClose(() => {
+        clearTimeout(timer);
+        resolve();
+      });
       this.socket.end();
     });
   }
