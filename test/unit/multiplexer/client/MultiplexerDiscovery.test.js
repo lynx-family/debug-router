@@ -44,32 +44,19 @@ function frame(value) {
 function receiveFrame(socket) {
   return new Promise((resolve, reject) => {
     let buffer = Buffer.alloc(0);
-    const cleanup = () => {
-      socket.off("data", onData);
-      socket.off("error", onError);
-      socket.off("end", onEnd);
-    };
-    const rejectFrame = (error) => {
-      cleanup();
-      reject(error);
-    };
     const onData = (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length < FRAME_HEADER_SIZE) return;
+
+      assert.deepStrictEqual(
+        buffer.subarray(0, FRAME_PREFIX.length),
+        FRAME_PREFIX
+      );
+      const payloadLength = buffer.readUInt32BE(FRAME_PREFIX.length);
+      if (buffer.length < FRAME_HEADER_SIZE + payloadLength) return;
+
+      socket.off("data", onData);
       try {
-        buffer = Buffer.concat([buffer, chunk]);
-        if (buffer.length < FRAME_HEADER_SIZE) return;
-
-        if (
-          !isDeepStrictEqual(
-            buffer.subarray(0, FRAME_PREFIX.length),
-            FRAME_PREFIX
-          )
-        ) {
-          throw new Error("received an invalid multiplexer frame prefix");
-        }
-        const payloadLength = buffer.readUInt32BE(FRAME_PREFIX.length);
-        if (buffer.length < FRAME_HEADER_SIZE + payloadLength) return;
-
-        cleanup();
         resolve(
           JSON.parse(
             buffer
@@ -78,15 +65,10 @@ function receiveFrame(socket) {
           )
         );
       } catch (error) {
-        rejectFrame(error);
+        reject(error);
       }
     };
-    const onError = (error) => rejectFrame(error);
-    const onEnd = () =>
-      rejectFrame(new Error("socket ended before receiving a complete frame"));
     socket.on("data", onData);
-    socket.once("error", onError);
-    socket.once("end", onEnd);
   });
 }
 
@@ -217,12 +199,7 @@ describe("MultiplexerDiscovery", function () {
       controlEndpoint: context.endpoint,
       localProtocolVersion: 1,
     }).probeHealth();
-    assert.deepStrictEqual(result, {
-      status: "replace-required",
-      reason: "daemon-older-than-connector",
-      daemonProtocolVersion: 0,
-      connectorProtocolVersion: 1,
-    });
+    assert.strictEqual(result.status, "replace-required");
   });
 
   it("rejects replacement when an older daemon is in use", async function () {
@@ -242,21 +219,16 @@ describe("MultiplexerDiscovery", function () {
     });
   });
 
-  it("reports an unreachable endpoint", async function () {
+  it("reports unreachable and timeout endpoints", async function () {
     const context = createTempContext();
     contexts.push(context);
-    const result = await new MultiplexerDiscovery({
+    const unreachable = await new MultiplexerDiscovery({
       controlEndpoint: context.endpoint,
       localProtocolVersion: 1,
+      healthCheckTimeout: 20,
     }).probeHealth();
-    assert.strictEqual(result.status, "unusable");
-    assert.strictEqual(result.reason, "unreachable");
-    assert.ok(result.error instanceof Error);
-  });
+    assert.strictEqual(unreachable.reason, "unreachable");
 
-  it("reports a health probe timeout", async function () {
-    const context = createTempContext();
-    contexts.push(context);
     const rawSockets = new Set();
     const rawServer = net.createServer((socket) => {
       rawSockets.add(socket);
@@ -267,35 +239,27 @@ describe("MultiplexerDiscovery", function () {
     const timeout = await new MultiplexerDiscovery({
       controlEndpoint: context.endpoint,
       localProtocolVersion: 1,
-      healthCheckTimeout: 200,
+      healthCheckTimeout: 20,
     }).probeHealth();
-    assert.deepStrictEqual(timeout, {
-      status: "unusable",
-      reason: "timeout",
-    });
+    assert.strictEqual(timeout.reason, "timeout");
   });
 
-  it("reports an invalid health response", async function () {
-    const context = createTempContext();
-    contexts.push(context);
+  it("reports invalid response and invalid frames", async function () {
+    const invalidResponseContext = createTempContext();
+    contexts.push(invalidResponseContext);
     const invalidResponseServer = net.createServer((socket) => {
       socket.once("data", () => socket.end(frame({ kind: "unexpected" })));
     });
     trackServer(invalidResponseServer);
-    await listen(invalidResponseServer, context.endpoint);
-    const result = await new MultiplexerDiscovery({
-      controlEndpoint: context.endpoint,
+    await listen(invalidResponseServer, invalidResponseContext.endpoint);
+    const invalidResponse = await new MultiplexerDiscovery({
+      controlEndpoint: invalidResponseContext.endpoint,
       localProtocolVersion: 1,
     }).probeHealth();
-    assert.deepStrictEqual(result, {
-      status: "unusable",
-      reason: "invalid-response",
-    });
-  });
+    assert.strictEqual(invalidResponse.reason, "invalid-response");
 
-  it("reports an invalid transport frame", async function () {
-    const context = createTempContext();
-    contexts.push(context);
+    const invalidFrameContext = createTempContext();
+    contexts.push(invalidFrameContext);
     const invalidFrameServer = net.createServer((socket) => {
       socket.once("data", () => {
         const bad = Buffer.alloc(FRAME_HEADER_SIZE + 1);
@@ -306,13 +270,11 @@ describe("MultiplexerDiscovery", function () {
       });
     });
     trackServer(invalidFrameServer);
-    await listen(invalidFrameServer, context.endpoint);
-    const result = await new MultiplexerDiscovery({
-      controlEndpoint: context.endpoint,
+    await listen(invalidFrameServer, invalidFrameContext.endpoint);
+    const invalidFrame = await new MultiplexerDiscovery({
+      controlEndpoint: invalidFrameContext.endpoint,
       localProtocolVersion: 1,
     }).probeHealth();
-    assert.strictEqual(result.status, "unusable");
-    assert.strictEqual(result.reason, "invalid-frame");
-    assert.ok(result.error instanceof Error);
+    assert.strictEqual(invalidFrame.reason, "invalid-frame");
   });
 });

@@ -19,6 +19,7 @@ import {
   MultiplexerDiscovery,
   MultiplexerDiscoveryValidation,
 } from "./MultiplexerDiscovery";
+import type { MultiplexerDaemonClient } from "./MultiplexerDaemonClient";
 
 export const DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT = 5000;
 export const DEFAULT_MULTIPLEXER_READY_POLL_INTERVAL = 50;
@@ -31,6 +32,7 @@ export type MultiplexerDaemonReplaceReason =
   | "force-stop";
 
 export type SpawnedDaemonProcess = {
+  on(event: "error", listener: (error: Error) => void): void;
   unref(): void;
 };
 
@@ -39,14 +41,6 @@ export type MultiplexerDaemonSpawn = (
   args: string[],
   options: SpawnOptions,
 ) => SpawnedDaemonProcess;
-
-type MultiplexerDaemonControlClient = {
-  call(
-    method: "shutdownDaemon",
-    params: { reason?: string },
-    ensureDaemon?: boolean,
-  ): Promise<unknown>;
-};
 
 export type MultiplexerDaemonManagerOption = {
   // Required daemon lifecycle dependencies.
@@ -112,7 +106,7 @@ export class MultiplexerDaemonManager {
   private readonly isProcessAlive: (pid: number) => boolean;
   private readonly sleepFor: (duration: number) => Promise<void>;
   private readonly now: () => number;
-  private daemonClient?: MultiplexerDaemonControlClient;
+  private daemonClient?: MultiplexerDaemonClient;
 
   constructor(option: MultiplexerDaemonManagerOption) {
     this.discovery = option.discovery;
@@ -147,7 +141,7 @@ export class MultiplexerDaemonManager {
     this.now = option.now ?? Date.now;
   }
 
-  setDaemonClient(daemonClient: MultiplexerDaemonControlClient): void {
+  setDaemonClient(daemonClient: MultiplexerDaemonClient): void {
     this.daemonClient = daemonClient;
   }
 
@@ -185,14 +179,32 @@ export class MultiplexerDaemonManager {
     }
   }
 
-  async ensureDaemon(): Promise<void> {
+  async ensureDaemon(): Promise<boolean> {
+    /**
+     * Ensures a usable daemon is running by reusing, starting, or replacing it.
+     * Returns true when the daemon is ready, or false when the caller should retry.
+     * Throws on serious errors that should not be retried.
+     */
     if (this.enableDebugMode) {
-      return this.stopDaemonForDebugging(true);
+      await this.stopDaemonForDebugging(true);
+      return true;
     }
 
-    while (true) {
-      const validation = await this.probeDaemonHealthWithRetry();
-      if (await this.handleDiscoveryResult(validation)) return;
+    try {
+      while (true) {
+        const validation = await this.probeDaemonHealthWithRetry();
+        if (await this.handleDiscoveryResult(validation)) return true;
+      }
+    } catch (error) {
+      if (!isRetryableDaemonError(error)) {
+        throw error;
+      }
+      defaultLogger.warn(
+        `Failed to ensure multiplexer daemon; retry later: ${
+          asError(error).message
+        }`,
+      );
+      return false;
     }
   }
 
@@ -256,6 +268,11 @@ export class MultiplexerDaemonManager {
           : undefined,
       },
     );
+    child.on("error", (error) => {
+      defaultLogger.error(
+        `Failed to spawn multiplexer daemon: ${error.message}`,
+      );
+    });
     child.unref();
   }
 
@@ -284,7 +301,7 @@ export class MultiplexerDaemonManager {
       await this.sleepFor(this.readyPollInterval);
     }
 
-    throw new Error(
+    throw new RetryableDaemonError(
       `Timed out waiting for multiplexer daemon: ${formatValidation(
         lastValidation,
       )}${
@@ -356,7 +373,7 @@ export class MultiplexerDaemonManager {
     if (sigtermError) {
       throw asError(sigtermError);
     }
-    throw new Error(`Failed to stop multiplexer daemon ${pid}`);
+    throw new RetryableDaemonError(`Failed to stop multiplexer daemon ${pid}`);
   }
 
   private async forceStopDaemon(): Promise<void> {
@@ -616,4 +633,24 @@ function createDaemonReplacementRequiredError(
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+class RetryableDaemonError extends Error {}
+
+const RETRYABLE_SYSTEM_ERROR_CODES = new Set([
+  "EAGAIN",
+  "EBUSY",
+  "EINTR",
+  "EMFILE",
+  "ENFILE",
+  "ENOBUFS",
+  "ENOMEM",
+]);
+
+function isRetryableDaemonError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return (
+    error instanceof RetryableDaemonError ||
+    RETRYABLE_SYSTEM_ERROR_CODES.has(code ?? "")
+  );
 }
