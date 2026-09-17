@@ -7,7 +7,6 @@ const { EventEmitter } = require("events");
 
 const {
   MultiplexerControlTransport,
-  MultiplexerControlTransportError,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/transport/MultiplexerControlTransport");
 
 const FRAME_PREFIX = Buffer.from("$MUX", "ascii");
@@ -54,6 +53,40 @@ function frame(value) {
 }
 
 describe("MultiplexerControlTransport", function () {
+  it("forces closure when graceful shutdown does not complete", async function () {
+    this.timeout(4000);
+    const socket = new FakeSocket();
+    socket.end = () => {
+      socket.writable = false;
+    };
+    const transport = new MultiplexerControlTransport(socket);
+    let closed = false;
+    const ending = transport.end().then(() => {
+      closed = true;
+    });
+
+    assert.strictEqual(socket.destroyed, false);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.strictEqual(closed, false);
+    await ending;
+    assert.strictEqual(socket.destroyed, true);
+  });
+
+  it("cancels forced closure after graceful shutdown completes", async function () {
+    this.timeout(4000);
+    const socket = new FakeSocket();
+    const transport = new MultiplexerControlTransport(socket);
+    let destroyCalls = 0;
+    transport.destroy = () => {
+      destroyCalls++;
+    };
+
+    await transport.end();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.strictEqual(socket.destroyed, true);
+    assert.strictEqual(destroyCalls, 0);
+  });
+
   it("parses split headers, split payloads, and multiple frames", function () {
     const socket = new FakeSocket();
     const transport = new MultiplexerControlTransport(socket);
@@ -93,8 +126,8 @@ describe("MultiplexerControlTransport", function () {
     const socket = new FakeSocket();
     const transport = new MultiplexerControlTransport(socket);
 
-    transport.send({ id: 1 });
-    transport.send({ id: 2 });
+    assert.strictEqual(transport.send({ id: 1 }), true);
+    assert.strictEqual(transport.send({ id: 2 }), true);
 
     assert.deepStrictEqual(socket.writes, [frame({ id: 1 }), frame({ id: 2 })]);
   });
@@ -194,28 +227,53 @@ describe("MultiplexerControlTransport", function () {
       maxFrameSize: 4,
     });
 
-    assert.throws(
-      () => transport.send(12345),
-      (error) =>
-        error instanceof MultiplexerControlTransportError &&
-        error.code === "frame-too-large"
-    );
+    assert.strictEqual(transport.send(12345), false);
+    assert.strictEqual(transport.closed, false);
+    assert.deepStrictEqual(socket.writes, []);
+    assert.strictEqual(transport.send({}), true);
   });
 
-  it("rejects send on non-writable sockets and propagates sync write errors", function () {
+  it("rejects non-serializable messages without closing the socket", function () {
+    const socket = new FakeSocket();
+    const transport = new MultiplexerControlTransport(socket);
+    const circular = {};
+    circular.self = circular;
+    for (const message of [undefined, 1n, circular]) {
+      assert.strictEqual(transport.send(message), false);
+      assert.strictEqual(transport.closed, false);
+    }
+    assert.deepStrictEqual(socket.writes, []);
+    assert.strictEqual(transport.send({ id: 1 }), true);
+  });
+
+  it("accepts frames queued under backpressure", function () {
+    const socket = new FakeSocket();
+    socket.writeResult = false;
+    const transport = new MultiplexerControlTransport(socket);
+    assert.strictEqual(transport.send({ id: 1 }), true);
+    assert.strictEqual(transport.closed, false);
+    assert.deepStrictEqual(socket.writes, [frame({ id: 1 })]);
+  });
+
+  it("closes non-writable sockets and preserves synchronous write errors", function () {
     const closedSocket = new FakeSocket();
     closedSocket.writable = false;
     const closedTransport = new MultiplexerControlTransport(closedSocket);
-    assert.throws(() => closedTransport.send({}));
+    assert.strictEqual(closedTransport.send({}), false);
+    assert.strictEqual(closedTransport.closed, true);
+    assert.strictEqual(closedTransport.send({}), false);
 
     const errorSocket = new FakeSocket();
     const writeError = new Error("write failed");
     errorSocket.writeError = writeError;
     const errorTransport = new MultiplexerControlTransport(errorSocket);
-    assert.throws(
-      () => errorTransport.send({}),
-      (error) => error === writeError
-    );
+    let closeError;
+    errorTransport.onClose((error) => {
+      closeError = error;
+    });
+    assert.strictEqual(errorTransport.send({}), false);
+    assert.strictEqual(errorTransport.closed, true);
+    assert.strictEqual(closeError, writeError);
   });
 
   it("notifies close once across error, end, close, and destroy", function () {
