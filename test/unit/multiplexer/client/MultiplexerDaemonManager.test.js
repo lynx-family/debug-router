@@ -147,7 +147,7 @@ function createManager(tempDir, values, overrides = {}) {
       const call = { command, args, options, unref: false };
       spawnCalls.push(call);
       overrides.onSpawn?.(call);
-      return { unref: () => (call.unref = true) };
+      return { on: () => {}, unref: () => (call.unref = true) };
     },
     kill: overrides.kill ?? (() => {}),
     isProcessAlive: overrides.isProcessAlive ?? (() => false),
@@ -175,7 +175,7 @@ describe("MultiplexerDaemonManager", function () {
 
   it("reuses a healthy daemon without locking or spawning", async function () {
     const { manager, spawnCalls } = createManager(tempDir, [usable()]);
-    assert.strictEqual(await manager.ensureDaemon(), undefined);
+    assert.strictEqual(await manager.ensureDaemon(), true);
     assert.deepStrictEqual(spawnCalls, []);
     assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
   });
@@ -230,7 +230,7 @@ describe("MultiplexerDaemonManager", function () {
         spawned = true;
       },
     });
-    assert.strictEqual(await manager.ensureDaemon(), undefined);
+    assert.strictEqual(await manager.ensureDaemon(), true);
     assert.strictEqual(spawnCalls.length, 1);
     assert.strictEqual(spawnCalls[0].args[0], "/tmp/entry.js");
     assert.strictEqual(
@@ -345,7 +345,7 @@ describe("MultiplexerDaemonManager", function () {
       usable(),
     ]);
 
-    assert.strictEqual(await manager.ensureDaemon(), undefined);
+    assert.strictEqual(await manager.ensureDaemon(), true);
     assert.deepStrictEqual(spawnCalls, []);
   });
 
@@ -410,7 +410,7 @@ describe("MultiplexerDaemonManager", function () {
     const owner = new FileLock(manager.spawnLock.lockPath);
     assert.strictEqual(owner.acquire(), true);
     try {
-      assert.strictEqual(await manager.ensureDaemon(), undefined);
+      assert.strictEqual(await manager.ensureDaemon(), true);
       assert.strictEqual(discovery.calls, 2);
       assert.deepStrictEqual(spawnCalls, []);
     } finally {
@@ -515,6 +515,47 @@ describe("MultiplexerDaemonManager", function () {
 
     assert.strictEqual(spawnCalls.length, 1);
     assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
+  });
+
+  it("returns false on readiness and stop timeouts", async function () {
+    const { manager } = createManager(tempDir, [unavailable()]);
+    assert.strictEqual(await manager.ensureDaemon(), false);
+    assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
+    manager.findDaemonProcessIds = async () => [12345];
+    manager.isProcessAlive = () => true;
+    assert.strictEqual(await manager.ensureDaemon(), false);
+    assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
+  });
+
+  it("returns false for temporary errors and propagates terminal errors", async function () {
+    for (const code of [
+      "EAGAIN",
+      "EBUSY",
+      "EINTR",
+      "EMFILE",
+      "ENFILE",
+      "ENOBUFS",
+      "ENOMEM",
+      "EPERM",
+      "EACCES",
+      "EINVAL",
+      undefined,
+    ]) {
+      const error = Object.assign(new Error("ensure failed"), { code });
+      const { manager } = createManager(tempDir, [
+        () => {
+          throw error;
+        },
+      ]);
+      if (["EPERM", "EACCES", "EINVAL", undefined].includes(code)) {
+        await assert.rejects(
+          manager.ensureDaemon(),
+          (value) => value === error
+        );
+      } else {
+        assert.strictEqual(await manager.ensureDaemon(), false, code);
+      }
+    }
   });
 
   it("[v1 compatibility gate] requests graceful shutdown for protocol replacement", async function () {
