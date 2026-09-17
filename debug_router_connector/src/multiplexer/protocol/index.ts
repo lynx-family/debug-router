@@ -12,6 +12,8 @@ export type {
   MultiplexerHealthRequest,
   MultiplexerHealthResponse,
   MultiplexerHandshakeErrorResponse,
+  MultiplexerRegisterRequest,
+  MultiplexerRegisterResponse,
   WebSocketServerInfo,
 } from "./control";
 export type { MultiplexerDebugInfo } from "./debuginfo";
@@ -36,6 +38,8 @@ export {
   isMultiplexerHealthRequest,
   isMultiplexerHealthResponse,
   isMultiplexerHandshakeErrorResponse,
+  isMultiplexerRegisterRequest,
+  isMultiplexerRegisterResponse,
   isNumber,
   isNumberArray,
   isRecord,
