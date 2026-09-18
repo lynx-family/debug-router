@@ -54,18 +54,13 @@ export class MultiplexerControlConnection {
   }
 
   send(message: ControlEvent | ControlRpcResponse): void {
-    if (this.closed || !this.transport.writable) {
+    if (this.closed) {
       return;
     }
 
     const debugInfo = this.createDebugInfo?.();
-    try {
-      this.transport.send(debugInfo ? { ...message, debugInfo } : message);
-    } catch (error) {
-      this.transport.destroy(
-        error instanceof Error ? error : new Error(String(error)),
-      );
-    }
+    // Sending is not guaranteed to succeed; the transport will log an error if sending fails.
+    this.transport.send(debugInfo ? { ...message, debugInfo } : message);
   }
 
   sendResponse(

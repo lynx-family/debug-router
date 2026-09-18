@@ -17,8 +17,12 @@ class FakeTransport {
     this.closeListeners = new Set();
   }
   send(value) {
-    if (this.sendError) throw this.sendError;
+    if (this.sendError) {
+      this.emitClose(this.sendError);
+      return false;
+    }
     this.sent.push(value);
+    return true;
   }
   onMessage(listener) {
     this.messageListeners.add(listener);
@@ -98,6 +102,22 @@ describe("MultiplexerControlConnection", function () {
       debugInfo: { processId: 10 },
     });
     assert.strictEqual(transport.sent.length, 3);
+  });
+
+  it("keeps the connection usable when send returns false without closing", function () {
+    const { connection, transport, closes } = createConnection();
+    const originalSend = transport.send;
+    transport.send = () => false;
+
+    connection.sendResponse(1, {});
+
+    assert.strictEqual(transport.closed, false);
+    assert.deepStrictEqual(closes, []);
+    transport.send = originalSend;
+    connection.sendResponse(2, {});
+    assert.strictEqual(transport.sent.length, 1);
+    assert.strictEqual(transport.sent[0].id, 2);
+    assert.deepStrictEqual(closes, []);
   });
 
   it("closes idempotently and unregisters once", async function () {
