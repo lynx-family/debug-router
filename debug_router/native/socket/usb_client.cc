@@ -342,7 +342,7 @@ void UsbClient::ReadMessage() {
 
     std::string payload_str(payload.get(), payload_size_int);
 
-    LOGI("[RX]:" << payload_str);
+    LOGV("[RX]:" << payload_str);
     if (core::internal::ShouldDropIncomingBySessionFilter(payload_str, "USB")) {
       continue;
     }
@@ -434,14 +434,13 @@ void UsbClient::WriteMessage() {
       } else if (message.find("Lynx.screenshotCapture") != std::string::npos) {
         LOGI("UsbClient: [TX]: Lynx.screenshotCapture Sent.");
       } else {
-        LOGI("UsbClient: [TX]:");
-        LOGI(message);
+        LOGV("UsbClient: [TX]: " << message);
       }
       std::string result_message;
       WrapHeader(message, result_message);
       if (base::SendNoSigPipe(socket_guard_.Get(), result_message.c_str(),
                               result_message.size()) == -1) {
-        LOGE("send error: " << GetErrorMessage() << " message:" << message);
+        LOGE("send error: " << GetErrorMessage());
         BeginTransportShutdown();
         NotifyErrorOnce(GetErrorMessage(),
                         "UsbClient::WriteMessage send data failed.");
@@ -517,7 +516,7 @@ void UsbClient::SendInternal(const std::string &message) {
   if (stopping_.load(std::memory_order_relaxed) ||
       connect_status_.load(std::memory_order_relaxed) !=
           USBConnectStatus::CONNECTED) {
-    LOGI("current usb client is not connected:" << message);
+    LOGI("current usb client is not connected.");
     return;
   }
   std::string non_const_message = message;

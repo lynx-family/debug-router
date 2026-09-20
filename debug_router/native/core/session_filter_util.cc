@@ -66,11 +66,11 @@ bool ShouldDropIncomingBySessionFilter(const std::string &message,
   }
 
   if (!transport_name.empty()) {
-    LOGV(std::string(transport_name) +
+    LOGI(std::string(transport_name) +
          " drop incoming message for inactive session_id: " +
          std::to_string(session_id));
   } else {
-    LOGV("Drop incoming message for inactive session_id: " +
+    LOGI("Drop incoming message for inactive session_id: " +
          std::to_string(session_id));
   }
   return true;

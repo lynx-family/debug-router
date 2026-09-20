@@ -35,7 +35,7 @@ const char *log_severity_name(int severity) {
 // the log level to output
 bool hasSetDelegate = false;
 
-int g_min_log_level = DEBUGROUTER_LOG_LEVEL_VERBOSE;
+int g_min_log_level = DEBUGROUTER_LOG_LEVEL_INFO;
 
 LoggingDestination g_logging_destination = LOG_DEFAULT;
 
