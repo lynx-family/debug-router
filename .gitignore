@@ -68,3 +68,7 @@ test/e2e_test/connector_test/reports
 .venv-ci-py312/
 check_style.xml
 test/unit_test/**/__pycache__/
+
+# Local connection trace diagnostics
+/test/e2e_test/connector_test/connection_trace_test.js
+/test/e2e_test/connector_test/debug_router_connector_auto_test.js

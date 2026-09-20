@@ -34,6 +34,13 @@ export default class IOSDeviceManager extends DeviceManager {
         const device: iOSDevice = new iOSDevice(this.driver, serial, title);
         resolve(device);
       } catch (e: any) {
+        this.driver.traceRecorder?.record(
+          "direct_device",
+          "failed",
+          serial,
+          { os: "iOS", step: "prepare" },
+          e,
+        );
         const msg = "createDevice: iOS: error" + serial + " " + e?.message;
         defaultLogger.debug(msg);
         getDriverReportService()?.report("ios_connect_error", null, {
@@ -56,6 +63,13 @@ export default class IOSDeviceManager extends DeviceManager {
     try {
       client = createListener();
     } catch (err: any) {
+      this.driver.traceRecorder?.record(
+        "direct_discovery",
+        "failed",
+        undefined,
+        { os: "iOS", step: "initialize" },
+        err,
+      );
       const msg = "createUsbmuxListener error:" + err?.message;
       defaultLogger.debug(msg);
       getDriverReportService()?.report("ios_connect_error", null, {
@@ -82,6 +96,7 @@ export default class IOSDeviceManager extends DeviceManager {
         this.reWatchIOSDevices();
         return;
       }
+      this.driver.traceRecorder?.discovery(usbmuxListener, "iOS");
       let statusSocket = new DeviceWatchStatusSocket(usbmuxListener);
       statusSocket.currentWatchStatus = WatchStatus.PrepareToWatch;
       // TODO on usbmux_error before create createUsbmuxListener
@@ -106,26 +121,23 @@ export default class IOSDeviceManager extends DeviceManager {
       usbmuxListener.on("attached", (udid: string) => {
         statusSocket.currentWatchStatus = WatchStatus.Watching;
         defaultLogger.debug("watchIOSDevices attached:" + JSON.stringify(udid));
-        if (!this.driver.devices.has(udid)) {
-          this.driver.traceRecorder?.recordDevicePlug(udid, {
-            os: "iOS",
-            event: "attached",
-          });
-        }
         this.handleDeviceConnect(udid, statusSocket);
       });
 
       usbmuxListener.on("detached", (udid: string) => {
         statusSocket.currentWatchStatus = WatchStatus.Watching;
         defaultLogger.debug("watchIOSDevices detached:" + JSON.stringify(udid));
-        this.driver.traceRecorder?.recordDeviceUnplug(udid, {
-          os: "iOS",
-          event: "detached",
-        });
         this.driver.unregisterDevice(udid);
       });
       this.listener = statusSocket;
     } catch (e: any) {
+      this.driver.traceRecorder?.record(
+        "direct_discovery",
+        "failed",
+        undefined,
+        { os: "iOS", step: "watch" },
+        e,
+      );
       // TODO ineffectively catch
       const msg = "watchIOSDevices error:" + e?.message;
       defaultLogger.debug(msg);
@@ -142,6 +154,9 @@ export default class IOSDeviceManager extends DeviceManager {
     udid: string,
     statusSocket: DeviceWatchStatusSocket,
   ) {
+    this.driver.traceRecorder?.record("direct_device", "preparing", udid, {
+      os: "iOS",
+    });
     getTunnel(this.LOCKDOWN_PORT, { udid: udid })
       .then((tunnel: any) => {
         const parse = this.makeParse((result: any) => {
@@ -151,6 +166,13 @@ export default class IOSDeviceManager extends DeviceManager {
               this.registerDevice(udid, deviceName);
             }
           } else {
+            this.driver.traceRecorder?.record(
+              "direct_device",
+              "failed",
+              udid,
+              { os: "iOS", step: "device_info" },
+              "Missing DeviceName",
+            );
             getDriverReportService()?.report("ios_connect_error", null, {
               stage: "device",
               detail: "handleDeviceConnect_deviceName_null",
@@ -175,6 +197,13 @@ export default class IOSDeviceManager extends DeviceManager {
         });
 
         tunnel.on("usbmux_error", (err: Error) => {
+          this.driver.traceRecorder?.record(
+            "direct_device",
+            "failed",
+            udid,
+            { os: "iOS", step: "device_info" },
+            err,
+          );
           const msg =
             "handleDeviceConnect: tunnel error:" + udid + " " + err?.message;
           defaultLogger.debug(msg);
@@ -202,6 +231,13 @@ export default class IOSDeviceManager extends DeviceManager {
         tunnel.write(Buffer.concat([header_buf, payload_buf]));
       })
       .catch((err: Error) => {
+        this.driver.traceRecorder?.record(
+          "direct_device",
+          "failed",
+          udid,
+          { os: "iOS", step: "device_info" },
+          err,
+        );
         const msg =
           "handleDeviceConnect: getTunnel and then error:" + err?.message;
         defaultLogger.debug(msg);

@@ -41,7 +41,6 @@ import {
 } from "./MonitorUtils";
 import { createConnectionTraceRecorder } from "../trace/ConnectionTraceRecorder";
 import type {
-  ConnectionTraceNode,
   ConnectionTraceOptions,
   ConnectionTraceRecorder,
 } from "../trace/ConnectionTraceRecorder";
@@ -179,6 +178,20 @@ export class DebugRouterConnector {
       option.connectionTrace,
       process.env.DriverConnectionTracePath,
     );
+    for (const [os, enabled] of Object.entries({
+      Android: this.enableAndroid,
+      iOS: this.enableIOS,
+      Harmony: this.enableHarmony,
+      Desktop: this.enableDesktop,
+      Network: this.enableNetworkDevice,
+    })) {
+      if (!enabled)
+        this.traceRecorder?.record("direct_discovery", "disabled", undefined, {
+          os,
+        });
+    }
+    if (!this.enableWebSocket)
+      this.traceRecorder?.record("websocket_server", "disabled");
     this.devicesManager = new Set<DeviceManager>();
     this.driverClient = new DriverClient(this.createClientId());
     if (this.enableAndroid) {
@@ -491,17 +504,6 @@ export class DebugRouterConnector {
     this.events.off(event, callback);
   }
 
-  getConnectionTrace(limit?: number): ConnectionTraceNode[] {
-    return this.traceRecorder?.getRecentNodes(limit) ?? [];
-  }
-
-  onConnectionTrace(listener: (node: ConnectionTraceNode) => void): () => void {
-    if (!this.traceRecorder) {
-      return () => {};
-    }
-    return this.traceRecorder.addListener(listener);
-  }
-
   async close(): Promise<void> {
     if (this.closed) {
       return;
@@ -524,32 +526,7 @@ export class DebugRouterConnector {
     event: Event,
     payload: DebugerRouterDriverEvents[Event],
   ): void {
-    if (event === "app-client-connected") {
-      this.traceRecorder?.recordAppClientConnected(payload as Client);
-    }
-    if (event === "app-client-disconnected") {
-      this.traceRecorder?.recordAppClientDisconnected(payload as number);
-    }
-    if (event === "websocket-app-client-connected") {
-      this.traceRecorder?.recordWebsocketAppClientConnected(
-        payload as WebSocketClient,
-      );
-    }
-    if (event === "websocket-app-client-disconnected") {
-      this.traceRecorder?.recordWebsocketAppClientDisconnected(
-        payload as number,
-      );
-    }
-    if (event === "websocket-web-client-connected") {
-      this.traceRecorder?.recordWebsocketWebClientConnected(
-        payload as WebSocketClient,
-      );
-    }
-    if (event === "websocket-web-client-disconnected") {
-      this.traceRecorder?.recordWebsocketWebClientDisconnected(
-        payload as number,
-      );
-    }
+    this.traceRecorder?.onEvent(event, payload);
     this.events.emit(event, payload);
   }
 
@@ -563,10 +540,7 @@ export class DebugRouterConnector {
     defaultLogger.debug("register new device:" + device.serial);
     // register new device
     this.devices.set(device.info.serial, device);
-    this.traceRecorder?.recordDeviceRegistered(device.info.serial, {
-      os: device.info.os,
-      title: device.info.title,
-    });
+    this.traceRecorder?.device("registered", device.info);
     if (
       !this.manualConnect &&
       this.currentStatus === MultiOpenStatus.attached
@@ -586,10 +560,7 @@ export class DebugRouterConnector {
       return;
     }
     defaultLogger.debug("unregisterDevice:" + serial);
-    this.traceRecorder?.recordDeviceUnregistered(serial, {
-      os: device.info.os,
-      title: device.info.title,
-    });
+    this.traceRecorder?.device("unregistered", device.info);
     this.devices.delete(serial);
     device.disConnect(); // we'll only destroy upon replacement
     this.emit("device-disconnected", device);

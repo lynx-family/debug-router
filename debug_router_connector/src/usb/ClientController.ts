@@ -7,7 +7,6 @@ import { BaseDevice } from "../device/BaseDevice";
 import { ClientDescription, ClientQuery } from "../utils/type";
 import ClientAdapter, { ClientEventsListener } from "./ClientAdapter";
 import { Connection } from "./Connection";
-import { USBConnection } from "./USBConnection";
 import { DebugRouterConnector } from "../connector";
 import { defaultLogger } from "../utils/logger";
 
@@ -71,25 +70,17 @@ export class ClientController implements ClientEventsListener {
     }
 
     const client = new UsbClient(info, connection);
-    if (connection instanceof USBConnection) {
-      connection.setTraceClientId(id);
-    }
 
     this.connections.set(id, client);
     // port has connected
     this.ports.set(port, true);
     this.clientInfos.set(id, port);
-    this.driver.traceRecorder?.recordUsbClientConnected(client);
     this.driver.regiserUsbClient(client);
     return id;
   }
 
   private removeConnection(id: number) {
-    const client = this.connections.get(id);
-    if (client) {
-      this.driver.traceRecorder?.recordUsbClientDisconnected(client);
-      this.connections.delete(id);
-    }
+    this.connections.delete(id);
     const port = this.clientInfos.get(id);
     if (port) {
       this.ports.set(port, false);
@@ -114,6 +105,7 @@ export class ClientController implements ClientEventsListener {
   }
 
   private watchClient() {
+    this.driver.traceRecorder?.flushProbes(this);
     for (const port of this.ports.keys()) {
       if (!this.ports.get(port)) {
         const connectAdapter = this.sockets.get(port);
@@ -131,6 +123,7 @@ export class ClientController implements ClientEventsListener {
   }
 
   startWatchClient(): void {
+    this.driver.traceRecorder?.startWatch(this, this.device.info);
     this.watchClient();
     if (process.env.DriverAutoFindClientsEnv === "false") {
       defaultLogger.warn("AutoFinding new client is closed for debug");
@@ -142,6 +135,7 @@ export class ClientController implements ClientEventsListener {
   }
 
   stopWatchClient(): void {
+    this.driver.traceRecorder?.stopWatch(this);
     if (this.timer) {
       clearInterval(this.timer);
     }

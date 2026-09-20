@@ -26,7 +26,11 @@ export class AndroidDeviceManager extends DeviceManager {
     adbClient: ADBClient,
     device: Device,
   ): Promise<AndroidDevice | undefined> {
+    this.driver.traceRecorder?.record("direct_device", "preparing", device.id, {
+      os: "Android",
+    });
     return new Promise(async (resolve, reject) => {
+      let step = "device_info";
       try {
         const deviceClient = adbClient.getDevice(device.id);
         const props = await deviceClient.getProperties();
@@ -38,9 +42,17 @@ export class AndroidDeviceManager extends DeviceManager {
           name,
           adbClient,
         );
+        step = "forward";
         await androidLikeDevice.forwards();
         resolve(androidLikeDevice);
       } catch (e: any) {
+        this.driver.traceRecorder?.record(
+          "direct_device",
+          "failed",
+          device.id,
+          { os: "Android", step },
+          e,
+        );
         const msg = "create device error:" + e?.message;
         defaultLogger.warn(msg);
         getDriverReportService()?.report("android_connect_warn", null, {
@@ -77,6 +89,13 @@ export class AndroidDeviceManager extends DeviceManager {
     if (!this.adbClient) {
       this.adbClient = await getAdbInstance(this.adbOptions);
       if (!this.adbClient) {
+        this.driver.traceRecorder?.record(
+          "direct_discovery",
+          "failed",
+          undefined,
+          { os: "Android", step: "initialize" },
+          "Unable to initialize adbClient",
+        );
         defaultLogger.debug("getAdbInstance error");
         getDriverReportService()?.report("android_connect_error", null, {
           msg: "getAdbInstance error",
@@ -109,6 +128,7 @@ export class AndroidDeviceManager extends DeviceManager {
 
         // @ts-ignore
         .then((tracker) => {
+          this.driver.traceRecorder?.discovery(tracker, "Android");
           tracker.on("error", async (err: Error) => {
             this.currentWatchStatus = WatchStatus.StopWatching;
             const msg = "tracker error:" + err?.message;
@@ -131,13 +151,6 @@ export class AndroidDeviceManager extends DeviceManager {
               serial: device.id,
             });
             if (device.type === "device") {
-              if (!this.driver.devices.has(device.id)) {
-                this.driver.traceRecorder?.recordDevicePlug(device.id, {
-                  os: "Android",
-                  event: "add",
-                  deviceType: device.type,
-                });
-              }
               this.registerDevice(this.adbClient as ADBClient, device);
             }
           });
@@ -151,21 +164,9 @@ export class AndroidDeviceManager extends DeviceManager {
               serial: device.id,
             });
             if (device.type === "device") {
-              if (!this.driver.devices.has(device.id)) {
-                this.driver.traceRecorder?.recordDevicePlug(device.id, {
-                  os: "Android",
-                  event: "change",
-                  deviceType: device.type,
-                });
-              }
               this.registerDevice(this.adbClient as ADBClient, device);
             } else {
               if (this.driver.devices.has(device.id)) {
-                this.driver.traceRecorder?.recordDeviceUnplug(device.id, {
-                  os: "Android",
-                  event: "change",
-                  deviceType: device.type,
-                });
                 this.driver.unregisterDevice(device.id);
               }
             }
@@ -180,16 +181,18 @@ export class AndroidDeviceManager extends DeviceManager {
               serial: device.id,
             });
             if (this.driver.devices.has(device.id)) {
-              this.driver.traceRecorder?.recordDeviceUnplug(device.id, {
-                os: "Android",
-                event: "remove",
-                deviceType: device.type,
-              });
               this.driver.unregisterDevice(device.id);
             }
           });
         })
         .catch(async (err: any) => {
+          this.driver.traceRecorder?.record(
+            "direct_discovery",
+            "failed",
+            undefined,
+            { os: "Android", step: "watch" },
+            err,
+          );
           this.currentWatchStatus = WatchStatus.StopWatching;
           const msg = "trackDevices catch:" + err?.message;
           getDriverReportService()?.report("android_connect_error", null, {
@@ -202,6 +205,13 @@ export class AndroidDeviceManager extends DeviceManager {
           this.reWatchAndroidDevices();
         });
     } catch (e: any) {
+      this.driver.traceRecorder?.record(
+        "direct_discovery",
+        "failed",
+        undefined,
+        { os: "Android", step: "watch" },
+        e,
+      );
       // TODO ineffectively branch
       this.currentWatchStatus = WatchStatus.StopWatching;
       const msg = "watchAndroidDevices error:" + e?.message;

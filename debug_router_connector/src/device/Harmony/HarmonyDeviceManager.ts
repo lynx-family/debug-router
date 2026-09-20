@@ -23,6 +23,12 @@ export default class HarmonyDeviceManager extends DeviceManager {
     hdcClient: Client,
     target: Target,
   ): Promise<HarmonyDevice | undefined> {
+    this.driver.traceRecorder?.record(
+      "direct_device",
+      "preparing",
+      target.connectKey,
+      { os: "Harmony" },
+    );
     return new Promise(async (resolve, reject) => {
       try {
         const device: HarmonyDevice = new HarmonyDevice(
@@ -34,6 +40,13 @@ export default class HarmonyDeviceManager extends DeviceManager {
         await device.forwards();
         resolve(device);
       } catch (e: any) {
+        this.driver.traceRecorder?.record(
+          "direct_device",
+          "failed",
+          target.connectKey,
+          { os: "Harmony", step: "prepare" },
+          e,
+        );
         const msg =
           "createDevice: harmony: error" + target.connectKey + " " + e?.message;
         defaultLogger.debug(msg);
@@ -64,6 +77,13 @@ export default class HarmonyDeviceManager extends DeviceManager {
     if (!this.hdcClient) {
       this.hdcClient = await getHdcInstance(this.hdcOptions);
       if (!this.hdcClient) {
+        this.driver.traceRecorder?.record(
+          "direct_discovery",
+          "failed",
+          undefined,
+          { os: "Harmony", step: "initialize" },
+          "Unable to initialize hdcClient",
+        );
         defaultLogger.debug("getHdcInstance error");
         getDriverReportService()?.report("harmony_watch_device_error", null, {
           msg: "getHdcInstance error",
@@ -95,6 +115,7 @@ export default class HarmonyDeviceManager extends DeviceManager {
       this.hdcClient
         .trackTargets()
         .then((tracker) => {
+          this.driver.traceRecorder?.discovery(tracker, "Harmony");
           tracker.on("error", async (err: Error) => {
             this.currentWatchStatus = WatchStatus.StopWatching;
             const msg = "tracker error:" + err?.message;
@@ -108,13 +129,6 @@ export default class HarmonyDeviceManager extends DeviceManager {
             this.retryCount = 0;
             defaultLogger.debug("tracker add:" + JSON.stringify(target));
             if (target.connStatus === "Connected") {
-              const serial = target.connectKey || target.connType;
-              if (!this.driver.devices.has(serial)) {
-                this.driver.traceRecorder?.recordDevicePlug(serial, {
-                  os: "Harmony",
-                  event: "add",
-                });
-              }
               this.registerDevice(this.hdcClient as Client, target);
             }
           });
@@ -129,23 +143,9 @@ export default class HarmonyDeviceManager extends DeviceManager {
               "tracker change to:" + JSON.stringify(newTarget),
             );
             if (newTarget.connStatus === "Connected") {
-              const serial = newTarget.connectKey;
-              if (!this.driver.devices.has(serial)) {
-                this.driver.traceRecorder?.recordDevicePlug(serial, {
-                  os: "Harmony",
-                  event: "change",
-                });
-              }
               this.registerDevice(this.hdcClient as Client, newTarget);
             } else {
               if (this.driver.devices.has(newTarget.connectKey)) {
-                this.driver.traceRecorder?.recordDeviceUnplug(
-                  newTarget.connectKey,
-                  {
-                    os: "Harmony",
-                    event: "change",
-                  },
-                );
                 this.driver.unregisterDevice(newTarget.connectKey);
               }
             }
@@ -156,15 +156,18 @@ export default class HarmonyDeviceManager extends DeviceManager {
             this.retryCount = 0;
             defaultLogger.debug("tracker remove:" + JSON.stringify(target));
             if (this.driver.devices.has(target.connectKey)) {
-              this.driver.traceRecorder?.recordDeviceUnplug(target.connectKey, {
-                os: "Harmony",
-                event: "remove",
-              });
               this.driver.unregisterDevice(target.connectKey);
             }
           });
         })
         .catch(async (err: any) => {
+          this.driver.traceRecorder?.record(
+            "direct_discovery",
+            "failed",
+            undefined,
+            { os: "Harmony", step: "watch" },
+            err,
+          );
           this.currentWatchStatus = WatchStatus.StopWatching;
           const msg = "trackDevices catch:" + err?.message;
           defaultLogger.debug(msg);
@@ -177,6 +180,13 @@ export default class HarmonyDeviceManager extends DeviceManager {
           this.reWatchHarmonyDevices();
         });
     } catch (e: any) {
+      this.driver.traceRecorder?.record(
+        "direct_discovery",
+        "failed",
+        undefined,
+        { os: "Harmony", step: "watch" },
+        e,
+      );
       // TODO ineffectively branch
       this.currentWatchStatus = WatchStatus.StopWatching;
       const msg = "watchHarmonyDevices error:" + e?.message;

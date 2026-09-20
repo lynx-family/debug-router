@@ -294,7 +294,6 @@ describe("MultiplexerDaemonManager", function () {
     const connectionTrace = {
       enabled: true,
       output: "/tmp/multiplexer-trace.jsonl",
-      bufferSize: 32,
     };
     const physicalConnectorOption = {
       manualConnect: true,

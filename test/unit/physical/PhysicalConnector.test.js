@@ -190,11 +190,8 @@ describe("PhysicalConnector", function () {
     const trace = {
       registered: [],
       unregistered: [],
-      recordDeviceRegistered(serial, info) {
-        this.registered.push({ serial, info });
-      },
-      recordDeviceUnregistered(serial, info) {
-        this.unregistered.push({ serial, info });
+      device(reason, info) {
+        this[reason].push(info);
       },
     };
     const connector = createConnector({ traceRecorder: trace });
@@ -217,12 +214,7 @@ describe("PhysicalConnector", function () {
     assert.strictEqual(connector.devices.get("device-1"), device);
     assert.strictEqual(device.state.startWatchCalls, 0);
     assert.strictEqual(duplicate.state.startWatchCalls, 0);
-    assert.deepStrictEqual(trace.registered, [
-      {
-        serial: "device-1",
-        info: { os: "Android", title: "Device device-1" },
-      },
-    ]);
+    assert.deepStrictEqual(trace.registered, [device.info]);
 
     connector.unregisterDevice("missing-device");
     connector.unregisterDevice("device-1");
@@ -230,12 +222,7 @@ describe("PhysicalConnector", function () {
     assert.strictEqual(connector.devices.has("device-1"), false);
     assert.strictEqual(device.state.disconnectCalls, 1);
     assert.deepStrictEqual(disconnected, [device]);
-    assert.deepStrictEqual(trace.unregistered, [
-      {
-        serial: "device-1",
-        info: { os: "Android", title: "Device device-1" },
-      },
-    ]);
+    assert.deepStrictEqual(trace.unregistered, [device.info]);
   });
 
   it("owns USB client lifecycle state and emits strict physical events", function () {

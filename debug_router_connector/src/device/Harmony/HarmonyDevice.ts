@@ -37,7 +37,18 @@ export default class HarmonyDevice extends BaseDevice {
 
   private async forward(remotePorts: number[]) {
     const device = this.hdc.getDevice(this.serial);
+    const failures: { remotePort: number; error: unknown }[] | undefined = this
+      .driver.traceRecorder
+      ? []
+      : undefined;
     if (!device) {
+      this.driver.traceRecorder?.record(
+        "direct_device",
+        "failed",
+        this.serial,
+        { os: this.info.os, step: "forward" },
+        "Device not found",
+      );
       getDriverReportService()?.report("harmony_device_forward_error", null, {
         msg: "device not found",
       });
@@ -46,6 +57,13 @@ export default class HarmonyDevice extends BaseDevice {
     try {
       await this.removeForward(device);
     } catch (e: any) {
+      this.driver.traceRecorder?.record(
+        "direct_device",
+        "failed",
+        this.serial,
+        { os: this.info.os, step: "remove_forward" },
+        e,
+      );
       defaultLogger.debug(JSON.stringify(e));
       getDriverReportService()?.report("harmony_device_forward_error", null, {
         msg: "remove forward failed",
@@ -58,6 +76,7 @@ export default class HarmonyDevice extends BaseDevice {
     for (let i = 0; i < remotePorts.length; i++) {
       const remotePort = remotePorts[i];
       let tryCount = 0;
+      let lastError: unknown;
       while (tryCount < 5) {
         let hostport =
           HarmonyDevice.localBasePort +
@@ -81,9 +100,11 @@ export default class HarmonyDevice extends BaseDevice {
             this.port.push(hostport);
             break;
           } else {
+            lastError = "Forward returned no result";
             tryCount++;
           }
         } catch (e: any) {
+          lastError = e;
           defaultLogger.debug(
             "forward failed:" +
               remotePort +
@@ -107,9 +128,11 @@ export default class HarmonyDevice extends BaseDevice {
       }
 
       if (tryCount >= 5) {
+        failures?.push({ remotePort, error: lastError });
         defaultLogger.debug("forward failed:" + remotePort);
       }
     }
+    this.driver.traceRecorder?.forwardResult(this.info, this.port, failures);
     defaultLogger.debug("hdc forward result:" + JSON.stringify(this.port));
   }
 

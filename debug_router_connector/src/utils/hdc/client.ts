@@ -93,10 +93,13 @@ export default class Client extends EventEmitter {
       });
   }
 
-  public async listTargets(): Promise<Target[]> {
+  public async listTargets(
+    onError?: (error: Error) => void,
+  ): Promise<Target[]> {
     return this.connection()
       .then((conn) => new TargetsCommand(conn).execute())
       .catch((e: Error) => {
+        onError?.(e);
         defaultLogger.debug(`ListTargets fail: ${e.message}`);
         getDriverReportService()?.report(
           "hdc_client_list_targets_error",

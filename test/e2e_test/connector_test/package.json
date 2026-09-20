@@ -4,12 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "npm run test:without-device",
-    "test:without-device": "node debug_router_connector_auto_test.js --mode no-device",
-    "test:with-device": "node debug_router_connector_auto_test.js --mode real-device --platform all",
-    "test:with-device:android": "node debug_router_connector_auto_test.js --mode real-device --platform android",
-    "test:with-device:ios": "node debug_router_connector_auto_test.js --mode real-device --platform ios --no-launch-app",
-    "test:with-device:harmony": "node debug_router_connector_auto_test.js --mode real-device --platform harmony --no-launch-app"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
   "license": "ISC",

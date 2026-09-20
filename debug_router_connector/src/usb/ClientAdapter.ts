@@ -45,7 +45,6 @@ export default class ClientAdapter {
   protected connection: Connection | null = null;
   protected from?: number;
   protected id: number = 0;
-  private connectionAttemptId?: string;
   constructor(
     protected driver: DebugRouterConnector,
     protected listener: ClientEventsListener | null,
@@ -60,6 +59,7 @@ export default class ClientAdapter {
     try {
       this.handleUnpackMessage(data);
     } catch (error: any) {
+      this.driver.traceRecorder?.connection(client, "failed", "decode", error);
       const msg = "pack data error:" + error?.message + " " + this.port;
       defaultLogger.debug(msg);
       getDriverReportService()?.report("handle_unpack_message_error", null, {
@@ -74,16 +74,6 @@ export default class ClientAdapter {
   protected handleOff(client: net.Socket) {
     this.isConnected = false;
     client.destroy();
-    this.driver.traceRecorder?.recordSocketDisconnected(
-      this.device_id,
-      this.port,
-      {
-        device: this.device,
-        os: this.type,
-      },
-      this.connectionAttemptId,
-    );
-    this.connectionAttemptId = undefined;
     if (this.listener === null) {
       defaultLogger.debug("handleOff: this.listener == null");
       return;
@@ -138,7 +128,19 @@ export default class ClientAdapter {
           this.offset + this.usbmuxdPacketHeaderLength,
           this.offset + this.usbmuxdPacketHeaderLength + size,
         );
-        this.handleMessage(receivedBuffer);
+        const socket = this.tcpClient;
+        const handling = this.handleMessage(receivedBuffer);
+        if (this.driver.traceRecorder) {
+          handling.catch((error) => {
+            this.driver.traceRecorder?.connection(
+              socket,
+              "failed",
+              "protocol",
+              error,
+            );
+            throw error; // Preserve the original rejected-message behavior.
+          });
+        }
         this.offset += this.usbmuxdPacketHeaderLength + size;
         if (this.offset == this.end) {
           this.offset = 0;
@@ -155,14 +157,6 @@ export default class ClientAdapter {
       event: "Initialize",
       data: -1,
     };
-    this.connectionAttemptId = this.driver.traceRecorder?.recordSocketConnected(
-      this.device_id,
-      this.port,
-      {
-        device: this.device,
-        os: this.type,
-      },
-    );
     try {
       if (this.tcpClient.writable && !this.tcpClient.destroyed) {
         defaultLogger.debug("send Initialize:" + this.port);
@@ -241,18 +235,7 @@ export default class ClientAdapter {
         sdk_version,
         raw_info: result,
       };
-      this.driver.traceRecorder?.recordSdkRegister(
-        this.device_id,
-        this.port,
-        {
-          app,
-          os: this.type,
-          device: this.device,
-          deviceModel,
-          sdkVersion: sdk_version,
-        },
-        this.connectionAttemptId,
-      );
+      this.driver.traceRecorder?.register(this.tcpClient, ClientQuery);
       if (this.listener === null) {
         defaultLogger.debug(
           "handleConnection: this.listener = null:" +
@@ -260,12 +243,7 @@ export default class ClientAdapter {
         );
         return;
       }
-      this.connection = new USBConnection(this.tcpClient, {
-        recorder: this.driver.traceRecorder,
-        deviceId: this.device_id,
-        port: this.port,
-        connectionAttemptId: this.connectionAttemptId,
-      });
+      this.connection = new USBConnection(this.tcpClient);
       this.id = this.listener.onConnectionCreated(
         this.connection,
         this.port,
@@ -300,6 +278,7 @@ export default class ClientAdapter {
       getTunnel(this.port, { udid: this.device_id })
         .then((tunnel: net.Socket) => {
           this.tcpClient = tunnel;
+          this.traceSocket(tunnel, true);
           this.tcpClient.on("data", (data: Buffer) => {
             this.handleData(this.tcpClient, data);
           });
@@ -320,6 +299,13 @@ export default class ClientAdapter {
           this.onConnect();
         })
         .catch((err: Error) => {
+          this.driver.traceRecorder?.probeFailed(
+            this.listener,
+            this.device_id,
+            this.port,
+            err,
+            "tunnel",
+          );
           const msg =
             "ios connect error:" + this.port + " error:" + err?.message;
           defaultLogger.debug(msg);
@@ -331,6 +317,7 @@ export default class ClientAdapter {
     } else {
       try {
         this.tcpClient = new net.Socket();
+        this.traceSocket(this.tcpClient);
         this.tcpClient.on("data", (data: Buffer) => {
           this.handleData(this.tcpClient, data);
         });
@@ -359,6 +346,12 @@ export default class ClientAdapter {
         const host = this.device_host;
         this.tcpClient.connect({ host: host, port: this.port });
       } catch (err: any) {
+        this.driver.traceRecorder?.probeFailed(
+          this.listener,
+          this.device_id,
+          this.port,
+          err,
+        );
         const msg =
           platform + " connect error:" + this.port + " error:" + err?.message;
         defaultLogger.debug(msg);
@@ -369,6 +362,21 @@ export default class ClientAdapter {
         });
       }
     }
+  }
+
+  private traceSocket(socket: net.Socket, connected = false) {
+    this.driver.traceRecorder?.socket(
+      socket,
+      {
+        transport: "direct",
+        port: this.port,
+        device: this.device,
+        os: this.type,
+      },
+      this.device_id,
+      this.listener,
+      connected,
+    );
   }
 
   public destroy() {

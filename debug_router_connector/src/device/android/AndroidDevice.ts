@@ -53,8 +53,19 @@ export default class AndroidDevice extends BaseDevice {
 
   private async forward(remotePorts: number[]) {
     const device = this.adb.getDevice(this.serial);
+    const failures: { remotePort: number; error: unknown }[] | undefined = this
+      .driver.traceRecorder
+      ? []
+      : undefined;
     if (!device) {
       defaultLogger.debug("device not found by serial:" + this.serial);
+      this.driver.traceRecorder?.record(
+        "direct_device",
+        "failed",
+        this.serial,
+        { os: this.info.os, step: "forward" },
+        "Device not found",
+      );
       getDriverReportService()?.report("android_device_forward_error", null, {
         msg: "device not found",
       });
@@ -63,6 +74,13 @@ export default class AndroidDevice extends BaseDevice {
     try {
       await this.adbForwardRemove(device);
     } catch (e: any) {
+      this.driver.traceRecorder?.record(
+        "direct_device",
+        "failed",
+        this.serial,
+        { os: this.info.os, step: "remove_forward" },
+        e,
+      );
       defaultLogger.debug(JSON.stringify(e));
       getDriverReportService()?.report("android_device_forward_error", null, {
         msg: "remove forward failed",
@@ -76,6 +94,7 @@ export default class AndroidDevice extends BaseDevice {
       const remotePort = remotePorts[i];
       defaultLogger.debug("start forward:" + remotePort);
       let tryCount = 0;
+      let lastError: unknown;
       while (tryCount < 5) {
         // find a available hostport
         let hostport =
@@ -105,9 +124,11 @@ export default class AndroidDevice extends BaseDevice {
             this.port.push(hostport);
             break;
           } else {
+            lastError = "Forward returned no result";
             tryCount++;
           }
         } catch (e: any) {
+          lastError = e;
           defaultLogger.debug(
             "forward failed:" +
               remotePort +
@@ -127,9 +148,11 @@ export default class AndroidDevice extends BaseDevice {
       }
 
       if (tryCount >= 5) {
+        failures?.push({ remotePort, error: lastError });
         defaultLogger.debug("forward failed:" + remotePort);
       }
     }
+    this.driver.traceRecorder?.forwardResult(this.info, this.port, failures);
     defaultLogger.debug("adb forward result:" + JSON.stringify(this.port));
   }
 
