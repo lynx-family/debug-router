@@ -45,10 +45,11 @@ export class USBConnection extends Connection {
 
   send(data: any): void {
     if (this.socket.writable) {
+      const message = this.prepareCustomizedRequest(data);
       if (process.env.PrintAllUSBMessage === "enable") {
-        defaultLogger.info("[Send]:" + JSON.stringify(data));
+        defaultLogger.info("[Send]:" + JSON.stringify(message));
       }
-      this.socket.write(packMessage(data));
+      this.socket.write(packMessage(message));
     }
   }
   sendExpectResponse(

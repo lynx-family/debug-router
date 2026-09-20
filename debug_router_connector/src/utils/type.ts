@@ -148,6 +148,7 @@ export type SessionListType = {
   type: CustomizedEventType.SessionList;
   data: Array<SessionInfoType>;
   sender: number;
+  id?: number;
 };
 
 export type CDPResponseType = {
@@ -185,6 +186,7 @@ export type CustomizeMessageType = {
   event: "Customized";
   data: {
     type: string;
+    id?: number;
     data: {
       client_id: number;
       session_id: number;

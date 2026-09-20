@@ -9,6 +9,7 @@ import {
   RequireMessageType,
   ResponseMessageType,
 } from "../utils/type";
+import { CustomizedMessageCorrelation } from "../utils/customized_message_correlation";
 
 export interface PendingRequestResolvers {
   resolve: (data: ResponseMessageType) => void;
@@ -17,6 +18,7 @@ export interface PendingRequestResolvers {
 
 export abstract class Connection {
   private readonly events = new EventEmitter();
+  private readonly messageCorrelation = new CustomizedMessageCorrelation();
   protected pendingRequests: Map<string, PendingRequestResolvers> = new Map();
   abstract close(): void;
   abstract send(data: any): void;
@@ -31,6 +33,14 @@ export abstract class Connection {
 
   handleSessionList(sessionList: any) {
     this.events.emit("SessionList", sessionList);
+  }
+
+  shouldAcceptCustomizedResponse(response: any): boolean {
+    return this.messageCorrelation.shouldAcceptResponse(response);
+  }
+
+  protected prepareCustomizedRequest<T>(message: T): T {
+    return this.messageCorrelation.prepareRequest(message);
   }
 
   on(event: string, callback: EventHandler) {
