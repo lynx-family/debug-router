@@ -283,6 +283,8 @@ function createListener() {
       client.end();
     }
 
+    if (msg.MessageType === 'Result' && msg.Number === 0) client.emit('listening');
+
     // subsequent responses report on connected device status:
     if (msg.MessageType === 'Attached') {
       devices[msg.Properties.SerialNumber] = msg.Properties;

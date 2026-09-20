@@ -5,14 +5,31 @@
 import { randomUUID } from "crypto";
 import fs from "fs";
 import { defaultLogger } from "../utils/logger";
-import type { Client } from "../connector/Client";
+import { EventEmitter, errorMonitor } from "events";
+import type { ClientQuery, DeviceDescription } from "../utils/type";
 import { UsbClient } from "../usb/Client";
 import type { WebSocketClient } from "../websocket/WebSocketConnection";
+
+type TraceReasons = {
+  direct_discovery:
+    | "disabled"
+    | "started"
+    | "snapshot"
+    | "changed"
+    | "failed"
+    | "stopped";
+  direct_device: "preparing" | "registered" | "unregistered" | "failed";
+  direct_watch: "started" | "stopped" | "probe_failed";
+  websocket_server: "disabled" | "starting" | "listening" | "failed" | "closed";
+  connection: "connected" | "register_received" | "failed" | "closed";
+  client: "connected" | "disconnected";
+};
 
 export type ConnectionTraceNode = {
   sequence: number;
   deviceId?: string;
-  event: string;
+  event: keyof TraceReasons;
+  reason: TraceReasons[keyof TraceReasons];
   timestamp: string;
   traceSchemaVersion: string;
   connectionAttemptId?: string;
@@ -21,459 +38,423 @@ export type ConnectionTraceNode = {
 
 export type ConnectionTraceOptions = {
   enabled?: boolean;
-  output?: string | NodeJS.WritableStream;
-  bufferSize?: number;
+  output?: string;
 };
 
 const TRACE_SCHEMA_VERSION = "0.1";
-const DEFAULT_TRACE_BUFFER_SIZE = 2000;
+type TraceContext = {
+  deviceId?: string;
+  connectionAttemptId?: string;
+  metadata: Record<string, any>;
+};
 
-type TraceListener = (node: ConnectionTraceNode) => void;
+type Attempt = TraceContext & {
+  connected: boolean;
+  ended: boolean;
+};
 
-interface ConnectionTraceSink {
-  write(node: ConnectionTraceNode): void;
-  close(): Promise<void>;
-}
+type Watch = { info: DeviceDescription; failures: Record<string, any>[] };
 
-class StreamTraceSink implements ConnectionTraceSink {
-  constructor(private readonly stream: NodeJS.WritableStream) {}
-
-  write(node: ConnectionTraceNode): void {
-    this.stream.write(`${JSON.stringify(node)}\n`);
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve();
-  }
-}
-
-class FileTraceSink implements ConnectionTraceSink {
+export class ConnectionTraceRecorder {
   private readonly stream: fs.WriteStream;
+  private nextSequenceValue = 0;
+  private attempts = new WeakMap<object, Attempt>();
+  private registrations = new WeakMap<object, Attempt>();
+  private clients = new Map<number, TraceContext>();
+  private watches = new Map<object, Watch>();
+  private cleanups = new Set<() => void>();
   private closed = false;
   private closePromise?: Promise<void>;
 
   constructor(path: string) {
     this.stream = fs.createWriteStream(path, { flags: "a" });
-    this.stream.on("error", (err) => {
-      defaultLogger.warn(`connection trace write error: ${err?.message}`);
+    this.stream.on("error", (error) => {
+      defaultLogger.warn(`connection trace write error: ${error.message}`);
     });
-  }
-
-  write(node: ConnectionTraceNode): void {
-    if (this.closed) {
-      return;
-    }
-    this.stream.write(`${JSON.stringify(node)}\n`);
   }
 
   close(): Promise<void> {
     if (this.closePromise) {
       return this.closePromise;
     }
+    for (const owner of this.watches.keys()) this.stopWatch(owner);
     this.closed = true;
+    for (const cleanup of this.cleanups) cleanup();
+    this.cleanups.clear();
+    this.clients.clear();
+    this.attempts = new WeakMap();
+    this.registrations = new WeakMap();
     this.closePromise = new Promise((resolve) => {
       if (this.stream.destroyed) {
         resolve();
         return;
       }
-      this.stream.end(resolve);
-    });
-    return this.closePromise;
-  }
-}
-
-type ClientTraceInfo = {
-  deviceId?: string;
-  port?: number;
-  connectionAttemptId?: string;
-};
-
-type UsbConnectionContext = {
-  deviceId?: string;
-  port?: number;
-  clientId?: number;
-  connectionAttemptId?: string;
-};
-
-export class ConnectionTraceRecorder {
-  private readonly sink: ConnectionTraceSink;
-  private readonly maxBufferedNodes: number;
-  private nextSequenceValue = 0;
-  private connectionAttemptByPort = new Map<string, string>();
-  private usbClientConnections = new Map<number, ClientTraceInfo>();
-  private appClientConnections = new Map<number, ClientTraceInfo>();
-  private listeners = new Set<TraceListener>();
-  private recentNodes: ConnectionTraceNode[] = [];
-  private closed = false;
-  private closePromise?: Promise<void>;
-
-  constructor(
-    sink: ConnectionTraceSink,
-    maxBufferedNodes = DEFAULT_TRACE_BUFFER_SIZE,
-  ) {
-    this.sink = sink;
-    this.maxBufferedNodes = Math.max(0, maxBufferedNodes);
-  }
-
-  addListener(listener: TraceListener): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  getRecentNodes(limit?: number): ConnectionTraceNode[] {
-    const target =
-      limit && limit > 0 ? this.recentNodes.slice(-limit) : this.recentNodes;
-    return target.map((node) => this.cloneNode(node));
-  }
-
-  close(): Promise<void> {
-    if (this.closePromise) {
-      return this.closePromise;
-    }
-    this.closed = true;
-    this.listeners.clear();
-    this.connectionAttemptByPort.clear();
-    this.usbClientConnections.clear();
-    this.appClientConnections.clear();
-    this.recentNodes = [];
-    this.closePromise = this.sink.close().catch((err: any) => {
-      defaultLogger.warn(`connection trace close error: ${err?.message}`);
+      // File streams close after flushing, or after an open/write error.
+      this.stream.once("close", resolve);
+      this.stream.end();
     });
     return this.closePromise;
   }
 
-  recordDevicePlug(deviceId: string, metadata?: Record<string, any>): void {
-    this.clearStaleDeviceTraceState(deviceId);
-    this.recordNode("device_plugged", deviceId, metadata);
-  }
-
-  recordDeviceUnplug(deviceId: string, metadata?: Record<string, any>): void {
-    this.recordNode("device_unplugged", deviceId, metadata);
-  }
-
-  recordDeviceRegistered(
-    deviceId: string,
-    metadata?: Record<string, any>,
-  ): void {
-    this.recordNode("device_registered", deviceId, metadata);
-  }
-
-  recordDeviceUnregistered(
-    deviceId: string,
-    metadata?: Record<string, any>,
-  ): void {
-    this.recordNode("device_unregistered", deviceId, metadata);
-  }
-
-  recordWatchClientStart(
-    deviceId: string,
-    metadata?: Record<string, any>,
-  ): void {
-    this.recordNode("client_watch_started", deviceId, metadata);
-  }
-
-  recordWatchClientStop(
-    deviceId: string,
-    metadata?: Record<string, any>,
-  ): void {
-    this.recordNode("client_watch_stopped", deviceId, metadata);
-  }
-
-  recordSocketConnected(
-    deviceId: string,
-    port: number,
-    metadata?: Record<string, any>,
-  ): string {
-    const connectionAttemptId = this.startConnectionAttempt(deviceId, port);
-    this.recordNode(
-      "socket_connected",
-      deviceId,
-      {
-        port,
-        ...metadata,
-      },
-      connectionAttemptId,
-    );
-    return connectionAttemptId;
-  }
-
-  recordSocketDisconnected(
-    deviceId: string,
-    port: number,
-    metadata?: Record<string, any>,
-    connectionAttemptId?: string,
-  ): void {
-    const resolvedConnectionAttemptId =
-      connectionAttemptId ?? this.findConnectionAttempt(deviceId, port);
-    this.recordNode(
-      "socket_disconnected",
-      deviceId,
-      {
-        port,
-        ...metadata,
-      },
-      resolvedConnectionAttemptId,
-    );
-    this.connectionAttemptByPort.delete(this.portKey(deviceId, port));
-  }
-
-  recordSdkRegister(
-    deviceId: string,
-    port: number,
-    metadata?: Record<string, any>,
-    connectionAttemptId?: string,
-  ): void {
-    const resolvedConnectionAttemptId =
-      connectionAttemptId ?? this.resolveConnectionAttempt(deviceId, port);
-    this.recordNode(
-      "sdk_register_received",
-      deviceId,
-      {
-        port,
-        ...metadata,
-      },
-      resolvedConnectionAttemptId,
-    );
-  }
-
-  recordUsbClientConnected(client: UsbClient): void {
-    const deviceId = client.deviceId();
-    const port = client.info.port;
-    const connectionAttemptId = this.resolveConnectionAttempt(deviceId, port);
-    this.recordNode(
-      "usb_client_connected",
-      deviceId,
-      {
-        clientId: client.clientId(),
-        port,
-        app: client.info.query.app,
-        os: client.info.query.os,
-        device: client.info.query.device,
-        deviceModel: client.info.query.device_model,
-        sdkVersion: client.info.query.sdk_version,
-      },
-      connectionAttemptId,
-    );
-    this.usbClientConnections.set(client.clientId(), {
-      deviceId,
-      port,
-      connectionAttemptId,
-    });
-  }
-
-  recordUsbClientDisconnected(client: UsbClient): void {
-    const deviceId = client.deviceId();
-    const port = client.info.port;
-    const entry = this.usbClientConnections.get(client.clientId());
-    const connectionAttemptId =
-      entry?.connectionAttemptId ?? this.findConnectionAttempt(deviceId, port);
-    this.recordNode(
-      "usb_client_disconnected",
-      deviceId,
-      {
-        clientId: client.clientId(),
-        port,
-        app: client.info.query.app,
-        os: client.info.query.os,
-        device: client.info.query.device,
-        deviceModel: client.info.query.device_model,
-        sdkVersion: client.info.query.sdk_version,
-      },
-      connectionAttemptId,
-    );
-    this.usbClientConnections.delete(client.clientId());
-  }
-
-  recordUsbConnectionClosed(context: UsbConnectionContext): void {
-    const clientId = context.clientId;
-    const entry = clientId
-      ? this.usbClientConnections.get(clientId)
-      : undefined;
-    const deviceId = entry?.deviceId ?? context.deviceId;
-    const port = entry?.port ?? context.port;
-    const connectionAttemptId =
-      context.connectionAttemptId ??
-      entry?.connectionAttemptId ??
-      (deviceId && port
-        ? this.findConnectionAttempt(deviceId, port)
-        : undefined);
-
-    this.recordNode(
-      "usb_connection_closed",
-      deviceId,
-      {
-        clientId,
-        port,
-      },
-      connectionAttemptId,
-    );
-  }
-
-  recordAppClientConnected(client: Client): void {
-    if (!(client instanceof UsbClient)) {
-      return;
-    }
-    const deviceId = client.deviceId();
-    const port = client.info.port;
-    const usbEntry = this.usbClientConnections.get(client.clientId());
-    const connectionAttemptId =
-      usbEntry?.connectionAttemptId ??
-      this.resolveConnectionAttempt(deviceId, port);
-
-    this.recordNode(
-      "app_client_connected",
-      deviceId,
-      {
-        clientId: client.clientId(),
-        port,
-        app: client.info.query.app,
-        os: client.info.query.os,
-        device: client.info.query.device,
-        deviceModel: client.info.query.device_model,
-        sdkVersion: client.info.query.sdk_version,
-      },
-      connectionAttemptId,
-    );
-    this.appClientConnections.set(client.clientId(), {
-      deviceId,
-      port,
-      connectionAttemptId,
-    });
-  }
-
-  recordAppClientDisconnected(clientId: number): void {
-    const entry = this.appClientConnections.get(clientId);
-    this.recordNode(
-      "app_client_disconnected",
-      entry?.deviceId,
-      {
-        clientId,
-        port: entry?.port,
-      },
-      entry?.connectionAttemptId,
-    );
-    this.appClientConnections.delete(clientId);
-  }
-
-  recordWebsocketAppClientConnected(client: WebSocketClient): void {
-    this.recordNode("websocket_app_client_connected", undefined, {
-      clientId: client.clientId(),
-      app: client.info.app,
-      deviceModel: client.info.deviceModel,
-      sdkVersion: client.info.sdkVersion,
-      osVersion: client.info.osVersion,
-      type: client.info.type,
-    });
-  }
-
-  recordWebsocketAppClientDisconnected(clientId: number): void {
-    this.recordNode("websocket_app_client_disconnected", undefined, {
-      clientId,
-    });
-  }
-
-  recordWebsocketWebClientConnected(client: WebSocketClient): void {
-    this.recordNode("websocket_web_client_connected", undefined, {
-      clientId: client.clientId(),
-      type: client.info.type,
-    });
-  }
-
-  recordWebsocketWebClientDisconnected(clientId: number): void {
-    this.recordNode("websocket_web_client_disconnected", undefined, {
-      clientId,
-    });
-  }
-
-  private recordNode(
-    event: string,
+  record<E extends keyof TraceReasons>(
+    event: E,
+    reason: TraceReasons[E],
     deviceId?: string,
     metadata?: Record<string, any>,
+    error?: any,
     connectionAttemptId?: string,
-  ): ConnectionTraceNode {
+  ): void {
+    if (this.closed) return;
     const node: ConnectionTraceNode = {
-      sequence: this.nextSequence(),
-      deviceId,
+      sequence: ++this.nextSequenceValue,
       event,
+      reason,
+      deviceId,
       timestamp: new Date().toISOString(),
       traceSchemaVersion: TRACE_SCHEMA_VERSION,
       connectionAttemptId,
-      metadata: this.compactMetadata(metadata),
+      metadata: this.compactMetadata({
+        ...metadata,
+        ...this.errorDetails(error),
+      }),
     };
-    if (!this.closed) {
-      try {
-        this.sink.write(node);
-      } catch (err: any) {
-        defaultLogger.warn(`connection trace write error: ${err?.message}`);
-      }
-      this.pushRecentNode(node);
-      this.emitNode(node);
-    }
-    return node;
-  }
-
-  private pushRecentNode(node: ConnectionTraceNode): void {
-    if (this.maxBufferedNodes <= 0) {
-      return;
-    }
-    this.recentNodes.push(this.cloneNode(node));
-    if (this.recentNodes.length > this.maxBufferedNodes) {
-      this.recentNodes.shift();
+    try {
+      if (!this.stream.destroyed)
+        this.stream.write(`${JSON.stringify(node)}\n`);
+    } catch (err: any) {
+      defaultLogger.warn(`connection trace write error: ${err?.message}`);
     }
   }
 
-  private emitNode(node: ConnectionTraceNode): void {
-    if (this.listeners.size === 0) {
-      return;
-    }
-    for (const listener of this.listeners) {
-      try {
-        listener(this.cloneNode(node));
-      } catch (err: any) {
-        defaultLogger.warn(`connection trace listener error: ${err?.message}`);
-      }
-    }
+  device(reason: TraceReasons["direct_device"], info: DeviceDescription): void {
+    this.record("direct_device", reason, info.serial, {
+      os: info.os,
+      title: info.title,
+    });
   }
 
-  private cloneNode(node: ConnectionTraceNode): ConnectionTraceNode {
-    return {
-      ...node,
-      metadata: node.metadata ? { ...node.metadata } : undefined,
-    };
-  }
-
-  private startConnectionAttempt(deviceId: string, port: number): string {
-    const connectionAttemptId = randomUUID();
-    this.connectionAttemptByPort.set(
-      this.portKey(deviceId, port),
-      connectionAttemptId,
-    );
-    return connectionAttemptId;
-  }
-
-  private resolveConnectionAttempt(deviceId: string, port: number): string {
-    return (
-      this.findConnectionAttempt(deviceId, port) ??
-      this.startConnectionAttempt(deviceId, port)
+  forwardResult(
+    info: DeviceDescription,
+    ports: number[],
+    failures: { remotePort: number; error: unknown }[] = [],
+  ): void {
+    this.record(
+      "direct_device",
+      failures.length ? "failed" : "preparing",
+      info.serial,
+      {
+        os: info.os,
+        step: "forward",
+        ports: [...ports],
+        failures: failures.map(({ remotePort, error }) => ({
+          remotePort,
+          ...this.errorDetails(error),
+        })),
+      },
     );
   }
 
-  private findConnectionAttempt(
+  // Observe the existing discovery stream; never issue a second discovery request.
+  discovery(tracker: EventEmitter, os: "Android" | "Harmony" | "iOS"): void {
+    if (this.closed) return;
+    let first = true;
+    let previous = "";
+    if (os !== "iOS")
+      this.record("direct_discovery", "started", undefined, { os });
+    const listeners: Record<string, (...args: any[]) => void> = {
+      error: (error) =>
+        this.record(
+          "direct_discovery",
+          "failed",
+          undefined,
+          { os, step: "watch" },
+          error,
+        ),
+      end: () => this.record("direct_discovery", "stopped", undefined, { os }),
+    };
+    if (os === "Android") {
+      listeners.changeSet = ({ added, changed, removed }) => {
+        const describe = (d: any) => ({ deviceId: d.id, status: d.type });
+        if (first || added.length || changed.length || removed.length) {
+          this.record(
+            "direct_discovery",
+            first ? "snapshot" : "changed",
+            undefined,
+            first
+              ? { os, devices: added.map(describe) }
+              : {
+                  os,
+                  added: added.map(describe),
+                  changed: changed.map(describe),
+                  removed: removed.map(describe),
+                },
+          );
+        }
+        first = false;
+      };
+    } else if (os === "Harmony") {
+      listeners.queryError = (error) => {
+        previous = ""; // Emit the next successful list even if its contents are unchanged.
+        this.record(
+          "direct_discovery",
+          "failed",
+          undefined,
+          { os, step: "list_targets" },
+          error,
+        );
+      };
+      listeners.snapshot = (targets) => {
+        const devices = targets.map((t: any) => ({
+          deviceId: t.connectKey,
+          status: t.connStatus,
+        }));
+        const current = JSON.stringify(devices);
+        if (first || current !== previous)
+          this.record(
+            "direct_discovery",
+            first ? "snapshot" : "changed",
+            undefined,
+            { os, devices },
+          );
+        first = false;
+        previous = current;
+      };
+    } else {
+      listeners.listening = () =>
+        this.record("direct_discovery", "started", undefined, { os });
+      listeners.attached = (deviceId) =>
+        this.record("direct_discovery", "changed", deviceId, {
+          os,
+          status: "attached",
+        });
+      listeners.detached = (deviceId) =>
+        this.record("direct_discovery", "changed", deviceId, {
+          os,
+          status: "detached",
+        });
+      listeners.usbmux_error = listeners.error;
+      delete listeners.error; // usbmux translates native errors into usbmux_error.
+      listeners.close = listeners.end;
+      delete listeners.end;
+    }
+    this.observe(tracker, listeners);
+  }
+
+  startWatch(owner: object, info: DeviceDescription): void {
+    if (this.closed || this.watches.has(owner)) return;
+    this.watches.set(owner, { info, failures: [] });
+    this.record("direct_watch", "started", info.serial, { os: info.os });
+  }
+
+  flushProbes(owner: object): void {
+    const watch = this.watches.get(owner);
+    if (!watch?.failures.length) return;
+    this.record("direct_watch", "probe_failed", watch.info.serial, {
+      os: watch.info.os,
+      failures: watch.failures,
+    });
+    watch.failures = [];
+  }
+
+  stopWatch(owner: object): void {
+    const watch = this.watches.get(owner);
+    if (!watch) return;
+    this.flushProbes(owner);
+    this.record("direct_watch", "stopped", watch.info.serial, {
+      os: watch.info.os,
+    });
+    this.watches.delete(owner);
+  }
+
+  probeFailed(
+    owner: object | null,
     deviceId: string,
     port: number,
-  ): string | undefined {
-    return this.connectionAttemptByPort.get(this.portKey(deviceId, port));
+    error: any,
+    step = "connect",
+  ): void {
+    if (this.closed) return;
+    const failure = { port, step, ...this.errorDetails(error) };
+    const watch = owner && this.watches.get(owner);
+    if (watch) watch.failures.push(failure);
+    else
+      this.record("direct_watch", "probe_failed", deviceId, {
+        failures: [failure],
+      });
   }
 
-  private nextSequence(): number {
-    this.nextSequenceValue += 1;
-    return this.nextSequenceValue;
+  // Each socket owns its identity. Old closes can never remove a newer attempt.
+  socket(
+    socket: EventEmitter,
+    metadata: Record<string, any>,
+    deviceId?: string,
+    owner: object | null = null,
+    connected = false,
+  ): void {
+    if (this.closed || this.attempts.has(socket)) return;
+    const attempt: Attempt = {
+      deviceId,
+      connectionAttemptId: randomUUID(),
+      metadata,
+      connected: false,
+      ended: false,
+    };
+    this.attempts.set(socket, attempt);
+    const onConnected = () => {
+      if (attempt.connected || attempt.ended) return;
+      attempt.connected = true;
+      this.connection(socket, "connected");
+    };
+    const onError = (error: any) => {
+      if (attempt.ended) return;
+      if (attempt.connected) this.connection(socket, "failed", "socket", error);
+      else this.probeFailed(owner, deviceId!, metadata.port, error);
+      attempt.ended = true;
+    };
+    this.observe(socket, {
+      connect: onConnected,
+      [errorMonitor]: onError,
+      usbmux_error: onError,
+      close: (code, reason) => {
+        if (!attempt.ended && attempt.connected)
+          this.connection(
+            socket,
+            "closed",
+            undefined,
+            undefined,
+            metadata.transport === "websocket"
+              ? { code, closeReason: reason?.toString() }
+              : undefined,
+          );
+        attempt.ended = true;
+      },
+    });
+    if (connected) onConnected();
   }
 
-  private portKey(deviceId: string, port: number): string {
-    return `${deviceId}:${port}`;
+  connection(
+    socket: object,
+    reason: TraceReasons["connection"],
+    step?: string,
+    error?: any,
+    metadata?: Record<string, any>,
+  ): void {
+    const attempt = this.attempts.get(socket);
+    if (!attempt || attempt.ended) return;
+    this.record(
+      "connection",
+      reason,
+      attempt.deviceId,
+      { ...attempt.metadata, ...metadata, step },
+      error,
+      attempt.connectionAttemptId,
+    );
+  }
+
+  register(socket: object, info: ClientQuery | WebSocketClient["info"]): void {
+    const attempt = this.attempts.get(socket);
+    if (!attempt || attempt.ended || this.closed) return;
+    this.registrations.set(info, attempt);
+    this.connection(
+      socket,
+      "register_received",
+      undefined,
+      undefined,
+      this.clientMetadata(info),
+    );
+  }
+
+  onEvent(event: string, payload: any): void {
+    if (this.closed) return;
+    let entry: TraceContext | undefined;
+    let reason: TraceReasons["client"];
+    if (
+      event === "app-client-connected" ||
+      event === "websocket-web-client-connected"
+    ) {
+      const client = payload as UsbClient | WebSocketClient;
+      const direct = client instanceof UsbClient;
+      const info = direct ? client.info.query : client.info;
+      const attempt = this.registrations.get(info);
+      entry = {
+        deviceId: direct ? client.deviceId() : undefined,
+        connectionAttemptId: attempt?.connectionAttemptId,
+        metadata: {
+          ...attempt?.metadata,
+          ...this.clientMetadata(info),
+          transport: direct ? "direct" : "websocket",
+          role: event === "websocket-web-client-connected" ? "debugger" : "app",
+          clientId: client.clientId(),
+          ...(direct ? { port: client.info.port } : {}),
+        },
+      };
+      this.clients.set(client.clientId(), entry);
+      reason = "connected";
+    } else if (
+      event === "app-client-disconnected" ||
+      event === "websocket-web-client-disconnected"
+    ) {
+      entry = this.clients.get(payload);
+      if (!entry) return;
+      this.clients.delete(payload);
+      reason = "disconnected";
+    } else return;
+    this.record(
+      "client",
+      reason,
+      entry.deviceId,
+      entry.metadata,
+      undefined,
+      entry.connectionAttemptId,
+    );
+  }
+
+  private clientMetadata(
+    info: ClientQuery | WebSocketClient["info"],
+  ): Record<string, any> {
+    if ("device_id" in info)
+      return {
+        app: info.app,
+        os: info.os,
+        device: info.device,
+        deviceModel: info.device_model,
+        sdkVersion: info.sdk_version,
+      };
+    return {
+      app: info.app,
+      deviceModel: info.deviceModel,
+      sdkVersion: info.sdkVersion,
+      osVersion: info.osVersion,
+      type: info.type,
+    };
+  }
+
+  private errorDetails(error: any): Record<string, any> {
+    return error === undefined
+      ? {}
+      : { error: String(error?.message ?? error), errorCode: error?.code };
+  }
+
+  private observe(
+    emitter: EventEmitter,
+    listeners: Record<PropertyKey, (...args: any[]) => void>,
+  ): void {
+    const cleanup = () => {
+      for (const event of Reflect.ownKeys(listeners))
+        emitter.off(event, listeners[event]);
+      emitter.off("close", cleanup);
+      emitter.off("end", cleanup);
+      emitter.off("error", cleanup);
+      this.cleanups.delete(cleanup);
+    };
+    for (const event of Reflect.ownKeys(listeners))
+      emitter.prependListener(event, listeners[event]);
+    emitter.once("close", cleanup);
+    if (listeners.end) {
+      emitter.once("end", cleanup);
+      if (listeners.queryError) emitter.once("error", cleanup);
+    }
+    this.cleanups.add(cleanup);
   }
 
   private compactMetadata(
@@ -489,24 +470,6 @@ export class ConnectionTraceRecorder {
       }
     }
     return Object.keys(compacted).length > 0 ? compacted : undefined;
-  }
-
-  private clearStaleDeviceTraceState(deviceId: string): void {
-    for (const key of this.connectionAttemptByPort.keys()) {
-      if (key.startsWith(`${deviceId}:`)) {
-        this.connectionAttemptByPort.delete(key);
-      }
-    }
-    for (const [clientId, entry] of this.usbClientConnections.entries()) {
-      if (entry.deviceId === deviceId) {
-        this.usbClientConnections.delete(clientId);
-      }
-    }
-    for (const [clientId, entry] of this.appClientConnections.entries()) {
-      if (entry.deviceId === deviceId) {
-        this.appClientConnections.delete(clientId);
-      }
-    }
   }
 }
 
@@ -525,37 +488,9 @@ export function createConnectionTraceRecorder(
     return null;
   }
   try {
-    if (typeof output === "string") {
-      return new ConnectionTraceRecorder(
-        new FileTraceSink(output),
-        parseTraceBufferSize(options?.bufferSize),
-      );
-    }
-    return new ConnectionTraceRecorder(
-      new StreamTraceSink(output),
-      parseTraceBufferSize(options?.bufferSize),
-    );
+    return new ConnectionTraceRecorder(output);
   } catch (err: any) {
     defaultLogger.warn(`connection trace init error: ${err?.message}`);
     return null;
   }
-}
-
-function parseTraceBufferSize(optionBufferSize?: number): number {
-  if (
-    typeof optionBufferSize === "number" &&
-    Number.isFinite(optionBufferSize) &&
-    optionBufferSize >= 0
-  ) {
-    return Math.floor(optionBufferSize);
-  }
-  const envValue = process.env.DriverConnectionTraceBufferSize;
-  if (!envValue) {
-    return DEFAULT_TRACE_BUFFER_SIZE;
-  }
-  const parsed = Number(envValue);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return DEFAULT_TRACE_BUFFER_SIZE;
-  }
-  return Math.floor(parsed);
 }

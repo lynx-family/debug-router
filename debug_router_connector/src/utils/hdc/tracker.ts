@@ -12,9 +12,16 @@ export default class Tracker extends EventEmitter {
   }
 
   public read() {
+    let queryFailed = false;
     this.client
-      .listTargets()
+      .listTargets((error) => {
+        // Preserve the existing empty-list fallback for business logic, but do
+        // not report it as a successful empty discovery result.
+        queryFailed = true;
+        this.emit("queryError", error);
+      })
       .then((targets) => {
+        if (!queryFailed) this.emit("snapshot", targets);
         this.update(targets);
         setTimeout(() => {
           this.read();

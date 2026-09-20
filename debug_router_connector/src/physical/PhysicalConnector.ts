@@ -222,10 +222,7 @@ export class PhysicalConnector {
       return;
     }
     defaultLogger.debug("unregisterDevice:" + serial);
-    this.traceRecorder?.recordDeviceUnregistered(serial, {
-      os: device.info.os,
-      title: device.info.title,
-    });
+    this.traceRecorder?.device("unregistered", device.info);
     this.devices.delete(serial);
     device.disConnect(); // we'll only destroy upon replacement
     this.emit("device-disconnected", device);
@@ -449,10 +446,7 @@ export class PhysicalConnector {
     defaultLogger.debug("register new device:" + device.serial);
     // register new device
     this.devices.set(device.info.serial, device);
-    this.traceRecorder?.recordDeviceRegistered(device.info.serial, {
-      os: device.info.os,
-      title: device.info.title,
-    });
+    this.traceRecorder?.device("registered", device.info);
     // remove auto startWatchClient, host will handle it
     this.emit("device-connected", device);
     setDeviceTimeMap(device);

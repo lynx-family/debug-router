@@ -61,7 +61,7 @@ await connector.watchNetworkDeviceAtIp({
 Each IP is watched once. Repeated calls with the same IP do nothing.
 
 #### Connection trace (optional)
-Use `connectionTrace` to enable flat JSON-line connection logging, or set `DriverConnectionTracePath` to a file path. Each record includes a monotonically increasing `sequence`; socket-backed records also include `connectionAttemptId` for later trace analysis.
+Use `connectionTrace` to enable file-only JSON-line connection logging, or set `DriverConnectionTracePath` to a file path. Records use six event categories plus `reason` to locate the failed connection stage. `sequence` orders records within an instance, and `connectionAttemptId` correlates each actual socket across registration and client lifecycle. Event names have changed while `traceSchemaVersion` remains `0.1`; see [the event reference](../docs/connection_trace.md) when updating consumers.
 
 #### Get Connected Clients
 You have two ways to get the connected clients.

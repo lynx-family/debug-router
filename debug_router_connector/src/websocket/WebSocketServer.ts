@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 import { WebSocket, WebSocketServer } from "ws";
+import { errorMonitor } from "events";
 import { WebSocketClientInfo, WebSocketClient } from "./WebSocketConnection";
 import { DebugRouterConnector } from "../connector";
 import { UsbClient } from "../usb/Client";
@@ -36,6 +37,12 @@ export class WebSocketController {
     this.host = option.host;
     this.wssPath = `ws://${this.host}/mdevices/page/android`;
     this.roomId = option.roomId ?? "";
+    this.driver.traceRecorder?.record(
+      "websocket_server",
+      "starting",
+      undefined,
+      { host: this.host, port: this.port },
+    );
     const wsService = new WebSocketServer({
       port: this.port,
       path: "/mdevices/page/android",
@@ -45,7 +52,22 @@ export class WebSocketController {
       return request.url?.startsWith("/mdevices/page/android") ?? false;
     };
 
+    wsService.on(errorMonitor, (error) =>
+      this.driver.traceRecorder?.record(
+        "websocket_server",
+        "failed",
+        undefined,
+        { port: this.port, step: "listen" },
+        error,
+      ),
+    );
     wsService.on("listening", () => {
+      this.driver.traceRecorder?.record(
+        "websocket_server",
+        "listening",
+        undefined,
+        { address: wsService.address() },
+      );
       getDriverReportService()?.report("websocket_server_init_result", null, {
         result: "success",
         port: this.port,
@@ -55,7 +77,15 @@ export class WebSocketController {
       }
     });
     wsService.on("connection", this.handleConnection.bind(this));
-    wsService.on("close", this.close.bind(this));
+    wsService.on("close", () => {
+      this.driver.traceRecorder?.record(
+        "websocket_server",
+        "closed",
+        undefined,
+        { port: this.port },
+      );
+      this.close();
+    });
     this.server = wsService;
   }
 
@@ -85,8 +115,21 @@ export class WebSocketController {
   }
 
   async handleConnection(socket: WebSocket) {
+    this.driver.traceRecorder?.socket(
+      socket,
+      { transport: "websocket", port: this.port },
+      undefined,
+      null,
+      true,
+    );
     const info = await this.onConnection(socket);
     if (info === undefined) {
+      this.driver.traceRecorder?.connection(
+        socket,
+        "failed",
+        "register",
+        "Registration did not complete before the existing deadline",
+      );
       socket.close();
       return;
     }
@@ -123,7 +166,18 @@ export class WebSocketController {
         const timer = setTimeout(() => {
           resolve(undefined);
         }, 5000);
-        const response: any = JSON.parse(data);
+        let response: any;
+        try {
+          response = JSON.parse(data);
+        } catch (error) {
+          this.driver.traceRecorder?.connection(
+            socket,
+            "failed",
+            "register",
+            error,
+          );
+          throw error;
+        }
         if (response.event === "Register") {
           const data = response.data;
           if (data && data.id === client_id) {
@@ -138,6 +192,7 @@ export class WebSocketController {
               type: data.type,
               raw_info: data.info,
             };
+            this.driver.traceRecorder?.register(socket, info);
             socket.off("message", messageHandler);
             clearTimeout(timer);
             resolve(info);
