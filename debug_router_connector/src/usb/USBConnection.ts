@@ -43,6 +43,10 @@ export class USBConnection extends Connection {
     this.socket.end();
   }
 
+  canSend(): boolean {
+    return this.socket.writable && !this.socket.destroyed;
+  }
+
   send(data: any): void {
     if (this.socket.writable) {
       if (process.env.PrintAllUSBMessage === "enable") {

@@ -19,6 +19,9 @@ export abstract class Connection {
   private readonly events = new EventEmitter();
   protected pendingRequests: Map<string, PendingRequestResolvers> = new Map();
   abstract close(): void;
+  canSend(): boolean {
+    return true;
+  }
   abstract send(data: any): void;
   abstract sendExpectResponse(
     data: RequireMessageType,
