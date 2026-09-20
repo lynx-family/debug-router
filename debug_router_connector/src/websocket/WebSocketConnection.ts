@@ -174,7 +174,12 @@ export class WebSocketClient extends Client {
       if (id == -1) {
         return;
       }
-      this.server.sendMessageToApp(id, message);
+      if (!this.server.trySendMessageToApp(id, message)) {
+        defaultLogger.warn(
+          `RouteRejected: client ${String(id).slice(0, 64)} is unavailable`,
+        );
+        this.socket.close(1011, "RouteRejected");
+      }
     } else {
       // message from app, only send to web
       const id = data.data?.sender ?? -1;

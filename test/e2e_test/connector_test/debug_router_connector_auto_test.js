@@ -4,10 +4,15 @@ const fs = require("fs");
 const net = require("net");
 const os = require("os");
 const path = require("path");
+const { WebSocket } = require("ws");
 
 const {
   DebugRouterConnector,
+  UsbClient,
 } = require("@lynx-js/debug-router-connector");
+const {
+  USBConnection,
+} = require("@lynx-js/debug-router-connector/dist/cjs/src/usb/USBConnection");
 
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
@@ -353,9 +358,212 @@ async function runEmptyDiscoveryCheck() {
     const devices = await driver.connectDevices(100);
     assert.deepStrictEqual(devices, []);
 
-    const clients = await driver.connectUsbClients("missing-device", 100, false);
+    const clients = await driver.connectUsbClients(
+      "missing-device",
+      100,
+      false,
+    );
     assert.deepStrictEqual(clients, []);
     assert.deepStrictEqual(driver.getConnectionTrace(), []);
+  } finally {
+    await driver.close();
+  }
+}
+
+async function connectWebDriver(port) {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/mdevices/page/android`);
+  const initialize = await withTimeout(
+    new Promise((resolve, reject) => {
+      socket.on("message", (data) => {
+        const message = JSON.parse(data.toString());
+        if (message.event === "Initialize") {
+          resolve(message);
+        }
+      });
+      socket.once("error", reject);
+    }),
+    1000,
+    "Lynx DevTool driver initialization",
+  );
+  const roomJoined = withTimeout(
+    new Promise((resolve, reject) => {
+      socket.on("message", (data) => {
+        const message = JSON.parse(data.toString());
+        if (message.event === "RoomJoined") {
+          resolve();
+        }
+      });
+      socket.once("error", reject);
+    }),
+    1000,
+    "Lynx DevTool driver registration",
+  );
+  socket.send(
+    JSON.stringify({
+      event: "Register",
+      data: { id: initialize.data, type: "Driver" },
+    }),
+  );
+  await roomJoined;
+  return socket;
+}
+
+async function expectRouteRejected(socket, target) {
+  const closed = withTimeout(
+    new Promise((resolve) => {
+      socket.once("close", (code, reason) => {
+        resolve({ code, reason: reason.toString() });
+      });
+    }),
+    1000,
+    `route ${target} rejection`,
+  );
+  socket.send(
+    JSON.stringify({
+      event: "Customized",
+      data: {
+        type: "App",
+        data: { client_id: target, message: { method: "App.Test" } },
+      },
+    }),
+  );
+  assert.deepStrictEqual(await closed, {
+    code: 1011,
+    reason: "RouteRejected",
+  });
+}
+
+async function runRouteRejectionCheck() {
+  logStep(
+    "checking unavailable Lynx DevTool routes fail the originating driver",
+  );
+  const driver = new DebugRouterConnector({
+    manualConnect: true,
+    enableWebSocket: true,
+    enableAndroid: false,
+    enableIOS: false,
+    enableHarmony: false,
+    enableDesktop: false,
+    enableNetworkDevice: false,
+  });
+
+  try {
+    await driver.startWSServer();
+    const observerSocket = await connectWebDriver(driver.wssPort);
+    await expectRouteRejected(await connectWebDriver(driver.wssPort), 404);
+    await expectRouteRejected(
+      await connectWebDriver(driver.wssPort),
+      "无效路由".repeat(100),
+    );
+
+    const unwritableClientId = 405;
+    const socket = await connectWebDriver(driver.wssPort);
+    driver.usbClients.set(
+      unwritableClientId,
+      new UsbClient(
+        { id: unwritableClientId, query: {} },
+        new USBConnection({ writable: false }),
+      ),
+    );
+    await expectRouteRejected(socket, unwritableClientId);
+    driver.usbClients.delete(unwritableClientId);
+
+    const writeFailureClientId = 407;
+    const writeFailureSocket = await connectWebDriver(driver.wssPort);
+    const writeFailureConnection = new USBConnection({
+      writable: true,
+      write() {
+        throw new Error("socket write failed");
+      },
+    });
+    assert.throws(
+      () =>
+        writeFailureConnection.send({
+          event: "Customized",
+          data: { type: "App", data: { message: {} } },
+        }),
+      /socket write failed/,
+    );
+    driver.usbClients.set(
+      writeFailureClientId,
+      new UsbClient(
+        { id: writeFailureClientId, query: {} },
+        writeFailureConnection,
+      ),
+    );
+    await expectRouteRejected(writeFailureSocket, writeFailureClientId);
+    driver.usbClients.delete(writeFailureClientId);
+
+    const backpressuredClientId = 408;
+    let backpressuredWrites = 0;
+    const backpressuredSocket = await connectWebDriver(driver.wssPort);
+    driver.usbClients.set(
+      backpressuredClientId,
+      new UsbClient(
+        { id: backpressuredClientId, query: {} },
+        new USBConnection({
+          writable: true,
+          write() {
+            backpressuredWrites += 1;
+            return false;
+          },
+        }),
+      ),
+    );
+    backpressuredSocket.send(
+      JSON.stringify({
+        event: "Customized",
+        data: {
+          type: "App",
+          data: {
+            client_id: backpressuredClientId,
+            message: { method: "App.Test" },
+          },
+        },
+      }),
+    );
+    await waitFor(
+      () => backpressuredWrites === 1,
+      1000,
+      "backpressured Lynx DevTool route forwarding",
+    );
+    assert.strictEqual(backpressuredSocket.readyState, WebSocket.OPEN);
+    backpressuredSocket.close();
+    driver.usbClients.delete(backpressuredClientId);
+
+    const writableClientId = 406;
+    const receivedMessages = [];
+    const writableSocket = await connectWebDriver(driver.wssPort);
+    driver.usbClients.set(writableClientId, {
+      clientId: () => writableClientId,
+      close() {},
+      trySendMessage(message) {
+        receivedMessages.push(message);
+        return true;
+      },
+    });
+    writableSocket.send(
+      JSON.stringify({
+        event: "Customized",
+        data: {
+          type: "App",
+          data: {
+            client_id: writableClientId,
+            message: { method: "App.Test" },
+          },
+        },
+      }),
+    );
+    await waitFor(
+      () => receivedMessages.length === 1,
+      1000,
+      "writable Lynx DevTool route forwarding",
+    );
+    assert.strictEqual(writableSocket.readyState, WebSocket.OPEN);
+    writableSocket.close();
+    driver.usbClients.delete(writableClientId);
+    assert.strictEqual(observerSocket.readyState, WebSocket.OPEN);
+    observerSocket.close();
   } finally {
     await driver.close();
   }
@@ -657,7 +865,9 @@ async function runRealDeviceScenario(args) {
     );
 
     logStep(
-      `connected ${device.serial} (${device.info.os}) client=${client.clientId()} app=${client.info.query.app}`,
+      `connected ${device.serial} (${
+        device.info.os
+      }) client=${client.clientId()} app=${client.info.query.app}`,
     );
   } finally {
     await driver?.close();
@@ -669,6 +879,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.mode === "no-device") {
     await runEmptyDiscoveryCheck();
+    await runRouteRejectionCheck();
     await runFakeNetworkCheck();
     await runDynamicNetworkCheck(true);
     await runDynamicNetworkCheck(false);

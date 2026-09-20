@@ -810,7 +810,11 @@ export class DebugRouterConnector {
     }
   }
 
-  handleWsMessage(id: number, message: string) {
+  handleWsMessage(id: number, message: string): void {
+    this.tryHandleWsMessage(id, message);
+  }
+
+  tryHandleWsMessage(id: number, message: string): boolean {
     const client = this.usbClients.get(id);
     if (client) {
       const data = JSON.parse(message);
@@ -818,12 +822,13 @@ export class DebugRouterConnector {
         data?.data?.type === "UsbConnect" ||
         data?.data?.type === "UsbConnectAck"
       )
-        return;
+        return true;
       if (data?.data?.data?.client_id) {
         data.data.data.client_id = -1;
       }
-      client.sendMessage(data);
+      return client.trySendMessage(data);
     }
+    return false;
   }
 
   handleUsbClienChange() {
