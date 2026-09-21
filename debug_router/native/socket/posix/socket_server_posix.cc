@@ -9,6 +9,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <cstdlib>
+
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
 #include "debug_router/native/socket/usb_client.h"
@@ -48,6 +51,20 @@ int32_t SocketServerPosix::InitSocket() {
   const PORT_TYPE start_port = kStartPort;
 #endif
   int32_t port = start_port;
+  const char *port_env = std::getenv("LYNX_DEBUG_ROUTER_PORT");
+  if (port_env) {
+    char *end = nullptr;
+    errno = 0;
+    const long configured_port = std::strtol(port_env, &end, 10);
+    if (*port_env < '0' || *port_env > '9' || *end != '\0' || errno == ERANGE ||
+        configured_port <= 0 || configured_port > UINT16_MAX) {
+      Close();
+      LOGE("invalid LYNX_DEBUG_ROUTER_PORT");
+      NotifyInit(EINVAL, "invalid LYNX_DEBUG_ROUTER_PORT");
+      return kInvalidPort;
+    }
+    port = static_cast<int32_t>(configured_port);
+  }
   do {
     struct sockaddr_in addr;
     bzero((char *)&addr, sizeof(addr));
@@ -61,7 +78,7 @@ int32_t SocketServerPosix::InitSocket() {
       break;
     }
     port = port + 1;
-  } while ((port < start_port + kTryPortCount) &&
+  } while (!port_env && (port < start_port + kTryPortCount) &&
            (GetErrorMessage() == EADDRINUSE));
 
   if (!flag) {
