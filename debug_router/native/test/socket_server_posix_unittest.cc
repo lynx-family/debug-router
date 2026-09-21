@@ -13,6 +13,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <future>
 #include <memory>
@@ -20,8 +21,10 @@
 #include <string>
 
 #include "debug_router/native/base/socket_guard.h"
+#include "debug_router/native/core/debug_router_core.h"
 #include "debug_router/native/socket/count_down_latch.h"
 #include "debug_router/native/socket/usb_client.h"
+#include "debug_router/native/thread/debug_router_executor.h"
 #include "gtest/gtest.h"
 
 namespace debugrouter {
@@ -29,6 +32,14 @@ namespace socket_server {
 
 class SocketServerPosixTestPeer {
  public:
+  static int32_t InitSocket(SocketServerPosix &server) {
+    return server.InitSocket();
+  }
+
+  static int SocketFd(SocketServerPosix &server) {
+    return server.socket_fd_.load(std::memory_order_acquire);
+  }
+
   static void AdoptListeningSocket(SocketServerPosix &server, int socket_fd) {
     server.socket_fd_.store(socket_fd, std::memory_order_release);
   }
@@ -84,7 +95,7 @@ class CountDownOnExit {
   std::shared_ptr<CountDownLatch> latch_;
 };
 
-int CreateLoopbackListener(uint16_t &port) {
+int CreateLoopbackListener(uint16_t &port, uint16_t requested_port = 0) {
   const int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (socket_fd < 0) {
     return -1;
@@ -92,7 +103,7 @@ int CreateLoopbackListener(uint16_t &port) {
 
   sockaddr_in address{};
   address.sin_family = AF_INET;
-  address.sin_port = 0;
+  address.sin_port = htons(requested_port);
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   if (bind(socket_fd, reinterpret_cast<sockaddr *>(&address),
            sizeof(address)) != 0 ||
@@ -127,6 +138,79 @@ int ConnectToPort(uint16_t port) {
     return -1;
   }
   return socket_fd;
+}
+
+class ScopedSocketEnvironment {
+ public:
+  explicit ScopedSocketEnvironment(const char *name) : name_(name) {
+    const char *value = std::getenv(name);
+    was_set_ = value != nullptr;
+    value_ = value ? value : "";
+    unsetenv(name_);
+  }
+  ~ScopedSocketEnvironment() {
+    if (was_set_) {
+      setenv(name_, value_.c_str(), 1);
+    } else {
+      unsetenv(name_);
+    }
+  }
+
+ private:
+  const char *name_;
+  bool was_set_;
+  std::string value_;
+};
+
+class SocketServerEnvironmentTest : public testing::Test {
+ protected:
+  static void SetUpTestSuite() { core::DebugRouterCore::GetInstance(); }
+
+  int32_t InitSocket() {
+    // Run callbacks before returning so they cannot outlive the server.
+    std::promise<int32_t> result;
+    thread::DebugRouterExecutor::GetInstance().Post([&]() {
+      result.set_value(SocketServerPosixTestPeer::InitSocket(server_));
+    });
+    return result.get_future().get();
+  }
+
+  ScopedSocketEnvironment port_env_{"LYNX_DEBUG_ROUTER_PORT"};
+  SocketServerPosix server_{std::make_shared<NoopListener>()};
+};
+
+TEST_F(SocketServerEnvironmentTest, KeepsDefaultPortRetry) {
+  uint16_t occupied_port = 0;
+  base::SocketGuard occupied(CreateLoopbackListener(occupied_port, kStartPort));
+  if (occupied.Get() < 0) {
+    GTEST_SKIP() << "Default port is unavailable";
+  }
+  const int32_t port = InitSocket();
+  EXPECT_GT(port, kStartPort);
+  EXPECT_LT(port, kStartPort + kTryPortCount);
+}
+
+TEST_F(SocketServerEnvironmentTest, UsesExactConfiguredPort) {
+  uint16_t port = 0;
+  base::SocketGuard occupied(CreateLoopbackListener(port));
+  ASSERT_GE(occupied.Get(), 0);
+  ASSERT_EQ(setenv("LYNX_DEBUG_ROUTER_PORT", std::to_string(port).c_str(), 1),
+            0);
+  EXPECT_EQ(InitSocket(), kInvalidPort);
+  occupied.Reset();
+  ASSERT_EQ(InitSocket(), port);
+  base::SocketGuard client(ConnectToPort(port));
+  EXPECT_GE(client.Get(), 0);
+}
+
+TEST_F(SocketServerEnvironmentTest, RejectsInvalidPorts) {
+  for (const char *value : {"", "0", "-1", "65536", "9001x", " 9001",
+                            "999999999999999999999999999999"}) {
+    SCOPED_TRACE(value);
+    ASSERT_EQ(setenv("LYNX_DEBUG_ROUTER_PORT", value, 1), 0);
+    EXPECT_EQ(InitSocket(), kInvalidPort);
+    EXPECT_EQ(SocketServerPosixTestPeer::SocketFd(server_), kInvalidSocket);
+  }
 }
 
 TEST(SocketServerPosixTestSuite,

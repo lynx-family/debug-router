@@ -74,6 +74,18 @@ cd test/e2e_test/connector_test && npm install && node index.js
 ### Check Result
 If the execution result of `node index.js` includes your device name and debug_router_example information, it means the execution was successful.
 
+### Configure the native POSIX socket listener
+
+Set `LYNX_DEBUG_ROUTER_PORT=9001` before starting the app that embeds DebugRouter
+to use an exact TCP port (`1`–`65535`). If it is unavailable, initialization fails
+without trying another port. This variable does not enable the debug server;
+the existing start/stop controls still apply.
+
+Invalid values fail initialization without falling back or disabling the server;
+the existing initialization retry behavior is unchanged. With the variable unset,
+the existing start-port selection and port retry behavior are unchanged.
+This variable applies to the POSIX backend only; Windows is unchanged.
+
 ## 🤝 How to Contribute
 ### Code of Conduct
 We are devoted to ensuring a positive, inclusive, and safe environment for all contributors. Please find our [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for detailed information.
