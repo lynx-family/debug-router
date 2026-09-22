@@ -10,11 +10,16 @@ import { LynxView } from '@lynx/lynx/src/main/ets/tasm/LynxView';
 
 export class DebugRouter {
   private static viewMap: Map<LynxView, number> = new Map<LynxView, number>();
+  private static initialized: boolean = false;
 
-  public static createInstance(): void {
+  public static ensureInitialized(): void {
+    if (DebugRouter.initialized) {
+      return;
+    }
     let uuid: string = util.generateRandomUUID(true);
     DebugRouterHarmony.createInstance();
     DebugRouter.setAppInfo("debugRouterId", uuid);
+    DebugRouter.initialized = true;
   }
 
   public static getSessionIdByView(view: LynxView): number {
