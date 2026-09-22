@@ -71,7 +71,7 @@ export abstract class BaseDevice {
     }
   }
 
-  disConnect() {
+  disconnect() {
     this.connected = false;
     if (this.clientController) {
       this.clientController.close();

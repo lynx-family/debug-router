@@ -16,8 +16,8 @@ export type Snapshot = {
 };
 
 export type DeviceSnapshot = DeviceDescription & {
-  ports?: number[];
-  host?: string;
+  ports: number[];
+  host: string;
 };
 
 export type ClientSnapshot = ClientDescription;
