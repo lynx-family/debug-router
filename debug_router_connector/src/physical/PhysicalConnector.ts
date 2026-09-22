@@ -227,7 +227,7 @@ export class PhysicalConnector {
       title: device.info.title,
     });
     this.devices.delete(serial);
-    device.disConnect(); // we'll only destroy upon replacement
+    device.disconnect(); // we'll only destroy upon replacement
     this.emit("device-disconnected", device);
     monitorUnregisterDevice(device, this.usbConnectOpt.retryTime);
   }

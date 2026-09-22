@@ -68,7 +68,7 @@ function createDevice(
     stopWatchClient() {
       state.stopWatchCalls++;
     },
-    disConnect() {
+    disconnect() {
       state.disconnectCalls++;
     },
   };

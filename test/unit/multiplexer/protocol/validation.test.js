@@ -293,6 +293,39 @@ describe("multiplexer protocol validation", function () {
     );
   });
 
+  it("requires device host and ports in snapshots, events, and connectDevices responses", function () {
+    const missingHost = createDeviceSnapshot();
+    delete missingHost.host;
+    const missingPorts = createDeviceSnapshot();
+    delete missingPorts.ports;
+    const cases = [
+      [missingHost, false],
+      [{ ...createDeviceSnapshot(), host: undefined }, false],
+      [{ ...createDeviceSnapshot(), host: null }, false],
+      [{ ...createDeviceSnapshot(), host: 123 }, false],
+      [createDeviceSnapshot(), true],
+      [{ ...createDeviceSnapshot(), host: "/var/run/usbmuxd" }, true],
+      [{ ...createDeviceSnapshot(), host: "10.0.0.1" }, true],
+      [missingPorts, false],
+      [{ ...createDeviceSnapshot(), ports: undefined }, false],
+      [{ ...createDeviceSnapshot(), ports: null }, false],
+      [{ ...createDeviceSnapshot(), ports: 8080 }, false],
+      [{ ...createDeviceSnapshot(), ports: ["8080"] }, false],
+      [{ ...createDeviceSnapshot(), ports: [] }, true],
+    ];
+
+    for (const [device, valid] of cases) {
+      const snapshot = { ...createSnapshot(), devices: [device] };
+      assert.strictEqual(isDeviceSnapshot(device), valid);
+      assert.strictEqual(isSnapshot(snapshot), valid);
+      assert.strictEqual(isControlEvent(createEvent("snapshot", snapshot)), valid);
+      assert.strictEqual(
+        isControlRpcResponse(...createRpcResponse([device], "connectDevices")),
+        valid
+      );
+    }
+  });
+
   it("validates Health and Register DTOs without PID or versioned requests", function () {
     assert.strictEqual(
       isMultiplexerHealthRequest({
