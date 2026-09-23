@@ -36,22 +36,27 @@ export class UsbClient extends Client {
     this.connection.close();
   }
 
+  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   on(event: string, callback: EventHandler) {
     this.connection.on(event, callback);
   }
 
+  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   onAllEvents(callback: CDPEventHandler) {
     this.connection.onAllEvents(callback);
   }
 
+  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   off(event: string, callback: EventHandler) {
     this.connection.off(event, callback);
   }
 
+  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   once(event: string, callback: EventHandler) {
     this.connection.once(event, callback);
   }
 
+  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   protected rawSend(message: RequireMessageType): Promise<ResponseMessageType> {
     return new Promise(async (resolve, reject) => {
       const response = await this.connection.sendExpectResponse(message);
@@ -60,6 +65,7 @@ export class UsbClient extends Client {
   }
 
   // send sendCustomizedMessage and wait result
+  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   sendCustomizedMessage(
     method: string,
     params: Object = "",
@@ -98,6 +104,7 @@ export class UsbClient extends Client {
   }
 
   // send message and wait result
+  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   sendRawMessage(message: RequireMessageType): Promise<ResponseMessageType> {
     return this.rawSend(message);
   }
@@ -108,6 +115,7 @@ export class UsbClient extends Client {
   }
 
   // send ClientMessageHandler message and wait result
+  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   sendClientMessage(method: string, params: Object = {}): Promise<string> {
     return this.sendCustomizedMessage(method, params, -1, "App");
   }
