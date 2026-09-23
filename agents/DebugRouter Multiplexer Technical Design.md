@@ -419,8 +419,8 @@ type Snapshot = {
 };
 
 type DeviceSnapshot = DeviceDescription & {
-  ports?: number[];
-  host?: string;
+  ports: number[];
+  host: string;
 };
 
 type ClientSnapshot = ClientDescription;
@@ -481,8 +481,8 @@ To preserve downstream imports without reviving duplicate request handling, `Cli
 
 - `startWatchClient()` -> `startDeviceClientWatcher({ deviceId })`
 - `stopWatchClient()` -> `stopDeviceClientWatcher({ deviceId })`
-- `disConnect()` -> `disconnectDevice`
-- `getHost()` returns the snapshot host, or `127.0.0.1` if missing.
+- `disconnect()` -> `disconnectDevice`
+- `getHost()` returns the required snapshot host serialized from the physical device's `getHost()`.
 
 `MultiplexerUsbClient` is a runtime client proxy object in the connector process. It keeps the original `Client` API shape:
 
