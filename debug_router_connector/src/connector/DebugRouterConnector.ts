@@ -186,8 +186,10 @@ export class DebugRouterConnector {
       Network: this.enableNetworkDevice,
     })) {
       if (!enabled)
-        this.traceRecorder?.record("direct_discovery", "disabled", undefined, {
-          os,
+        this.traceRecorder?.record("direct_discovery", "disabled", {
+          metadata: {
+            os,
+          },
         });
     }
     if (!this.enableWebSocket)

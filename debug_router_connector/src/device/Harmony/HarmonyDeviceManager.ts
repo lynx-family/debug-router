@@ -23,12 +23,10 @@ export default class HarmonyDeviceManager extends DeviceManager {
     hdcClient: Client,
     target: Target,
   ): Promise<HarmonyDevice | undefined> {
-    this.driver.traceRecorder?.record(
-      "direct_device",
-      "preparing",
-      target.connectKey,
-      { os: "Harmony" },
-    );
+    this.driver.traceRecorder?.record("direct_device", "preparing", {
+      deviceId: target.connectKey,
+      metadata: { os: "Harmony" },
+    });
     return new Promise(async (resolve, reject) => {
       try {
         const device: HarmonyDevice = new HarmonyDevice(
@@ -43,8 +41,10 @@ export default class HarmonyDeviceManager extends DeviceManager {
         this.driver.traceRecorder?.record(
           "direct_device",
           "failed",
-          target.connectKey,
-          { os: "Harmony", step: "prepare" },
+          {
+            deviceId: target.connectKey,
+            metadata: { os: "Harmony", step: "prepare" },
+          },
           e,
         );
         const msg =
@@ -80,8 +80,7 @@ export default class HarmonyDeviceManager extends DeviceManager {
         this.driver.traceRecorder?.record(
           "direct_discovery",
           "failed",
-          undefined,
-          { os: "Harmony", step: "initialize" },
+          { metadata: { os: "Harmony", step: "initialize" } },
           "Unable to initialize hdcClient",
         );
         defaultLogger.debug("getHdcInstance error");
@@ -164,8 +163,7 @@ export default class HarmonyDeviceManager extends DeviceManager {
           this.driver.traceRecorder?.record(
             "direct_discovery",
             "failed",
-            undefined,
-            { os: "Harmony", step: "watch" },
+            { metadata: { os: "Harmony", step: "watch" } },
             err,
           );
           this.currentWatchStatus = WatchStatus.StopWatching;
@@ -183,8 +181,7 @@ export default class HarmonyDeviceManager extends DeviceManager {
       this.driver.traceRecorder?.record(
         "direct_discovery",
         "failed",
-        undefined,
-        { os: "Harmony", step: "watch" },
+        { metadata: { os: "Harmony", step: "watch" } },
         e,
       );
       // TODO ineffectively branch

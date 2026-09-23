@@ -299,13 +299,6 @@ export default class ClientAdapter {
           this.onConnect();
         })
         .catch((err: Error) => {
-          this.driver.traceRecorder?.probeFailed(
-            this.listener,
-            this.device_id,
-            this.port,
-            err,
-            "tunnel",
-          );
           const msg =
             "ios connect error:" + this.port + " error:" + err?.message;
           defaultLogger.debug(msg);
@@ -346,12 +339,6 @@ export default class ClientAdapter {
         const host = this.device_host;
         this.tcpClient.connect({ host: host, port: this.port });
       } catch (err: any) {
-        this.driver.traceRecorder?.probeFailed(
-          this.listener,
-          this.device_id,
-          this.port,
-          err,
-        );
         const msg =
           platform + " connect error:" + this.port + " error:" + err?.message;
         defaultLogger.debug(msg);
@@ -374,7 +361,6 @@ export default class ClientAdapter {
         os: this.type,
       },
       this.device_id,
-      this.listener,
       connected,
     );
   }

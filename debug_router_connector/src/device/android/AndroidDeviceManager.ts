@@ -26,8 +26,11 @@ export class AndroidDeviceManager extends DeviceManager {
     adbClient: ADBClient,
     device: Device,
   ): Promise<AndroidDevice | undefined> {
-    this.driver.traceRecorder?.record("direct_device", "preparing", device.id, {
-      os: "Android",
+    this.driver.traceRecorder?.record("direct_device", "preparing", {
+      deviceId: device.id,
+      metadata: {
+        os: "Android",
+      },
     });
     return new Promise(async (resolve, reject) => {
       let step = "device_info";
@@ -49,8 +52,7 @@ export class AndroidDeviceManager extends DeviceManager {
         this.driver.traceRecorder?.record(
           "direct_device",
           "failed",
-          device.id,
-          { os: "Android", step },
+          { deviceId: device.id, metadata: { os: "Android", step } },
           e,
         );
         const msg = "create device error:" + e?.message;
@@ -92,8 +94,7 @@ export class AndroidDeviceManager extends DeviceManager {
         this.driver.traceRecorder?.record(
           "direct_discovery",
           "failed",
-          undefined,
-          { os: "Android", step: "initialize" },
+          { metadata: { os: "Android", step: "initialize" } },
           "Unable to initialize adbClient",
         );
         defaultLogger.debug("getAdbInstance error");
@@ -189,8 +190,7 @@ export class AndroidDeviceManager extends DeviceManager {
           this.driver.traceRecorder?.record(
             "direct_discovery",
             "failed",
-            undefined,
-            { os: "Android", step: "watch" },
+            { metadata: { os: "Android", step: "watch" } },
             err,
           );
           this.currentWatchStatus = WatchStatus.StopWatching;
@@ -208,8 +208,7 @@ export class AndroidDeviceManager extends DeviceManager {
       this.driver.traceRecorder?.record(
         "direct_discovery",
         "failed",
-        undefined,
-        { os: "Android", step: "watch" },
+        { metadata: { os: "Android", step: "watch" } },
         e,
       );
       // TODO ineffectively branch

@@ -56,6 +56,11 @@ conversion or duplicate output. Only file output is supported; see the interface
   Direct includes Android/Harmony forwarding, iOS USB tunnels, and TCP connections
   to configured Network/Desktop devices; it does not necessarily mean USB.
 - `metadata.role` is `app` or `debugger` for client records.
+- Empty metadata is written as `{}`; fields whose values are `undefined` are omitted.
+- App, model, and SDK details are recorded at `connection/register_received`.
+  Client connected/disconnected records retain only `deviceId`,
+  `connectionAttemptId`, and metadata containing `clientId`, `transport`, and
+  `role`. Use `connectionAttemptId` to find registration details.
 - `deviceId` identifies a connector-visible device. `clientId` is in metadata and
   is local to the connector instance. SDK app/model/version fields are labels,
   not unique identities.
@@ -69,9 +74,9 @@ conversion or duplicate output. Only file output is supported; see the interface
 | --- | --- | --- |
 | `direct_discovery` | `disabled`, `started`, `snapshot`, `changed`, `failed`, `stopped` | Whether discovery is enabled and working; observed devices and their raw status. |
 | `direct_device` | `preparing`, `registered`, `unregistered`, `failed` | Device preparation and membership in the connector device map. |
-| `direct_watch` | `started`, `stopped`, `probe_failed` | Whether application ports are being probed, and summarized unsuccessful probes. |
+| `direct_watch` | `started`, `stopped` | When port scanning starts/stops; `started` lists the local ports. |
 | `websocket_server` | `disabled`, `starting`, `listening`, `failed`, `closed` | Local WebSocket listener lifecycle and actual listening address. |
-| `connection` | `connected`, `register_received`, `failed`, `closed` | Transport established, valid protocol registration received, failure, or closure. |
+| `connection` | `connected`, `register_received`, `failed`, `closed` | WebSocket transport established, valid registration received, failure, or closure. |
 | `client` | `connected`, `disconnected` | Application/debugger client becomes available to consumers or is removed. |
 
 ### Device discovery and preparation
@@ -101,17 +106,19 @@ has not yet finished at that point.
 
 ### Probes, connections, and clients
 
-Unsuccessful pre-connection probes are accumulated per device controller and
-flushed at the next existing probe cycle or when watching stops. Each
-`direct_watch/probe_failed` includes `metadata.failures` with port, step, error,
-and available error code. A failure arriving after watch stop is emitted
-immediately rather than lost. No additional timer or retry is created.
+`direct_watch/started` records the local ports scanned by a controller once when
+watching begins. TCP connections to forwarded ports can succeed even when no
+application is listening on the device. Such probes, including ordinary errors
+and closes before registration, produce no connection records. A direct socket
+is recorded as successful only when a valid registration arrives:
+`connection/register_received`, followed by `client/connected` when available.
+Registered sockets still record one `connection/failed` or `connection/closed`
+on termination. Actual protocol decode failures remain visible as
+`connection/failed` with their step and error.
 
-Successful probes produce `connection/connected`. They become protocol-valid
-only after `connection/register_received`; client availability is separately
-recorded as `client/connected`. A transport error followed by close produces one
-termination record (`connection/failed`), not another `connection/closed`.
-Protocol-processing failures can be followed by a later transport close.
+WebSocket connections retain `connection/connected` at transport establishment,
+so a connection without registration remains visible. Neither transport's retry
+or registration behavior changes.
 
 Both WebSocket applications and debugger clients use these same connection and
 client events. Their roles are distinguished by metadata. The old internal
@@ -128,8 +135,8 @@ not proof that its socket had closed.
 | Android/Harmony `snapshot` with `devices: []` | The discovery service returned an empty list at this time. |
 | Device status `unauthorized` | A device was detected but is not authorized. |
 | `direct_device/failed`, `step: forward` | Some or all forwarding attempts failed; inspect successful ports too. |
-| `direct_watch/probe_failed` | The listed probes failed before establishing their transports. |
-| `connection/connected` without registration | A transport was established, but registration has not been observed. This alone does not establish an SDK fault. |
+| `direct_watch/started` without registration | The listed ports are being scanned; no application has registered yet. |
+| WebSocket `connection/connected` without registration | A WebSocket transport was established, but registration has not been observed. This alone does not establish an SDK fault. |
 | WebSocket `listening` without a connection | The local server is listening. It cannot tell whether the remote endpoint never tried or the network blocked it. |
 | `client/connected` | The registered client is visible to connector consumers. |
 

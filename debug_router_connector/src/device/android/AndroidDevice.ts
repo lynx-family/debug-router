@@ -62,8 +62,10 @@ export default class AndroidDevice extends BaseDevice {
       this.driver.traceRecorder?.record(
         "direct_device",
         "failed",
-        this.serial,
-        { os: this.info.os, step: "forward" },
+        {
+          deviceId: this.serial,
+          metadata: { os: this.info.os, step: "forward" },
+        },
         "Device not found",
       );
       getDriverReportService()?.report("android_device_forward_error", null, {
@@ -77,8 +79,10 @@ export default class AndroidDevice extends BaseDevice {
       this.driver.traceRecorder?.record(
         "direct_device",
         "failed",
-        this.serial,
-        { os: this.info.os, step: "remove_forward" },
+        {
+          deviceId: this.serial,
+          metadata: { os: this.info.os, step: "remove_forward" },
+        },
         e,
       );
       defaultLogger.debug(JSON.stringify(e));

@@ -37,8 +37,7 @@ export default class IOSDeviceManager extends DeviceManager {
         this.driver.traceRecorder?.record(
           "direct_device",
           "failed",
-          serial,
-          { os: "iOS", step: "prepare" },
+          { deviceId: serial, metadata: { os: "iOS", step: "prepare" } },
           e,
         );
         const msg = "createDevice: iOS: error" + serial + " " + e?.message;
@@ -66,8 +65,7 @@ export default class IOSDeviceManager extends DeviceManager {
       this.driver.traceRecorder?.record(
         "direct_discovery",
         "failed",
-        undefined,
-        { os: "iOS", step: "initialize" },
+        { metadata: { os: "iOS", step: "initialize" } },
         err,
       );
       const msg = "createUsbmuxListener error:" + err?.message;
@@ -134,8 +132,7 @@ export default class IOSDeviceManager extends DeviceManager {
       this.driver.traceRecorder?.record(
         "direct_discovery",
         "failed",
-        undefined,
-        { os: "iOS", step: "watch" },
+        { metadata: { os: "iOS", step: "watch" } },
         e,
       );
       // TODO ineffectively catch
@@ -154,8 +151,11 @@ export default class IOSDeviceManager extends DeviceManager {
     udid: string,
     statusSocket: DeviceWatchStatusSocket,
   ) {
-    this.driver.traceRecorder?.record("direct_device", "preparing", udid, {
-      os: "iOS",
+    this.driver.traceRecorder?.record("direct_device", "preparing", {
+      deviceId: udid,
+      metadata: {
+        os: "iOS",
+      },
     });
     getTunnel(this.LOCKDOWN_PORT, { udid: udid })
       .then((tunnel: any) => {
@@ -169,8 +169,7 @@ export default class IOSDeviceManager extends DeviceManager {
             this.driver.traceRecorder?.record(
               "direct_device",
               "failed",
-              udid,
-              { os: "iOS", step: "device_info" },
+              { deviceId: udid, metadata: { os: "iOS", step: "device_info" } },
               "Missing DeviceName",
             );
             getDriverReportService()?.report("ios_connect_error", null, {
@@ -200,8 +199,7 @@ export default class IOSDeviceManager extends DeviceManager {
           this.driver.traceRecorder?.record(
             "direct_device",
             "failed",
-            udid,
-            { os: "iOS", step: "device_info" },
+            { deviceId: udid, metadata: { os: "iOS", step: "device_info" } },
             err,
           );
           const msg =
@@ -234,8 +232,7 @@ export default class IOSDeviceManager extends DeviceManager {
         this.driver.traceRecorder?.record(
           "direct_device",
           "failed",
-          udid,
-          { os: "iOS", step: "device_info" },
+          { deviceId: udid, metadata: { os: "iOS", step: "device_info" } },
           err,
         );
         const msg =

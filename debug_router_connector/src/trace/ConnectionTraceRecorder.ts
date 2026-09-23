@@ -99,10 +99,8 @@ export class ConnectionTraceRecorder {
   record<E extends keyof TraceReasons>(
     event: E,
     reason: TraceReasons[E],
-    deviceId?: string,
-    metadata?: Record<string, any>,
+    { deviceId, connectionAttemptId, metadata }: Partial<TraceContext> = {},
     error?: any,
-    connectionAttemptId?: string,
   ): void {
     if (this.closed) return;
     const node: ConnectionTraceNode = {
@@ -113,10 +111,10 @@ export class ConnectionTraceRecorder {
       timestamp: new Date().toISOString(),
       traceSchemaVersion: TRACE_SCHEMA_VERSION,
       connectionAttemptId,
-      metadata: this.compactMetadata({
+      metadata: {
         ...metadata,
         ...this.errorDetails(error),
-      }),
+      },
     };
     try {
       if (!this.stream.destroyed)
@@ -127,9 +125,12 @@ export class ConnectionTraceRecorder {
   }
 
   device(reason: TraceReasons["direct_device"], info: DeviceDescription): void {
-    this.record("direct_device", reason, info.serial, {
-      os: info.os,
-      title: info.title,
+    this.record("direct_device", reason, {
+      deviceId: info.serial,
+      metadata: {
+        os: info.os,
+        title: info.title,
+      },
     });
   }
 
@@ -138,11 +139,9 @@ export class ConnectionTraceRecorder {
     ports: number[],
     failures: { remotePort: number; error: unknown }[] = [],
   ): void {
-    this.record(
-      "direct_device",
-      failures.length ? "failed" : "preparing",
-      info.serial,
-      {
+    this.record("direct_device", failures.length ? "failed" : "preparing", {
+      deviceId: info.serial,
+      metadata: {
         os: info.os,
         step: "forward",
         ports: [...ports],
@@ -151,7 +150,7 @@ export class ConnectionTraceRecorder {
           ...this.errorDetails(error),
         })),
       },
-    );
+    });
   }
 
   // Observe the existing discovery stream; never issue a second discovery request.
@@ -160,27 +159,24 @@ export class ConnectionTraceRecorder {
     let first = true;
     let previous = "";
     if (os !== "iOS")
-      this.record("direct_discovery", "started", undefined, { os });
+      this.record("direct_discovery", "started", { metadata: { os } });
     const listeners: Record<string, (...args: any[]) => void> = {
       error: (error) =>
         this.record(
           "direct_discovery",
           "failed",
-          undefined,
-          { os, step: "watch" },
+          { metadata: { os, step: "watch" } },
           error,
         ),
-      end: () => this.record("direct_discovery", "stopped", undefined, { os }),
+      end: () =>
+        this.record("direct_discovery", "stopped", { metadata: { os } }),
     };
     if (os === "Android") {
       listeners.changeSet = ({ added, changed, removed }) => {
         const describe = (d: any) => ({ deviceId: d.id, status: d.type });
         if (first || added.length || changed.length || removed.length) {
-          this.record(
-            "direct_discovery",
-            first ? "snapshot" : "changed",
-            undefined,
-            first
+          this.record("direct_discovery", first ? "snapshot" : "changed", {
+            metadata: first
               ? { os, devices: added.map(describe) }
               : {
                   os,
@@ -188,7 +184,7 @@ export class ConnectionTraceRecorder {
                   changed: changed.map(describe),
                   removed: removed.map(describe),
                 },
-          );
+          });
         }
         first = false;
       };
@@ -198,8 +194,7 @@ export class ConnectionTraceRecorder {
         this.record(
           "direct_discovery",
           "failed",
-          undefined,
-          { os, step: "list_targets" },
+          { metadata: { os, step: "list_targets" } },
           error,
         );
       };
@@ -210,27 +205,30 @@ export class ConnectionTraceRecorder {
         }));
         const current = JSON.stringify(devices);
         if (first || current !== previous)
-          this.record(
-            "direct_discovery",
-            first ? "snapshot" : "changed",
-            undefined,
-            { os, devices },
-          );
+          this.record("direct_discovery", first ? "snapshot" : "changed", {
+            metadata: { os, devices },
+          });
         first = false;
         previous = current;
       };
     } else {
       listeners.listening = () =>
-        this.record("direct_discovery", "started", undefined, { os });
+        this.record("direct_discovery", "started", { metadata: { os } });
       listeners.attached = (deviceId) =>
-        this.record("direct_discovery", "changed", deviceId, {
-          os,
-          status: "attached",
+        this.record("direct_discovery", "changed", {
+          deviceId: deviceId,
+          metadata: {
+            os,
+            status: "attached",
+          },
         });
       listeners.detached = (deviceId) =>
-        this.record("direct_discovery", "changed", deviceId, {
-          os,
-          status: "detached",
+        this.record("direct_discovery", "changed", {
+          deviceId: deviceId,
+          metadata: {
+            os,
+            status: "detached",
+          },
         });
       listeners.usbmux_error = listeners.error;
       delete listeners.error; // usbmux translates native errors into usbmux_error.
@@ -243,15 +241,21 @@ export class ConnectionTraceRecorder {
   startWatch(owner: object, info: DeviceDescription): void {
     if (this.closed || this.watches.has(owner)) return;
     this.watches.set(owner, { info, failures: [] });
-    this.record("direct_watch", "started", info.serial, { os: info.os });
+    this.record("direct_watch", "started", {
+      deviceId: info.serial,
+      metadata: { os: info.os },
+    });
   }
 
   flushProbes(owner: object): void {
     const watch = this.watches.get(owner);
     if (!watch?.failures.length) return;
-    this.record("direct_watch", "probe_failed", watch.info.serial, {
-      os: watch.info.os,
-      failures: watch.failures,
+    this.record("direct_watch", "probe_failed", {
+      deviceId: watch.info.serial,
+      metadata: {
+        os: watch.info.os,
+        failures: watch.failures,
+      },
     });
     watch.failures = [];
   }
@@ -260,8 +264,11 @@ export class ConnectionTraceRecorder {
     const watch = this.watches.get(owner);
     if (!watch) return;
     this.flushProbes(owner);
-    this.record("direct_watch", "stopped", watch.info.serial, {
-      os: watch.info.os,
+    this.record("direct_watch", "stopped", {
+      deviceId: watch.info.serial,
+      metadata: {
+        os: watch.info.os,
+      },
     });
     this.watches.delete(owner);
   }
@@ -278,8 +285,11 @@ export class ConnectionTraceRecorder {
     const watch = owner && this.watches.get(owner);
     if (watch) watch.failures.push(failure);
     else
-      this.record("direct_watch", "probe_failed", deviceId, {
-        failures: [failure],
+      this.record("direct_watch", "probe_failed", {
+        deviceId: deviceId,
+        metadata: {
+          failures: [failure],
+        },
       });
   }
 
@@ -344,10 +354,12 @@ export class ConnectionTraceRecorder {
     this.record(
       "connection",
       reason,
-      attempt.deviceId,
-      { ...attempt.metadata, ...metadata, step },
+      {
+        deviceId: attempt.deviceId,
+        connectionAttemptId: attempt.connectionAttemptId,
+        metadata: { ...attempt.metadata, ...metadata, step },
+      },
       error,
-      attempt.connectionAttemptId,
     );
   }
 
@@ -380,12 +392,9 @@ export class ConnectionTraceRecorder {
         deviceId: direct ? client.deviceId() : undefined,
         connectionAttemptId: attempt?.connectionAttemptId,
         metadata: {
-          ...attempt?.metadata,
-          ...this.clientMetadata(info),
           transport: direct ? "direct" : "websocket",
           role: event === "websocket-web-client-connected" ? "debugger" : "app",
           clientId: client.clientId(),
-          ...(direct ? { port: client.info.port } : {}),
         },
       };
       this.clients.set(client.clientId(), entry);
@@ -399,14 +408,7 @@ export class ConnectionTraceRecorder {
       this.clients.delete(payload);
       reason = "disconnected";
     } else return;
-    this.record(
-      "client",
-      reason,
-      entry.deviceId,
-      entry.metadata,
-      undefined,
-      entry.connectionAttemptId,
-    );
+    this.record("client", reason, entry);
   }
 
   private clientMetadata(
@@ -455,21 +457,6 @@ export class ConnectionTraceRecorder {
       if (listeners.queryError) emitter.once("error", cleanup);
     }
     this.cleanups.add(cleanup);
-  }
-
-  private compactMetadata(
-    metadata?: Record<string, any>,
-  ): Record<string, any> | undefined {
-    if (!metadata) {
-      return undefined;
-    }
-    const compacted: Record<string, any> = {};
-    for (const [key, value] of Object.entries(metadata)) {
-      if (value !== undefined) {
-        compacted[key] = value;
-      }
-    }
-    return Object.keys(compacted).length > 0 ? compacted : undefined;
   }
 }
 

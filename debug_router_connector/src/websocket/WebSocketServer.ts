@@ -37,12 +37,9 @@ export class WebSocketController {
     this.host = option.host;
     this.wssPath = `ws://${this.host}/mdevices/page/android`;
     this.roomId = option.roomId ?? "";
-    this.driver.traceRecorder?.record(
-      "websocket_server",
-      "starting",
-      undefined,
-      { host: this.host, port: this.port },
-    );
+    this.driver.traceRecorder?.record("websocket_server", "starting", {
+      metadata: { host: this.host, port: this.port },
+    });
     const wsService = new WebSocketServer({
       port: this.port,
       path: "/mdevices/page/android",
@@ -56,18 +53,14 @@ export class WebSocketController {
       this.driver.traceRecorder?.record(
         "websocket_server",
         "failed",
-        undefined,
-        { port: this.port, step: "listen" },
+        { metadata: { port: this.port, step: "listen" } },
         error,
       ),
     );
     wsService.on("listening", () => {
-      this.driver.traceRecorder?.record(
-        "websocket_server",
-        "listening",
-        undefined,
-        { address: wsService.address() },
-      );
+      this.driver.traceRecorder?.record("websocket_server", "listening", {
+        metadata: { address: wsService.address() },
+      });
       getDriverReportService()?.report("websocket_server_init_result", null, {
         result: "success",
         port: this.port,
@@ -78,12 +71,9 @@ export class WebSocketController {
     });
     wsService.on("connection", this.handleConnection.bind(this));
     wsService.on("close", () => {
-      this.driver.traceRecorder?.record(
-        "websocket_server",
-        "closed",
-        undefined,
-        { port: this.port },
-      );
+      this.driver.traceRecorder?.record("websocket_server", "closed", {
+        metadata: { port: this.port },
+      });
       this.close();
     });
     this.server = wsService;
@@ -119,7 +109,6 @@ export class WebSocketController {
       socket,
       { transport: "websocket", port: this.port },
       undefined,
-      null,
       true,
     );
     const info = await this.onConnection(socket);

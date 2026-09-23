@@ -105,7 +105,6 @@ export class ClientController implements ClientEventsListener {
   }
 
   private watchClient() {
-    this.driver.traceRecorder?.flushProbes(this);
     for (const port of this.ports.keys()) {
       if (!this.ports.get(port)) {
         const connectAdapter = this.sockets.get(port);
@@ -123,7 +122,9 @@ export class ClientController implements ClientEventsListener {
   }
 
   startWatchClient(): void {
-    this.driver.traceRecorder?.startWatch(this, this.device.info);
+    this.driver.traceRecorder?.startWatch(this, this.device.info, [
+      ...this.ports.keys(),
+    ]);
     this.watchClient();
     if (process.env.DriverAutoFindClientsEnv === "false") {
       defaultLogger.warn("AutoFinding new client is closed for debug");
