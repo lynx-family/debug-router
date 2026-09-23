@@ -5,6 +5,14 @@
 export const DEFAULT_PENDING_ROUTE_TIMEOUT_MS = 5000;
 
 export type PendingRouteInput = {
+  /**
+   * Information needed to route a runtime response:
+   * - kind: Request source, either a control connection or a WebSocket frontend.
+   * - requesterId: Control connection ID or frontend WebSocket client ID, depending on kind.
+   * - originalId: Original inner message ID to restore in the response, not the control RPC ID.
+   * - clientId: Target runtime client ID (USB or WebSocket App), also used to validate responses.
+   * - resolve/reject: Optional daemon-side Promise callbacks for control requests awaiting a reply.
+   */
   kind: "control" | "websocket";
   requesterId: number;
   originalId: number;
@@ -14,6 +22,12 @@ export type PendingRouteInput = {
 };
 
 export type PendingRoute = PendingRouteInput & {
+  /**
+   * Extends PendingRouteInput with state assigned when registering the route:
+   * - globalMessageId: Replaces originalId when forwarding to avoid collisions between requesters.
+   * - createdAt: Route creation timestamp in milliseconds.
+   * - timer: Removes the route on timeout and rejects control requests.
+   */
   globalMessageId: number;
   createdAt: number;
   timer: NodeJS.Timeout;
