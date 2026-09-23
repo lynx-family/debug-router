@@ -4,34 +4,39 @@
 
 import { WebSocket, WebSocketServer } from "ws";
 import { WebSocketClientInfo, WebSocketClient } from "./WebSocketConnection";
-import { DebugRouterConnector } from "../connector";
 import { UsbClient } from "../usb/Client";
 import { BaseDevice } from "../device/BaseDevice";
 import { getDriverReportService } from "../report/interface/DriverReportService";
+import { defaultLogger } from "../utils/logger";
 import { DebugerRouterDriverEvents } from "../utils/type";
+import type { DebugRouterConnector } from "../connector/DebugRouterConnector";
+import type { MultiplexerDaemonHost } from "../multiplexer/daemon/MultiplexerDaemonHost";
 
 export class WebSocketController {
-  private driver: DebugRouterConnector;
+  // TODO: Use only MultiplexerDaemonHost after migrating the DebugRouterConnector entry point.
+  private controllerHost: DebugRouterConnector | MultiplexerDaemonHost;
   private port: number;
   private host: string;
   private roomId: string;
   private wssPath: string;
   private server: WebSocketServer;
+  private closePromise: Promise<void> | null = null;
   // websocketAppClients
   private websocketAppClients: Map<number, WebSocketClient> = new Map();
   // web clients
   private webClients: Map<number, WebSocketClient> = new Map();
 
   constructor(
-    driver: DebugRouterConnector,
+    // TODO: Accept only MultiplexerDaemonHost after migrating the DebugRouterConnector entry point.
+    host: DebugRouterConnector | MultiplexerDaemonHost,
     option: {
       port: number;
       host: string;
       roomId?: string;
-      callback?: () => void;
+      callback?: (error?: Error) => void;
     },
   ) {
-    this.driver = driver;
+    this.controllerHost = host;
     this.port = option.port;
     this.host = option.host;
     this.wssPath = `ws://${this.host}/mdevices/page/android`;
@@ -45,21 +50,70 @@ export class WebSocketController {
       return request.url?.startsWith("/mdevices/page/android") ?? false;
     };
 
-    wsService.on("listening", () => {
+    let startupSettled = false;
+    const onListening = () => {
+      if (startupSettled) {
+        return;
+      }
+      startupSettled = true;
+      wsService.off("listening", onListening);
       getDriverReportService()?.report("websocket_server_init_result", null, {
         result: "success",
         port: this.port,
       });
-      if (option.callback) {
-        option.callback();
+      option.callback?.();
+    };
+    const onError = (error: Error) => {
+      if (startupSettled) {
+        defaultLogger.warn(
+          `WebSocket server error after startup on port ${this.port}: ${error.message}`,
+        );
+        return;
       }
-    });
+      startupSettled = true;
+      wsService.off("listening", onListening);
+      option.callback?.(error);
+    };
+
+    wsService.on("listening", onListening);
+    wsService.on("error", onError);
     wsService.on("connection", this.handleConnection.bind(this));
-    wsService.on("close", this.close.bind(this));
+    wsService.on("close", this.handleServerClose.bind(this));
     this.server = wsService;
   }
 
-  close() {
+  close(): Promise<void> {
+    if (this.closePromise) {
+      return this.closePromise;
+    }
+
+    this.closePromise = Promise.resolve().then(() => {
+      this.closeClients();
+
+      return new Promise<void>((resolve, reject) => {
+        this.server.close((error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+      });
+    });
+
+    return this.closePromise;
+  }
+
+  private handleServerClose(): void {
+    if (this.closePromise) {
+      return;
+    }
+    this.closePromise = Promise.resolve().then(() => {
+      this.closeClients();
+    });
+  }
+
+  private closeClients(): void {
     this.websocketAppClients.forEach((client) => {
       client.close();
     });
@@ -72,13 +126,13 @@ export class WebSocketController {
     const client = this.websocketAppClients.get(id);
     if (client) {
       this.websocketAppClients.delete(id);
-      this.driver.emit("websocket-app-client-disconnected", id);
-      this.driver.emit("app-client-disconnected", id);
+      this.controllerHost.emit("websocket-app-client-disconnected", id);
+      this.controllerHost.emit("app-client-disconnected", id);
     }
     const webClient = this.webClients.get(id);
     if (webClient) {
       this.webClients.delete(id);
-      this.driver.emit("websocket-web-client-disconnected", id);
+      this.controllerHost.emit("websocket-web-client-disconnected", id);
     }
 
     this.sendClientList();
@@ -103,18 +157,18 @@ export class WebSocketController {
 
     if (info.type === "Driver") {
       this.webClients.set(info.id, client);
-      this.driver.emit("websocket-web-client-connected", client);
+      this.controllerHost.emit("websocket-web-client-connected", client);
     } else {
       this.websocketAppClients.set(info.id, client);
-      this.driver.emit("websocket-app-client-connected", client);
-      this.driver.emit("app-client-connected", client);
+      this.controllerHost.emit("websocket-app-client-connected", client);
+      this.controllerHost.emit("app-client-connected", client);
     }
     this.sendClientList();
   }
 
   onConnection(socket: WebSocket): Promise<WebSocketClientInfo | undefined> {
     return new Promise((resolve) => {
-      const client_id = this.driver.createClientId();
+      const client_id = this.controllerHost.createClientId();
       const initMessage = {
         event: "Initialize",
         data: client_id,
@@ -155,15 +209,46 @@ export class WebSocketController {
     });
   }
 
-  sendMessageToApp(id: number, message: string) {
+  sendMessageToWebClient(id: number, message: string) {
+    this.webClients.get(id)?.sendMessage(message);
+  }
+
+  sendMessageToApp(id: number, message: string, fromWebClientId?: number) {
+    // TODO: Remove the legacy path after migrating the DebugRouterConnector entry point.
+    if (
+      fromWebClientId !== undefined &&
+      "handleWebSocketDriverMessage" in this.controllerHost
+    ) {
+      this.controllerHost.handleWebSocketDriverMessage(
+        fromWebClientId,
+        id,
+        message,
+      );
+      return;
+    }
+
+    // Legacy path.
     const client = this.websocketAppClients.get(id);
     if (client) {
       // send to ws client app
       client.sendMessage(message);
-    } else {
+    } else if ("handleWsMessage" in this.controllerHost) {
       // send to usb client app
-      this.driver.handleWsMessage(id, message);
+      this.controllerHost.handleWsMessage?.(id, message);
     }
+  }
+
+  handleWebSocketAppMessage(id: number, message: string) {
+    // TODO: Remove the legacy path after migrating the DebugRouterConnector entry point.
+    if ("handleWebSocketAppMessage" in this.controllerHost) {
+      this.controllerHost.handleWebSocketAppMessage(id, message);
+      return;
+    }
+
+    // Legacy path.
+    // Legacy connectors still consume runtime messages through this event.
+    this.emitEvent("ws-client-message", id, message);
+    this.sendMessageToWeb(message);
   }
 
   sendClientList() {
@@ -172,18 +257,12 @@ export class WebSocketController {
     });
   }
 
-  sendDeviceList() {
-    this.webClients.forEach((client) => {
-      client.handleListClients();
-    });
-  }
-
   getAllUsbClients(): UsbClient[] {
-    return this.driver.getAllUsbClients();
+    return this.controllerHost.getAllUsbClients();
   }
 
   getAllDevices(): Promise<BaseDevice[]> {
-    return this.driver.getDevices();
+    return this.controllerHost.getDevices();
   }
 
   // return all websocket app clients
@@ -200,6 +279,6 @@ export class WebSocketController {
     id: number,
     message: string,
   ) {
-    this.driver.emit(event, { id, message });
+    this.controllerHost.emit(event, { id, message });
   }
 }

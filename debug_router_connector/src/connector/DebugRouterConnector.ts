@@ -512,12 +512,21 @@ export class DebugRouterConnector {
       this.multiOpenMonitorTimer = undefined;
     }
     this.disableAllClients();
+    let closeError: unknown;
     if (this.wss) {
-      this.wss.close();
+      const wss = this.wss;
       this.wss = null;
+      try {
+        await wss.close();
+      } catch (error) {
+        closeError = error;
+      }
     }
     await new Promise((resolve) => setImmediate(resolve));
     await this.traceRecorder?.close();
+    if (closeError) {
+      throw closeError;
+    }
   }
 
   emit<Event extends keyof DebugerRouterDriverEvents>(
@@ -893,12 +902,19 @@ export class DebugRouterConnector {
       port: "wssPort:" + wssHost,
     });
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       this.wss = new WebSocketController(this, {
         port: this.wssPort,
         host: wssHost,
         roomId: this.roomId,
-        callback: resolve,
+        callback: (error) => {
+          if (error) {
+            this.wss = null;
+            reject(error);
+          } else {
+            resolve();
+          }
+        },
       });
     });
   }
