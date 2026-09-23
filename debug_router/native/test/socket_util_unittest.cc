@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "debug_router/native/base/socket_guard.h"
 #include "debug_router/native/core/debug_router_core.h"
@@ -25,6 +26,22 @@
 #endif
 
 namespace {
+
+void SetInterruptedSocketError() {
+#if defined(_WIN32)
+  WSASetLastError(WSAEINTR);
+#else
+  errno = EINTR;
+#endif
+}
+
+void SetFatalSocketError() {
+#if defined(_WIN32)
+  WSASetLastError(WSAECONNRESET);
+#else
+  errno = EIO;
+#endif
+}
 
 #ifndef _WIN32
 std::set<int32_t> ScanOccupiedDebugRouterPorts() {
@@ -198,6 +215,75 @@ TEST(SocketUtilTestSuite, TestCheckHeader) {
 
   EXPECT_EQ(true, debugrouter::util::CheckHeaderThreeBytes(header));
   EXPECT_EQ(true, debugrouter::util::CheckHeaderFourthByte(header, 27));
+}
+
+TEST(SocketUtilTestSuite, SendAllWithCompletesPositivePartialWrites) {
+  const std::string message = "complete this frame";
+  std::string sent;
+  std::vector<size_t> remaining_lengths;
+  size_t call_count = 0;
+
+  const bool result = debugrouter::base::internal::SendAllWith(
+      message.data(), message.size(),
+      [&](const void* buffer, size_t length) -> SocketSendResult {
+        EXPECT_EQ(static_cast<const char*>(buffer),
+                  message.data() + sent.size());
+        remaining_lengths.push_back(length);
+        const size_t written = call_count++ == 0 ? 3
+                               : call_count == 2 ? 5
+                                                 : length;
+        sent.append(static_cast<const char*>(buffer), written);
+        return static_cast<SocketSendResult>(written);
+      });
+
+  EXPECT_TRUE(result);
+  EXPECT_EQ(sent, message);
+  EXPECT_EQ(remaining_lengths,
+            std::vector<size_t>(
+                {message.size(), message.size() - 3, message.size() - 8}));
+}
+
+TEST(SocketUtilTestSuite, SendAllWithRetriesInterruptedWrite) {
+  const std::string message = "message";
+  size_t call_count = 0;
+
+  const bool result = debugrouter::base::internal::SendAllWith(
+      message.data(), message.size(),
+      [&](const void*, size_t length) -> SocketSendResult {
+        if (call_count++ == 0) {
+          SetInterruptedSocketError();
+          return -1;
+        }
+        return static_cast<SocketSendResult>(length);
+      });
+
+  EXPECT_TRUE(result);
+  EXPECT_EQ(call_count, 2u);
+}
+
+TEST(SocketUtilTestSuite, SendAllWithStopsOnZeroWrite) {
+  size_t call_count = 0;
+  const bool result = debugrouter::base::internal::SendAllWith(
+      "message", 7, [&](const void*, size_t) -> SocketSendResult {
+        ++call_count;
+        return 0;
+      });
+
+  EXPECT_FALSE(result);
+  EXPECT_EQ(call_count, 1u);
+}
+
+TEST(SocketUtilTestSuite, SendAllWithStopsOnFatalWriteError) {
+  size_t call_count = 0;
+  const bool result = debugrouter::base::internal::SendAllWith(
+      "message", 7, [&](const void*, size_t) -> SocketSendResult {
+        ++call_count;
+        SetFatalSocketError();
+        return -1;
+      });
+
+  EXPECT_FALSE(result);
+  EXPECT_EQ(call_count, 1u);
 }
 
 #ifndef _WIN32
