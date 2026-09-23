@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 export * from "./connector";
+export * from "./multiplexer";
 // enum
 export { SocketEvent } from "./utils/type";
 export { MultiOpenStatus } from "./connector/MultiOpenCallBack";
