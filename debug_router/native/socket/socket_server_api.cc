@@ -87,7 +87,7 @@ void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
     }
     if (should_notify) {
       if (auto listener = listener_.lock()) {
-        listener->OnStatusChanged(kConnected, code, reason);
+        listener->OnStatusChanged(client, kConnected, code, reason);
       }
     }
   });
@@ -106,7 +106,7 @@ void SocketServer::HandleOnMessageStatus(std::shared_ptr<UsbClient> client,
       return;
     }
     if (auto listener = listener_.lock()) {
-      listener->OnMessage(message);
+      listener->OnMessage(client, message);
     }
   });
 }
@@ -159,7 +159,7 @@ void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
       ScheduleClientStop(client_to_stop);
     }
     if (auto listener = listener_.lock()) {
-      listener->OnStatusChanged(status, code, reason);
+      listener->OnStatusChanged(client, status, code, reason);
     }
   });
 }
@@ -212,7 +212,7 @@ void SocketServer::HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
       ScheduleClientStop(client_to_stop);
     }
     if (auto listener = listener_.lock()) {
-      listener->OnStatusChanged(status, code, reason);
+      listener->OnStatusChanged(client, status, code, reason);
     }
   });
 }

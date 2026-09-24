@@ -100,8 +100,10 @@ class RecordingSocketServerListener final
  public:
   void OnInit(int32_t code, const std::string& info) override {}
 
-  void OnStatusChanged(ConnectionStatus status, int32_t code,
+  void OnStatusChanged(const std::shared_ptr<UsbClient>& client,
+                       ConnectionStatus status, int32_t code,
                        const std::string& info) override {
+    last_status_client.store(client.get(), std::memory_order_relaxed);
     if (status == kConnected) {
       connected_count.fetch_add(1, std::memory_order_relaxed);
     } else if (status == kDisconnected) {
@@ -112,7 +114,10 @@ class RecordingSocketServerListener final
     cv.notify_all();
   }
 
-  void OnMessage(const std::string& message) override {}
+  void OnMessage(const std::shared_ptr<UsbClient>& client,
+                 const std::string&) override {
+    last_message_client.store(client.get(), std::memory_order_relaxed);
+  }
 
   bool WaitForCount(const std::atomic<int>& counter, int expected_count,
                     int timeout_ms) {
@@ -127,6 +132,8 @@ class RecordingSocketServerListener final
   std::atomic<int> connected_count{0};
   std::atomic<int> disconnected_count{0};
   std::atomic<int> error_count{0};
+  std::atomic<UsbClient*> last_status_client{nullptr};
+  std::atomic<UsbClient*> last_message_client{nullptr};
 };
 
 class TestSocketServer final : public SocketServer {
@@ -181,14 +188,16 @@ class IntegrationConnectionListener final
     cv_.notify_all();
   }
 
-  void OnStatusChanged(ConnectionStatus status, int32_t code,
+  void OnStatusChanged(const std::shared_ptr<UsbClient>&,
+                       ConnectionStatus status, int32_t code,
                        const std::string& info) override {
     std::lock_guard<std::mutex> lock(mutex_);
     status_history_.push_back(status);
     cv_.notify_all();
   }
 
-  void OnMessage(const std::string& message) override {
+  void OnMessage(const std::shared_ptr<UsbClient>&,
+                 const std::string& message) override {
     std::lock_guard<std::mutex> lock(mutex_);
     messages_.push_back(message);
     cv_.notify_all();
@@ -297,7 +306,14 @@ TEST_F(UsbReconnectRaceTestSuite,
   server->HandleOnOpenStatus(new_client, 0, "Init Success!");
   ASSERT_TRUE(listener->WaitForCount(listener->connected_count, 1, 1000));
   EXPECT_EQ(listener->connected_count.load(std::memory_order_relaxed), 1);
+  EXPECT_EQ(listener->last_status_client.load(std::memory_order_relaxed),
+            new_client.get());
   EXPECT_EQ(server->CurrentClient(), new_client);
+
+  server->HandleOnMessageStatus(new_client, "hello");
+  ASSERT_TRUE(WaitForExecutorTask(1000));
+  EXPECT_EQ(listener->last_message_client.load(std::memory_order_relaxed),
+            new_client.get());
 }
 
 TEST_F(UsbReconnectRaceTestSuite,
@@ -319,6 +335,8 @@ TEST_F(UsbReconnectRaceTestSuite,
   ASSERT_TRUE(server->WaitUntil(
       [&]() { return server->CurrentClient() == nullptr; }, 1000));
   ASSERT_TRUE(listener->WaitForCount(listener->disconnected_count, 1, 1000));
+  EXPECT_EQ(listener->last_status_client.load(std::memory_order_relaxed),
+            old_client.get());
   EXPECT_EQ(listener->error_count.load(std::memory_order_relaxed), 0);
 
   server->HandleOnCloseStatus(new_client, ConnectionStatus::kDisconnected, 0,
@@ -348,6 +366,8 @@ TEST_F(UsbReconnectRaceTestSuite,
   ASSERT_TRUE(server->WaitUntil(
       [&]() { return server->CurrentClient() == nullptr; }, 1000));
   ASSERT_TRUE(listener->WaitForCount(listener->error_count, 1, 1000));
+  EXPECT_EQ(listener->last_status_client.load(std::memory_order_relaxed),
+            old_client.get());
   EXPECT_EQ(listener->disconnected_count.load(std::memory_order_relaxed), 0);
 
   server->HandleOnErrorStatus(new_client, ConnectionStatus::kError, 32,

@@ -28,7 +28,8 @@ class ConnectionListener
     }
   }
 
-  void OnStatusChanged(debugrouter::socket_server::ConnectionStatus status,
+  void OnStatusChanged(const std::shared_ptr<socket_server::UsbClient> &,
+                       debugrouter::socket_server::ConnectionStatus status,
                        int32_t code, const std::string &info) {
     if (auto client = client_.lock()) {
       core::MessageTransceiverDelegate *delegate = client->delegate();
@@ -50,7 +51,8 @@ class ConnectionListener
     }
   }
 
-  void OnMessage(const std::string &message) {
+  void OnMessage(const std::shared_ptr<socket_server::UsbClient> &,
+                 const std::string &message) {
     if (auto client = client_.lock()) {
       core::MessageTransceiverDelegate *delegate = client->delegate();
       if (delegate == nullptr) {

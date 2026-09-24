@@ -15,9 +15,11 @@ namespace {
 class NoopSocketServerListener final : public SocketServerConnectionListener {
  public:
   void OnInit(int32_t, const std::string&) override {}
-  void OnStatusChanged(ConnectionStatus, int32_t, const std::string&) override {
+  void OnStatusChanged(const std::shared_ptr<UsbClient>&, ConnectionStatus,
+                       int32_t, const std::string&) override {
   }
-  void OnMessage(const std::string&) override {}
+  void OnMessage(const std::shared_ptr<UsbClient>&,
+                 const std::string&) override {}
 };
 
 TEST(SocketServerSmokeTestSuite,

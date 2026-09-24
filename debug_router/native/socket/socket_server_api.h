@@ -23,9 +23,11 @@ namespace socket_server {
 class SocketServerConnectionListener {
  public:
   virtual void OnInit(int32_t code, const std::string &info) = 0;
-  virtual void OnStatusChanged(ConnectionStatus status, int32_t code,
+  virtual void OnStatusChanged(const std::shared_ptr<UsbClient> &client,
+                               ConnectionStatus status, int32_t code,
                                const std::string &info) = 0;
-  virtual void OnMessage(const std::string &message) = 0;
+  virtual void OnMessage(const std::shared_ptr<UsbClient> &client,
+                         const std::string &message) = 0;
 };
 
 class SocketServer : public std::enable_shared_from_this<SocketServer> {
