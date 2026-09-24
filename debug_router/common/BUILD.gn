@@ -61,8 +61,8 @@ source_set("debug_router_source") {
     "../native/core/util.h",
     "../native/log/logging.cc",
     "../native/log/logging.h",
-    "../native/net/socket_server_client.cc",
-    "../native/net/socket_server_client.h",
+    "../native/net/tcp_server_transport.cc",
+    "../native/net/tcp_server_transport.h",
     "../native/net/websocket_client.cc",
     "../native/net/websocket_client.h",
     "../native/net/websocket_task.cc",
@@ -81,13 +81,13 @@ source_set("debug_router_source") {
     "../native/socket/blocking_queue.h",
     "../native/socket/count_down_latch.cc",
     "../native/socket/count_down_latch.h",
-    "../native/socket/socket_server_api.cc",
-    "../native/socket/socket_server_api.h",
+    "../native/socket/tcp_server.cc",
+    "../native/socket/tcp_server.h",
     "../native/socket/socket_server_type.cc",
     "../native/socket/socket_server_type.h",
-    "../native/socket/usb_client.cc",
-    "../native/socket/usb_client.h",
-    "../native/socket/usb_client_listener.h",
+    "../native/socket/tcp_connection.cc",
+    "../native/socket/tcp_connection.h",
+    "../native/socket/tcp_connection_listener.h",
     "../native/socket/work_thread_executor.cc",
     "../native/socket/work_thread_executor.h",
     "../native/thread/debug_router_executor.cc",
@@ -105,13 +105,13 @@ source_set("debug_router_source") {
   ]
   if (is_win) {
     sources += [
-      "../native/socket/win/socket_server_win.cc",
-      "../native/socket/win/socket_server_win.h",
+      "../native/socket/win/tcp_server_win.cc",
+      "../native/socket/win/tcp_server_win.h",
     ]
   } else {
     sources += [
-      "../native/socket/posix/socket_server_posix.cc",
-      "../native/socket/posix/socket_server_posix.h",
+      "../native/socket/posix/tcp_server_posix.cc",
+      "../native/socket/posix/tcp_server_posix.h",
     ]
   }
 }

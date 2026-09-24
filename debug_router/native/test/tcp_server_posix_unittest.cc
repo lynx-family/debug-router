@@ -4,7 +4,7 @@
 
 #ifndef _WIN32
 
-#include "debug_router/native/socket/posix/socket_server_posix.h"
+#include "debug_router/native/socket/posix/tcp_server_posix.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -21,32 +21,32 @@
 
 #include "debug_router/native/base/socket_guard.h"
 #include "debug_router/native/socket/count_down_latch.h"
-#include "debug_router/native/socket/usb_client.h"
+#include "debug_router/native/socket/tcp_connection.h"
 #include "gtest/gtest.h"
 
 namespace debugrouter {
 namespace socket_server {
 
-class SocketServerPosixTestPeer {
+class TcpServerPosixTestPeer {
  public:
-  static void AdoptListeningSocket(SocketServerPosix &server, int socket_fd) {
+  static void AdoptListeningSocket(TcpServerPosix &server, int socket_fd) {
     server.socket_fd_.store(socket_fd, std::memory_order_release);
   }
 
-  static void AcceptOnce(SocketServerPosix &server) { server.Start(); }
+  static void AcceptOnce(TcpServerPosix &server) { server.Start(); }
 
-  static void SetTemporaryClient(SocketServerPosix &server,
-                                 std::shared_ptr<UsbClient> client) {
+  static void SetTemporaryClient(TcpServerPosix &server,
+                                 std::shared_ptr<TcpConnection> client) {
     std::lock_guard<std::mutex> lock(server.client_lock_);
-    server.temp_usb_client_ = std::move(client);
+    server.temp_tcp_connection_ = std::move(client);
   }
 
-  static void SubmitClientWork(const std::shared_ptr<UsbClient> &client,
+  static void SubmitClientWork(const std::shared_ptr<TcpConnection> &client,
                                std::function<void()> task) {
     client->SubmitWorkForTest(std::move(task));
   }
 
-  static void SubmitCleanupWork(SocketServerPosix &server,
+  static void SubmitCleanupWork(TcpServerPosix &server,
                                 std::function<void()> task) {
     server.clean_executor_.submit(std::move(task));
   }
@@ -56,24 +56,24 @@ namespace {
 
 using namespace std::chrono_literals;
 
-class NoopListener final : public SocketServerConnectionListener {
+class NoopListener final : public TcpServerConnectionListener {
  public:
   void OnInit(int32_t, const std::string &) override {}
-  void OnStatusChanged(const std::shared_ptr<UsbClient> &, ConnectionStatus,
+  void OnStatusChanged(const std::shared_ptr<TcpConnection> &, ConnectionStatus,
                        int32_t,
                        const std::string &) override {}
-  void OnMessage(const std::shared_ptr<UsbClient> &,
+  void OnMessage(const std::shared_ptr<TcpConnection> &,
                  const std::string &) override {}
 };
 
 class StopServerOnExit {
  public:
-  explicit StopServerOnExit(std::shared_ptr<SocketServerPosix> server)
+  explicit StopServerOnExit(std::shared_ptr<TcpServerPosix> server)
       : server_(std::move(server)) {}
   ~StopServerOnExit() { server_->StopServer(); }
 
  private:
-  std::shared_ptr<SocketServerPosix> server_;
+  std::shared_ptr<TcpServerPosix> server_;
 };
 
 class CountDownOnExit {
@@ -131,25 +131,25 @@ int ConnectToPort(uint16_t port) {
   return socket_fd;
 }
 
-TEST(SocketServerPosixTestSuite,
+TEST(TcpServerPosixTestSuite,
      AcceptsNewClientBeforeSupersededClientCleanupCompletes) {
   auto listener = std::make_shared<NoopListener>();
-  auto server = std::make_shared<SocketServerPosix>(listener);
+  auto server = std::make_shared<TcpServerPosix>(listener);
   StopServerOnExit stop_server(server);
 
   uint16_t port = 0;
   const int listener_socket = CreateLoopbackListener(port);
   ASSERT_GE(listener_socket, 0);
-  SocketServerPosixTestPeer::AdoptListeningSocket(*server, listener_socket);
+  TcpServerPosixTestPeer::AdoptListeningSocket(*server, listener_socket);
   ASSERT_NE(port, 0);
 
   int old_sockets[2] = {-1, -1};
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, old_sockets), 0);
   base::SocketGuard old_peer(old_sockets[1]);
-  auto old_client = std::make_shared<UsbClient>(old_sockets[0]);
+  auto old_client = std::make_shared<TcpConnection>(old_sockets[0]);
   old_client->Init();
-  std::weak_ptr<UsbClient> old_client_weak = old_client;
-  SocketServerPosixTestPeer::SetTemporaryClient(*server, old_client);
+  std::weak_ptr<TcpConnection> old_client_weak = old_client;
+  TcpServerPosixTestPeer::SetTemporaryClient(*server, old_client);
 
   const int new_peer_socket = ConnectToPort(port);
   ASSERT_GE(new_peer_socket, 0);
@@ -159,7 +159,7 @@ TEST(SocketServerPosixTestSuite,
   CountDownOnExit release_on_exit(release_old_cleanup);
   auto old_work_blocked = std::make_shared<std::promise<void>>();
   auto old_work_blocked_future = old_work_blocked->get_future();
-  SocketServerPosixTestPeer::SubmitClientWork(old_client, [=]() {
+  TcpServerPosixTestPeer::SubmitClientWork(old_client, [=]() {
     old_work_blocked->set_value();
     release_old_cleanup->Await();
   });
@@ -167,14 +167,14 @@ TEST(SocketServerPosixTestSuite,
   old_client.reset();
 
   auto accept_future = std::async(std::launch::async, [server]() {
-    SocketServerPosixTestPeer::AcceptOnce(*server);
+    TcpServerPosixTestPeer::AcceptOnce(*server);
   });
   const bool accepted_before_cleanup =
       accept_future.wait_for(2s) == std::future_status::ready;
 
   auto cleanup_drained = std::make_shared<std::promise<void>>();
   auto cleanup_drained_future = cleanup_drained->get_future();
-  SocketServerPosixTestPeer::SubmitCleanupWork(
+  TcpServerPosixTestPeer::SubmitCleanupWork(
       *server, [=]() { cleanup_drained->set_value(); });
   release_old_cleanup->CountDown();
 

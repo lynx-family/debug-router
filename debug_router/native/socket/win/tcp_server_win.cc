@@ -2,7 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/native/socket/win/socket_server_win.h"
+#include "debug_router/native/socket/win/tcp_server_win.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -17,14 +17,14 @@
 namespace debugrouter {
 namespace socket_server {
 
-SocketServerWin::SocketServerWin(
-    const std::shared_ptr<SocketServerConnectionListener> &listener)
-    : SocketServer(listener) {}
+TcpServerWin::TcpServerWin(
+    const std::shared_ptr<TcpServerConnectionListener> &listener)
+    : TcpServer(listener) {}
 
-SocketServerWin::~SocketServerWin() { Close(); }
+TcpServerWin::~TcpServerWin() { Close(); }
 
-int32_t SocketServerWin::InitSocket() {
-  LOGI("SocketServerWin::InitSocket");
+int32_t TcpServerWin::InitSocket() {
+  LOGI("TcpServerWin::InitSocket");
   WSADATA wsaData;
   int startup_result = WSAStartup(MAKEWORD(2, 2), &wsaData);
   if (startup_result != 0) {
@@ -77,7 +77,7 @@ int32_t SocketServerWin::InitSocket() {
   return port;
 }
 
-void SocketServerWin::Start() {
+void TcpServerWin::Start() {
   SocketType socket_fd = socket_fd_.load(std::memory_order_acquire);
   int32_t port = kInvalidPort;
   if (socket_fd == kInvalidSocket) {
@@ -98,24 +98,24 @@ void SocketServerWin::Start() {
     NotifyInit(GetErrorMessage(), "accept socket error");
     return;
   }
-  std::shared_ptr<UsbClient> old_client;
-  auto new_client = std::make_shared<UsbClient>(accept_socket_fd);
+  std::shared_ptr<TcpConnection> old_client;
+  auto new_client = std::make_shared<TcpConnection>(accept_socket_fd);
   {
     std::lock_guard<std::mutex> lock(client_lock_);
-    old_client = temp_usb_client_;
-    temp_usb_client_ = new_client;
+    old_client = temp_tcp_connection_;
+    temp_tcp_connection_ = new_client;
   }
   if (old_client) {
-    LOGI("close last connector, destroy temp_usb_client_.");
+    LOGI("close last connector, destroy temp_tcp_connection_.");
     ScheduleClientStop(old_client);
   }
-  std::shared_ptr<ClientListener> listener =
-      std::make_shared<ClientListener>(shared_from_this());
+  std::shared_ptr<TcpConnectionForwarder> listener =
+      std::make_shared<TcpConnectionForwarder>(shared_from_this());
   new_client->Init();
   new_client->StartUp(listener);
 }
 
-void SocketServerWin::CloseSocket(int socket_fd) {
+void TcpServerWin::CloseSocket(int socket_fd) {
   LOGI("CloseSocket" << socket_fd);
   if (socket_fd == kInvalidSocket) {
     return;

@@ -6,8 +6,9 @@
 
 | 步骤 | 状态 | 功能点与验收重点 |
 | --- | --- | --- |
-| 1 | **OK** | SocketServer 的状态和消息回调携带所属 `UsbClient`，保持单连接及新连接替换旧连接的现有行为。提交 `2e2ae5d`；相关 7 项单测通过，独立 agent 已审查。 |
-| 2 | 待讨论 | SocketServer 和 Core 建立多连接所有权及定向收发：多个 TCP 客户端与出站 WebSocket 可共存，关闭一条连接不影响其他连接。正式启用时机需先确认，避免 Session 路由尚未完成时改变上下游行为。 |
+| 1 | **OK** | TCP 服务的状态和消息回调携带所属连接身份，保持单连接及新连接替换旧连接的现有行为。提交 `2e2ae5d`；相关 7 项单测通过，独立 agent 已审查。 |
+| 1a | **OK** | 将内部 TCP 监听器、连接对象及 Core 适配器更名为 `TcpServer`、`TcpConnection`、`TcpServerTransport`；保留对外 USB API 并注明其 TCP 含义。只改命名，不改变行为。 |
+| 2 | 待讨论 | TcpServer 和 Core 建立多连接所有权及定向收发：多个 TCP 客户端与出站 WebSocket 可共存，关闭一条连接不影响其他连接。正式启用时机需先确认，避免 Session 路由尚未完成时改变上下游行为。 |
 | 3 | 待讨论 | 将协议解析、封装和版本判断集中到协议层；每条连接独立保存协议状态与 `client_id`。旧版兼容仅在协议层完成，在线上字段 `session_id`、`target_id` 的不同语义处加注释；非协议层统一使用新语义命名。 |
 | 4 | 待讨论 | 为 DevTool 后端预留按 Target 创建、销毁 Session 的接口，并贯通 C++、Android、iOS、Harmony。DevTool 实际的 Session 实现尚未完成，本步不伪造后端状态。 |
 | 5 | 待讨论 | 旧前端兼容：按连接和 Target 管理默认 Session，并在协议边界转换旧 `session_id` 字段，保持旧前端可用。 |

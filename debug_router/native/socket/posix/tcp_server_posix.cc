@@ -2,7 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/native/socket/posix/socket_server_posix.h"
+#include "debug_router/native/socket/posix/tcp_server_posix.h"
 
 #include <netinet/in.h>
 #include <strings.h>
@@ -11,19 +11,19 @@
 
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
-#include "debug_router/native/socket/usb_client.h"
+#include "debug_router/native/socket/tcp_connection.h"
 
 namespace debugrouter {
 namespace socket_server {
 
-SocketServerPosix::SocketServerPosix(
-    const std::shared_ptr<SocketServerConnectionListener> &listener)
-    : SocketServer(listener) {}
+TcpServerPosix::TcpServerPosix(
+    const std::shared_ptr<TcpServerConnectionListener> &listener)
+    : TcpServer(listener) {}
 
-SocketServerPosix::~SocketServerPosix() { Close(); }
+TcpServerPosix::~TcpServerPosix() { Close(); }
 
-int32_t SocketServerPosix::InitSocket() {
-  LOGI("SocketServerPosix::InitSocket");
+int32_t TcpServerPosix::InitSocket() {
+  LOGI("TcpServerPosix::InitSocket");
 
   const SocketType socket_fd = socket(AF_INET, SOCK_STREAM, 0);
   socket_fd_.store(socket_fd, std::memory_order_release);
@@ -82,7 +82,7 @@ int32_t SocketServerPosix::InitSocket() {
   return port;
 }
 
-void SocketServerPosix::Start() {
+void TcpServerPosix::Start() {
   SocketType socket_fd = socket_fd_.load(std::memory_order_acquire);
   if (socket_fd == kInvalidSocket) {
     int32_t port = kInvalidPort;
@@ -104,26 +104,26 @@ void SocketServerPosix::Start() {
     NotifyInit(GetErrorMessage(), "accept socket error");
     return;
   }
-  LOGI("accept usbclient socket:" << accept_socket_fd);
-  std::shared_ptr<UsbClient> old_temp_client;
-  LOGI("create a new usb client.");
-  auto new_temp_client = std::make_shared<UsbClient>(accept_socket_fd);
+  LOGI("accept tcp connection socket:" << accept_socket_fd);
+  std::shared_ptr<TcpConnection> old_temp_client;
+  LOGI("create a new tcp connection.");
+  auto new_temp_client = std::make_shared<TcpConnection>(accept_socket_fd);
   {
     std::lock_guard<std::mutex> lock(client_lock_);
-    old_temp_client = temp_usb_client_;
-    temp_usb_client_ = new_temp_client;
+    old_temp_client = temp_tcp_connection_;
+    temp_tcp_connection_ = new_temp_client;
   }
   if (old_temp_client) {
-    LOGI("close last connector, destroy temp_usb_client_.");
+    LOGI("close last connector, destroy temp_tcp_connection_.");
     ScheduleClientStop(old_temp_client);
   }
-  std::shared_ptr<ClientListener> listener =
-      std::make_shared<ClientListener>(shared_from_this());
+  std::shared_ptr<TcpConnectionForwarder> listener =
+      std::make_shared<TcpConnectionForwarder>(shared_from_this());
   new_temp_client->Init();
   new_temp_client->StartUp(listener);
 }
 
-void SocketServerPosix::CloseSocket(int socket_fd) {
+void TcpServerPosix::CloseSocket(int socket_fd) {
   LOGI("CloseSocket" << socket_fd);
   if (socket_fd == kInvalidSocket) {
     return;

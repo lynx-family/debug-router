@@ -2,23 +2,23 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#ifndef DEBUGROUTER_NATIVE_SOCKET_POSIX_SOCKET_SERVER_POSIX_H
-#define DEBUGROUTER_NATIVE_SOCKET_POSIX_SOCKET_SERVER_POSIX_H
+#ifndef DEBUGROUTER_NATIVE_SOCKET_POSIX_TCP_SERVER_POSIX_H
+#define DEBUGROUTER_NATIVE_SOCKET_POSIX_TCP_SERVER_POSIX_H
 
-#include "debug_router/native/socket/socket_server_api.h"
+#include "debug_router/native/socket/tcp_server.h"
 
 namespace debugrouter {
 namespace socket_server {
 
-class SocketServerPosix : public SocketServer {
+class TcpServerPosix : public TcpServer {
  public:
-  explicit SocketServerPosix(
-      const std::shared_ptr<SocketServerConnectionListener> &listener);
-  ~SocketServerPosix() override;
+  explicit TcpServerPosix(
+      const std::shared_ptr<TcpServerConnectionListener> &listener);
+  ~TcpServerPosix() override;
 
  private:
 #if defined(TESTING)
-  friend class SocketServerPosixTestPeer;
+  friend class TcpServerPosixTestPeer;
 #endif
 
   inline int GetErrorMessage() override { return errno; }
@@ -30,4 +30,4 @@ class SocketServerPosix : public SocketServer {
 }  // namespace socket_server
 };  // namespace debugrouter
 
-#endif  // DEBUGROUTER_NATIVE_SOCKET_POSIX_SOCKET_SERVER_POSIX_H
+#endif  // DEBUGROUTER_NATIVE_SOCKET_POSIX_TCP_SERVER_POSIX_H

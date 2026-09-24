@@ -2,19 +2,19 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#ifndef DEBUGROUTER_NATIVE_SOCKET_WIN_SOCKET_SERVER_WIN
-#define DEBUGROUTER_NATIVE_SOCKET_WIN_SOCKET_SERVER_WIN
+#ifndef DEBUGROUTER_NATIVE_SOCKET_WIN_TCP_SERVER_WIN
+#define DEBUGROUTER_NATIVE_SOCKET_WIN_TCP_SERVER_WIN
 
-#include "debug_router/native/socket/socket_server_api.h"
+#include "debug_router/native/socket/tcp_server.h"
 
 namespace debugrouter {
 namespace socket_server {
 
-class SocketServerWin : public SocketServer {
+class TcpServerWin : public TcpServer {
  public:
-  SocketServerWin(
-      const std::shared_ptr<SocketServerConnectionListener> &listener);
-  ~SocketServerWin() override;
+  TcpServerWin(
+      const std::shared_ptr<TcpServerConnectionListener> &listener);
+  ~TcpServerWin() override;
 
  private:
   inline int GetErrorMessage() override { return WSAGetLastError(); }
@@ -27,4 +27,4 @@ class SocketServerWin : public SocketServer {
 }  // namespace socket_server
 };  // namespace debugrouter
 
-#endif  // DEBUGROUTER_NATIVE_SOCKET_WIN_SOCKET_SERVER_WIN
+#endif  // DEBUGROUTER_NATIVE_SOCKET_WIN_TCP_SERVER_WIN

@@ -378,6 +378,7 @@ public class DebugRouter {
     return BuildConfig.DEBUGROUTER_VERSION;
   }
 
+  // Returns the TCP listening port used by USB-forwarded and direct TCP connections.
   public static int getUSBPort() {
     return getInstance().nativeGetUSBPort();
   }

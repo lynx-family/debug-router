@@ -20,6 +20,7 @@
 namespace debugrouter {
 namespace harmony {
 
+// USB is the existing API name for connections accepted by the TCP server.
 typedef enum { Unknown = -1, WebSocket = 0, USB } ConnectionType;
 
 struct NapiValueCompare {

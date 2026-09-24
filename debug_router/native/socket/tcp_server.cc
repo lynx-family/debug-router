@@ -4,9 +4,9 @@
 
 #include "debug_router/native/socket/socket_server_type.h"
 #ifdef _WIN32
-#include "debug_router/native/socket/win/socket_server_win.h"
+#include "debug_router/native/socket/win/tcp_server_win.h"
 #else
-#include "debug_router/native/socket/posix/socket_server_posix.h"
+#include "debug_router/native/socket/posix/tcp_server_posix.h"
 #endif
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/thread/debug_router_executor.h"
@@ -14,44 +14,44 @@
 namespace debugrouter {
 namespace socket_server {
 
-std::shared_ptr<SocketServer> SocketServer::CreateSocketServer(
-    const std::shared_ptr<SocketServerConnectionListener> &listener) {
+std::shared_ptr<TcpServer> TcpServer::CreateTcpServer(
+    const std::shared_ptr<TcpServerConnectionListener> &listener) {
 #ifdef _WIN32
-  return std::make_shared<SocketServerWin>(listener);
+  return std::make_shared<TcpServerWin>(listener);
 #else
-  return std::make_shared<SocketServerPosix>(listener);
+  return std::make_shared<TcpServerPosix>(listener);
 #endif
 }
 
-SocketServer::SocketServer(
-    const std::shared_ptr<SocketServerConnectionListener> &listener)
-    : listener_(listener), usb_client_(nullptr) {
+TcpServer::TcpServer(
+    const std::shared_ptr<TcpServerConnectionListener> &listener)
+    : listener_(listener), tcp_connection_(nullptr) {
   clean_executor_.init();
 }
 
-void SocketServer::ScheduleClientStop(
-    const std::shared_ptr<UsbClient> &client) {
+void TcpServer::ScheduleClientStop(
+    const std::shared_ptr<TcpConnection> &client) {
   if (!client) {
     return;
   }
   clean_executor_.submit([client]() { client->Stop(); });
 }
 
-bool SocketServer::Send(const std::string &message) {
-  std::shared_ptr<UsbClient> client;
+bool TcpServer::Send(const std::string &message) {
+  std::shared_ptr<TcpConnection> client;
   {
     std::lock_guard<std::mutex> lock(client_lock_);
-    client = usb_client_;
+    client = tcp_connection_;
   }
   if (!client) {
-    LOGI("SocketServerApi Send: client is null.");
+    LOGI("TcpServerApi Send: client is null.");
     return false;
   }
   return client->Send(message);
 }
 
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
-bool SocketServer::SetStartPort(int32_t start_port) {
+bool TcpServer::SetStartPort(int32_t start_port) {
   if (start_port <= 0 || start_port > UINT16_MAX - kTryPortCount + 1) {
     return false;
   }
@@ -60,29 +60,29 @@ bool SocketServer::SetStartPort(int32_t start_port) {
   return true;
 }
 
-PORT_TYPE SocketServer::GetStartPort() {
+PORT_TYPE TcpServer::GetStartPort() {
   return start_port_.load(std::memory_order_relaxed);
 }
 #endif
 
-void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
+void TcpServer::HandleOnOpenStatus(std::shared_ptr<TcpConnection> client,
                                       int32_t code, const std::string &reason) {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
-    std::shared_ptr<UsbClient> old_client_;
+    std::shared_ptr<TcpConnection> old_client_;
     bool should_notify = false;
     {
       std::lock_guard<std::mutex> lock(client_lock_);
-      if (temp_usb_client_ != client) {
-        LOGI("SocketServerApi OnOpen: stale client open ignored.");
+      if (temp_tcp_connection_ != client) {
+        LOGI("TcpServerApi OnOpen: stale client open ignored.");
         return;
       }
-      old_client_ = usb_client_;
-      usb_client_ = client;
+      old_client_ = tcp_connection_;
+      tcp_connection_ = client;
       should_notify = true;
     }
-    LOGI("SocketServerApi OnOpen: replace old client.");
+    LOGI("TcpServerApi OnOpen: replace old client.");
     if (old_client_ && old_client_ != client) {
-      LOGI("SocketServerApi HandleOnOpenStatus: stop old client.");
+      LOGI("TcpServerApi HandleOnOpenStatus: stop old client.");
       ScheduleClientStop(old_client_);
     }
     if (should_notify) {
@@ -93,16 +93,16 @@ void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
   });
 }
 
-void SocketServer::HandleOnMessageStatus(std::shared_ptr<UsbClient> client,
+void TcpServer::HandleOnMessageStatus(std::shared_ptr<TcpConnection> client,
                                          const std::string &message) {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
     bool is_current_client = false;
     {
       std::lock_guard<std::mutex> lock(client_lock_);
-      is_current_client = usb_client_ && usb_client_ == client;
+      is_current_client = tcp_connection_ && tcp_connection_ == client;
     }
     if (!is_current_client) {
-      LOGI("SocketServerApi OnMessage: client is null or not match.");
+      LOGI("TcpServerApi OnMessage: client is null or not match.");
       return;
     }
     if (auto listener = listener_.lock()) {
@@ -111,44 +111,44 @@ void SocketServer::HandleOnMessageStatus(std::shared_ptr<UsbClient> client,
   });
 }
 
-void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
+void TcpServer::HandleOnCloseStatus(std::shared_ptr<TcpConnection> client,
                                        ConnectionStatus status, int32_t code,
                                        const std::string &reason) {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
-    std::shared_ptr<UsbClient> client_to_stop;
+    std::shared_ptr<TcpConnection> client_to_stop;
     bool should_notify = false;
     // True if this callback tore down a client that had already been
-    // promoted to usb_client_. Such clients must still produce a status
+    // promoted to tcp_connection_. Such clients must still produce a status
     // notification even if their close/error races with a newer accept.
     bool cleared_promoted_client = false;
     {
       std::lock_guard<std::mutex> lock(client_lock_);
       const bool superseded_by_new_accept =
-          temp_usb_client_ && temp_usb_client_ != client;
-      if (superseded_by_new_accept || !usb_client_ || usb_client_ != client) {
-        if (usb_client_ == client) {
-          usb_client_ = nullptr;
+          temp_tcp_connection_ && temp_tcp_connection_ != client;
+      if (superseded_by_new_accept || !tcp_connection_ || tcp_connection_ != client) {
+        if (tcp_connection_ == client) {
+          tcp_connection_ = nullptr;
           cleared_promoted_client = true;
         }
-        if (temp_usb_client_ == client) {
-          temp_usb_client_ = nullptr;
+        if (temp_tcp_connection_ == client) {
+          temp_tcp_connection_ = nullptr;
         }
         client_to_stop = client;
       } else {
         LOGI(
-            "SocketServerApi HandleOnCloseStatus: close curr client for "
+            "TcpServerApi HandleOnCloseStatus: close curr client for "
             "OnClose.");
-        client_to_stop = usb_client_;
-        usb_client_ = nullptr;
-        if (temp_usb_client_ == client) {
-          temp_usb_client_ = nullptr;
+        client_to_stop = tcp_connection_;
+        tcp_connection_ = nullptr;
+        if (temp_tcp_connection_ == client) {
+          temp_tcp_connection_ = nullptr;
         }
         should_notify = true;
       }
     }
     if (!should_notify && !cleared_promoted_client) {
       LOGI(
-          "SocketServerApi OnClose: stale client closed, stop stale client "
+          "TcpServerApi OnClose: stale client closed, stop stale client "
           "without notifying current connection.");
       if (client_to_stop) {
         ScheduleClientStop(client_to_stop);
@@ -164,44 +164,44 @@ void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
   });
 }
 
-void SocketServer::HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
+void TcpServer::HandleOnErrorStatus(std::shared_ptr<TcpConnection> client,
                                        ConnectionStatus status, int32_t code,
                                        const std::string &reason) {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
-    std::shared_ptr<UsbClient> client_to_stop;
+    std::shared_ptr<TcpConnection> client_to_stop;
     bool should_notify = false;
     // True if this callback tore down a client that had already been
-    // promoted to usb_client_. Such clients must still produce a status
+    // promoted to tcp_connection_. Such clients must still produce a status
     // notification even if their close/error races with a newer accept.
     bool cleared_promoted_client = false;
     {
       std::lock_guard<std::mutex> lock(client_lock_);
       const bool superseded_by_new_accept =
-          temp_usb_client_ && temp_usb_client_ != client;
-      if (superseded_by_new_accept || !usb_client_ || usb_client_ != client) {
-        if (usb_client_ == client) {
-          usb_client_ = nullptr;
+          temp_tcp_connection_ && temp_tcp_connection_ != client;
+      if (superseded_by_new_accept || !tcp_connection_ || tcp_connection_ != client) {
+        if (tcp_connection_ == client) {
+          tcp_connection_ = nullptr;
           cleared_promoted_client = true;
         }
-        if (temp_usb_client_ == client) {
-          temp_usb_client_ = nullptr;
+        if (temp_tcp_connection_ == client) {
+          temp_tcp_connection_ = nullptr;
         }
         client_to_stop = client;
       } else {
         LOGI(
-            "SocketServerApi HandleOnErrorStatus: close curr client for "
+            "TcpServerApi HandleOnErrorStatus: close curr client for "
             "OnError.");
-        client_to_stop = usb_client_;
-        usb_client_ = nullptr;
-        if (temp_usb_client_ == client) {
-          temp_usb_client_ = nullptr;
+        client_to_stop = tcp_connection_;
+        tcp_connection_ = nullptr;
+        if (temp_tcp_connection_ == client) {
+          temp_tcp_connection_ = nullptr;
         }
         should_notify = true;
       }
     }
     if (!should_notify && !cleared_promoted_client) {
       LOGI(
-          "SocketServerApi OnError: stale client errored, stop stale client "
+          "TcpServerApi OnError: stale client errored, stop stale client "
           "without notifying current connection.");
       if (client_to_stop) {
         ScheduleClientStop(client_to_stop);
@@ -217,7 +217,7 @@ void SocketServer::HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
   });
 }
 
-void SocketServer::NotifyInit(int32_t code, const std::string &info) {
+void TcpServer::NotifyInit(int32_t code, const std::string &info) {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
     if (auto listener = listener_.lock()) {
       listener->OnInit(code, info);
@@ -225,8 +225,8 @@ void SocketServer::NotifyInit(int32_t code, const std::string &info) {
   });
 }
 
-void SocketServer::setEnableServer(bool enable) {
-  LOGI("SocketServer::setEnableServer:" << enable);
+void TcpServer::setEnableServer(bool enable) {
+  LOGI("TcpServer::setEnableServer:" << enable);
   // notify only when transition from false to true
   bool should_notify = false;
   {
@@ -239,11 +239,11 @@ void SocketServer::setEnableServer(bool enable) {
   }
 }
 
-void SocketServer::StartServer() { setEnableServer(true); }
+void TcpServer::StartServer() { setEnableServer(true); }
 
-void SocketServer::StopServer() {
-  std::shared_ptr<UsbClient> current_client;
-  std::shared_ptr<UsbClient> pending_client;
+void TcpServer::StopServer() {
+  std::shared_ptr<TcpConnection> current_client;
+  std::shared_ptr<TcpConnection> pending_client;
   setEnableServer(false);
   // Close socket if it's valid
   SocketType socket_fd = socket_fd_.load(std::memory_order_acquire);
@@ -262,10 +262,10 @@ void SocketServer::StopServer() {
   }
   {
     std::lock_guard<std::mutex> lock(client_lock_);
-    current_client = usb_client_;
-    pending_client = temp_usb_client_;
-    usb_client_ = nullptr;
-    temp_usb_client_ = nullptr;
+    current_client = tcp_connection_;
+    pending_client = temp_tcp_connection_;
+    tcp_connection_ = nullptr;
+    temp_tcp_connection_ = nullptr;
   }
   if (current_client) {
     current_client->Stop();
@@ -275,73 +275,73 @@ void SocketServer::StopServer() {
   }
 }
 
-void SocketServer::ThreadFunc(std::shared_ptr<SocketServer> socket_server) {
+void TcpServer::ThreadFunc(std::shared_ptr<TcpServer> tcp_server) {
   int count = 0;
   while (true) {
     {
-      std::unique_lock running_lock(socket_server->running_mutex_);
-      socket_server->running_condition_.wait(running_lock, [=]() {
-        return socket_server->is_running_.load(std::memory_order_relaxed) ==
+      std::unique_lock running_lock(tcp_server->running_mutex_);
+      tcp_server->running_condition_.wait(running_lock, [=]() {
+        return tcp_server->is_running_.load(std::memory_order_relaxed) ==
                true;
       });
-      std::lock_guard<std::mutex> serving_lock(socket_server->serving_mutex_);
-      socket_server->is_serving_ = true;
+      std::lock_guard<std::mutex> serving_lock(tcp_server->serving_mutex_);
+      tcp_server->is_serving_ = true;
     }
     LOGI("Init start:" << count);
-    socket_server->Start();
+    tcp_server->Start();
     {
-      std::lock_guard<std::mutex> lock(socket_server->serving_mutex_);
-      socket_server->is_serving_ = false;
+      std::lock_guard<std::mutex> lock(tcp_server->serving_mutex_);
+      tcp_server->is_serving_ = false;
     }
-    socket_server->serving_condition_.notify_all();
+    tcp_server->serving_condition_.notify_all();
     count++;
   }
 }
 
-void SocketServer::Init() {
+void TcpServer::Init() {
   std::thread listen_thread(ThreadFunc, shared_from_this());
   listen_thread.detach();
 }
 
 // close server socket
-void SocketServer::Close() {
+void TcpServer::Close() {
   SocketType socket_fd =
       socket_fd_.exchange(kInvalidSocket, std::memory_order_acq_rel);
-  LOGI("SocketServer::Close server socket_fd_:" << socket_fd);
+  LOGI("TcpServer::Close server socket_fd_:" << socket_fd);
   // The atomic exchange above is the only cross-thread double-close guard we
   // need here. Backend-specific CloseSocket() keeps the kInvalidSocket check so
   // all close validation remains centralized in one place.
   CloseSocket(socket_fd);
 }
 
-void SocketServer::Disconnect() {
+void TcpServer::Disconnect() {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
-    std::shared_ptr<UsbClient> client_to_stop;
+    std::shared_ptr<TcpConnection> client_to_stop;
     {
       std::lock_guard<std::mutex> lock(client_lock_);
-      client_to_stop = usb_client_;
-      usb_client_ = nullptr;
-      if (temp_usb_client_ == client_to_stop) {
-        temp_usb_client_ = nullptr;
+      client_to_stop = tcp_connection_;
+      tcp_connection_ = nullptr;
+      if (temp_tcp_connection_ == client_to_stop) {
+        temp_tcp_connection_ = nullptr;
       }
     }
     if (client_to_stop) {
-      LOGI("SocketServerApi Disconnect: stop curr client.");
+      LOGI("TcpServerApi Disconnect: stop curr client.");
       ScheduleClientStop(client_to_stop);
     }
   });
 }
 
-SocketServer::~SocketServer() {
+TcpServer::~TcpServer() {
   clean_executor_.shutdown();
-  std::shared_ptr<UsbClient> current_client;
-  std::shared_ptr<UsbClient> pending_client;
+  std::shared_ptr<TcpConnection> current_client;
+  std::shared_ptr<TcpConnection> pending_client;
   {
     std::lock_guard<std::mutex> lock(client_lock_);
-    current_client = usb_client_;
-    pending_client = temp_usb_client_;
-    usb_client_ = nullptr;
-    temp_usb_client_ = nullptr;
+    current_client = tcp_connection_;
+    pending_client = temp_tcp_connection_;
+    tcp_connection_ = nullptr;
+    temp_tcp_connection_ = nullptr;
   }
   if (current_client) {
     current_client->Stop();

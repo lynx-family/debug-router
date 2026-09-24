@@ -2,18 +2,18 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#ifndef DEBUGROUTER_NATIVE_NET_SOCKET_SERVER_CLIENT_H_
-#define DEBUGROUTER_NATIVE_NET_SOCKET_SERVER_CLIENT_H_
+#ifndef DEBUGROUTER_NATIVE_NET_TCP_SERVER_TRANSPORT_H_
+#define DEBUGROUTER_NATIVE_NET_TCP_SERVER_TRANSPORT_H_
 
 #include "debug_router/native/core/message_transceiver.h"
-#include "debug_router/native/socket/socket_server_api.h"
+#include "debug_router/native/socket/tcp_server.h"
 
 namespace debugrouter {
 namespace net {
-class SocketServerClient : public core::MessageTransceiver {
+class TcpServerTransport : public core::MessageTransceiver {
  public:
-  SocketServerClient();
-  virtual ~SocketServerClient() = default;
+  TcpServerTransport();
+  virtual ~TcpServerTransport() = default;
   void Init() override;
   bool Connect(const std::string &url) override;
   void Disconnect() override;
@@ -28,12 +28,12 @@ class SocketServerClient : public core::MessageTransceiver {
 #endif
 
  private:
-  std::shared_ptr<debugrouter::socket_server::SocketServer> socket_server_;
-  std::shared_ptr<debugrouter::socket_server::SocketServerConnectionListener>
+  std::shared_ptr<debugrouter::socket_server::TcpServer> tcp_server_;
+  std::shared_ptr<debugrouter::socket_server::TcpServerConnectionListener>
       listener_;
 };
 
 }  // namespace net
 }  // namespace debugrouter
 
-#endif  // DEBUGROUTER_NATIVE_NET_SOCKET_SERVER_CLIENT_H_
+#endif  // DEBUGROUTER_NATIVE_NET_TCP_SERVER_TRANSPORT_H_

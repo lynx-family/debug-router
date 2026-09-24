@@ -2,7 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/native/socket/usb_client.h"
+#include "debug_router/native/socket/tcp_connection.h"
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -21,27 +21,27 @@ namespace debugrouter {
 namespace socket_server {
 namespace {
 
-class CountingUsbClientListener final : public UsbClientListener {
+class CountingTcpConnectionListener final : public TcpConnectionListener {
  public:
-  void OnOpen(std::shared_ptr<UsbClient> client, int32_t code,
+  void OnOpen(std::shared_ptr<TcpConnection> client, int32_t code,
               const std::string& reason) override {
     open_count.fetch_add(1, std::memory_order_relaxed);
     cv.notify_all();
   }
 
-  void OnClose(std::shared_ptr<UsbClient> client, int32_t code,
+  void OnClose(std::shared_ptr<TcpConnection> client, int32_t code,
                const std::string& reason) override {
     close_count.fetch_add(1, std::memory_order_relaxed);
     cv.notify_all();
   }
 
-  void OnError(std::shared_ptr<UsbClient> client, int32_t code,
+  void OnError(std::shared_ptr<TcpConnection> client, int32_t code,
                const std::string& message) override {
     error_count.fetch_add(1, std::memory_order_relaxed);
     cv.notify_all();
   }
 
-  void OnMessage(std::shared_ptr<UsbClient> client,
+  void OnMessage(std::shared_ptr<TcpConnection> client,
                  const std::string& message) override {
     message_count.fetch_add(1, std::memory_order_relaxed);
     cv.notify_all();
@@ -84,9 +84,9 @@ std::string PackFrame(const std::string& message) {
   return result;
 }
 
-TEST(UsbClientTestSuite, CloseBeforeOpenDoesNotNotifyListener) {
-  auto client = std::make_shared<UsbClient>(kInvalidSocket);
-  auto listener = std::make_shared<CountingUsbClientListener>();
+TEST(TcpConnectionTestSuite, CloseBeforeOpenDoesNotNotifyListener) {
+  auto client = std::make_shared<TcpConnection>(kInvalidSocket);
+  auto listener = std::make_shared<CountingTcpConnectionListener>();
   client->SetListenerForTest(listener);
 
   client->NotifyCloseForTest(0, "before open");
@@ -95,9 +95,9 @@ TEST(UsbClientTestSuite, CloseBeforeOpenDoesNotNotifyListener) {
   EXPECT_EQ(listener->error_count.load(std::memory_order_relaxed), 0);
 }
 
-TEST(UsbClientTestSuite, CloseAfterOpenNotifiesOnlyOnce) {
-  auto client = std::make_shared<UsbClient>(kInvalidSocket);
-  auto listener = std::make_shared<CountingUsbClientListener>();
+TEST(TcpConnectionTestSuite, CloseAfterOpenNotifiesOnlyOnce) {
+  auto client = std::make_shared<TcpConnection>(kInvalidSocket);
+  auto listener = std::make_shared<CountingTcpConnectionListener>();
   client->SetListenerForTest(listener);
   client->SetConnectedForTest(true);
 
@@ -108,12 +108,12 @@ TEST(UsbClientTestSuite, CloseAfterOpenNotifiesOnlyOnce) {
   EXPECT_EQ(listener->error_count.load(std::memory_order_relaxed), 0);
 }
 
-TEST(UsbClientTestSuite, PeerEOFNotifiesCloseWithoutError) {
+TEST(TcpConnectionTestSuite, PeerEOFNotifiesCloseWithoutError) {
   int sockets[2] = {-1, -1};
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
 
-  auto client = std::make_shared<UsbClient>(sockets[0]);
-  auto listener = std::make_shared<CountingUsbClientListener>();
+  auto client = std::make_shared<TcpConnection>(sockets[0]);
+  auto listener = std::make_shared<CountingTcpConnectionListener>();
   client->Init();
   client->StartUp(listener);
 

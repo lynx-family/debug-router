@@ -2,7 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/native/socket/usb_client.h"
+#include "debug_router/native/socket/tcp_connection.h"
 
 #include <chrono>
 
@@ -10,7 +10,7 @@
 #include "debug_router/native/core/session_filter_util.h"
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
-#include "debug_router/native/socket/socket_server_api.h"
+#include "debug_router/native/socket/tcp_server.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -26,11 +26,11 @@ namespace socket_server {
 
 const char *kMessageQuit = "quit";
 
-// SO_RCVTIMEO timeout for recv() in UsbClient::Read()
+// SO_RCVTIMEO timeout for recv() in TcpConnection::Read()
 // Chosen as a balance between:
 //   - Low latency for Stop() to complete (max wait 0.5s)
 //   - Low CPU overhead (not waking up too frequently)
-const int kUsbClientRecvTimeoutMs = 500;
+const int kTcpConnectionRecvTimeoutMs = 500;
 
 int GetErrorMessage() {
 #ifdef _WIN32
@@ -40,38 +40,38 @@ int GetErrorMessage() {
 #endif
 }
 
-UsbClient::UsbClient(SocketType socket_fd) : socket_guard_(socket_fd) {
+TcpConnection::TcpConnection(SocketType socket_fd) : socket_guard_(socket_fd) {
   // Set SO_RCVTIMEO to avoid permanent blocking
   SocketType sock = socket_guard_.Get();
   if (sock != kInvalidSocket) {
 #ifdef _WIN32
-    DWORD timeout = kUsbClientRecvTimeoutMs;
+    DWORD timeout = kTcpConnectionRecvTimeoutMs;
     if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout,
                    sizeof(timeout)) == SOCKET_ERROR) {
-      LOGE("UsbClient: Failed to set SO_RCVTIMEO: " << WSAGetLastError());
+      LOGE("TcpConnection: Failed to set SO_RCVTIMEO: " << WSAGetLastError());
     }
 #else
     struct timeval timeout;
     timeout.tv_sec = 0;
-    timeout.tv_usec = kUsbClientRecvTimeoutMs * 1000;
+    timeout.tv_usec = kTcpConnectionRecvTimeoutMs * 1000;
     if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) ==
         -1) {
-      LOGE("UsbClient: Failed to set SO_RCVTIMEO: " << errno);
+      LOGE("TcpConnection: Failed to set SO_RCVTIMEO: " << errno);
     }
 #endif
   }
 }
 
-void UsbClient::BeginTransportShutdown() {
+void TcpConnection::BeginTransportShutdown() {
   stopping_.store(true, std::memory_order_relaxed);
-  connect_status_.store(USBConnectStatus::DISCONNECTED,
+  connect_status_.store(TcpConnectionStatus::DISCONNECTED,
                         std::memory_order_relaxed);
   incoming_message_queue_.put(std::string(kMessageQuit));
   outgoing_message_queue_.put(std::string(kMessageQuit));
   socket_guard_.ShutdownAndReset();
 }
 
-void UsbClient::NotifyErrorOnce(int32_t code, const std::string &message) {
+void TcpConnection::NotifyErrorOnce(int32_t code, const std::string &message) {
   bool expected = false;
   if (!failure_reported_.compare_exchange_strong(expected, true,
                                                  std::memory_order_acq_rel,
@@ -83,7 +83,7 @@ void UsbClient::NotifyErrorOnce(int32_t code, const std::string &message) {
   }
 }
 
-void UsbClient::NotifyCloseOnce(int32_t code, const std::string &reason) {
+void TcpConnection::NotifyCloseOnce(int32_t code, const std::string &reason) {
   bool expected = false;
   // First gate ensures only one path can attempt close delivery. The
   // subsequent is_connected_ exchange keeps the pre-open case silent, which is
@@ -101,29 +101,29 @@ void UsbClient::NotifyCloseOnce(int32_t code, const std::string &reason) {
   }
 }
 
-void UsbClient::SetConnectStatus(USBConnectStatus status) {
+void TcpConnection::SetConnectStatus(TcpConnectionStatus status) {
   connect_status_.store(status, std::memory_order_relaxed);
 }
 
-void UsbClient::Init() {
+void TcpConnection::Init() {
   work_thread_.init();
   read_thread_.init();
   write_thread_.init();
   dispatch_thread_.init();
 }
 
-void UsbClient::StartUp(const std::shared_ptr<UsbClientListener> &listener) {
+void TcpConnection::StartUp(const std::shared_ptr<TcpConnectionListener> &listener) {
   work_thread_.submit([client_ptr = shared_from_this(), listener]() {
     client_ptr->StartInternal(listener);
   });
 }
 
-void UsbClient::StartInternal(
-    const std::shared_ptr<UsbClientListener> &listener) {
+void TcpConnection::StartInternal(
+    const std::shared_ptr<TcpConnectionListener> &listener) {
   stopping_.store(false, std::memory_order_relaxed);
   failure_reported_.store(false, std::memory_order_relaxed);
   closed_reported_.store(false, std::memory_order_relaxed);
-  connect_status_.store(USBConnectStatus::CONNECTING,
+  connect_status_.store(TcpConnectionStatus::CONNECTING,
                         std::memory_order_relaxed);
   LOGI("StartInternal, listener is:" << listener.get());
   listener_ = listener;
@@ -159,7 +159,7 @@ void UsbClient::StartInternal(
  *  checkMessageHeader will check header's value.
  */
 
-UsbClient::ReadResult UsbClient::Read(char *buffer, uint32_t read_size,
+TcpConnection::ReadResult TcpConnection::Read(char *buffer, uint32_t read_size,
                                       int32_t *error_code) {
   if (error_code) {
     *error_code = 0;
@@ -223,22 +223,22 @@ UsbClient::ReadResult UsbClient::Read(char *buffer, uint32_t read_size,
   return ReadResult::kOk;
 }
 
-void UsbClient::ReadMessage() {
-  LOGI("UsbClient: ReadMessage:" << socket_guard_.Get());
+void TcpConnection::ReadMessage() {
+  LOGI("TcpConnection: ReadMessage:" << socket_guard_.Get());
   bool isFirst = true;
   int32_t close_code = 0;
   std::string close_reason = "ReadMessage finished";
   while (true) {
     // Check if we're stopping
     if (stopping_.load(std::memory_order_relaxed)) {
-      LOGI("UsbClient: ReadMessage: stopping, exit loop");
+      LOGI("TcpConnection: ReadMessage: stopping, exit loop");
       close_reason = "ReadMessage stopped";
       break;
     }
 
     char header[kFrameHeaderLen];
     memset(header, 0, kFrameHeaderLen);
-    LOGI("UsbClient: start check message header.");
+    LOGI("TcpConnection: start check message header.");
     int32_t error_code = 0;
     ReadResult header_result = Read(header, kFrameHeaderLen, &error_code);
     if (header_result == ReadResult::kStopped) {
@@ -246,7 +246,7 @@ void UsbClient::ReadMessage() {
       break;
     }
     if (header_result == ReadResult::kClosed) {
-      LOGI("UsbClient: peer closed connection before next frame.");
+      LOGI("TcpConnection: peer closed connection before next frame.");
       BeginTransportShutdown();
       close_reason = "peer closed connection (EOF)";
       break;
@@ -262,7 +262,7 @@ void UsbClient::ReadMessage() {
       break;
     }
     if (!util::CheckHeaderThreeBytes(header)) {
-      LOGW("UsbClient: don't match DebugRouter protocol:");
+      LOGW("TcpConnection: don't match DebugRouter protocol:");
       // need DebugRouterReport to report invailed client.
       for (int i = 0; i < kFrameHeaderLen; i++) {
         LOGE("header " << i << " : #" << util::CharToUInt32(header[i]) << "#");
@@ -278,7 +278,7 @@ void UsbClient::ReadMessage() {
       break;
     }
     if (isFirst) {
-      LOGI("UsbClient: handle first frame.");
+      LOGI("TcpConnection: handle first frame.");
       if (listener_) {
         is_connected_.store(true, std::memory_order_relaxed);
         listener_->OnOpen(shared_from_this(), ConnectionStatus::kConnected,
@@ -343,33 +343,33 @@ void UsbClient::ReadMessage() {
     std::string payload_str(payload.get(), payload_size_int);
 
     LOGI("[RX]:" << payload_str);
-    if (core::internal::ShouldDropIncomingBySessionFilter(payload_str, "USB")) {
+    if (core::internal::ShouldDropIncomingBySessionFilter(payload_str, "TCP")) {
       continue;
     }
 
     incoming_message_queue_.put(std::move(payload_str));
   }
   // end read loop.
-  LOGI("UsbClient: ReadMessage finished.");
+  LOGI("TcpConnection: ReadMessage finished.");
   NotifyCloseOnce(close_code, close_reason);
-  LOGI("UsbClient: ReadMessage thread exit.");
+  LOGI("TcpConnection: ReadMessage thread exit.");
   incoming_message_queue_.put(std::move(kMessageQuit));
   outgoing_message_queue_.put(std::move(kMessageQuit));
 }
 
-void UsbClient::StartReader() {
+void TcpConnection::StartReader() {
   StartMessageDispatcher();
   read_thread_.submit(
       [client_ptr = shared_from_this()]() { client_ptr->ReadMessage(); });
 }
 
-void UsbClient::MessageDispatcher() {
+void TcpConnection::MessageDispatcher() {
   while (true) {
     std::string message = "";
     message = incoming_message_queue_.take();
 
     if (message == kMessageQuit) {
-      LOGI("UsbClient: MessageDispatcherFunc receive MESSAGE_QUIT.");
+      LOGI("TcpConnection: MessageDispatcherFunc receive MESSAGE_QUIT.");
       break;
     }
 
@@ -381,12 +381,12 @@ void UsbClient::MessageDispatcher() {
   }
 }
 
-void UsbClient::StartMessageDispatcher() {
+void TcpConnection::StartMessageDispatcher() {
   dispatch_thread_.submit(
       [client_ptr = shared_from_this()]() { client_ptr->MessageDispatcher(); });
 }
 
-void UsbClient::WrapHeader(const std::string &message, std::string &result) {
+void TcpConnection::WrapHeader(const std::string &message, std::string &result) {
   const uint32_t total_size =
       static_cast<uint32_t>(kFrameHeaderLen + kPayloadSizeLen + message.size());
   result.resize(total_size);
@@ -418,8 +418,8 @@ void UsbClient::WrapHeader(const std::string &message, std::string &result) {
   memcpy(buffer + 20, message.c_str(), message.size());
 }
 
-void UsbClient::WriteMessage() {
-  LOGI("UsbClient: WriteMessage:" << socket_guard_.Get());
+void TcpConnection::WriteMessage() {
+  LOGI("TcpConnection: WriteMessage:" << socket_guard_.Get());
   while (true) {
     std::string message;
     message = outgoing_message_queue_.take();
@@ -430,11 +430,11 @@ void UsbClient::WriteMessage() {
 
     if (message.length() > 0) {
       if (message.find("Page.screencastFrame") != std::string::npos) {
-        LOGI("UsbClient: [TX]: Page.screencastFrame Sent.");
+        LOGI("TcpConnection: [TX]: Page.screencastFrame Sent.");
       } else if (message.find("Lynx.screenshotCapture") != std::string::npos) {
-        LOGI("UsbClient: [TX]: Lynx.screenshotCapture Sent.");
+        LOGI("TcpConnection: [TX]: Lynx.screenshotCapture Sent.");
       } else {
-        LOGI("UsbClient: [TX]:");
+        LOGI("TcpConnection: [TX]:");
         LOGI(message);
       }
       std::string result_message;
@@ -444,33 +444,33 @@ void UsbClient::WriteMessage() {
         LOGE("send error: " << GetErrorMessage() << " message:" << message);
         BeginTransportShutdown();
         NotifyErrorOnce(GetErrorMessage(),
-                        "UsbClient::WriteMessage send data failed.");
+                        "TcpConnection::WriteMessage send data failed.");
         NotifyCloseOnce(GetErrorMessage(), "writer thread finished");
         break;
       }
     }
   }
-  LOGI("UsbClient: WriteMessage finished.");
+  LOGI("TcpConnection: WriteMessage finished.");
   NotifyCloseOnce(GetErrorMessage(), "writer thread finished");
-  LOGI("UsbClient: WriteMessage thread exit.");
+  LOGI("TcpConnection: WriteMessage thread exit.");
 }
 
-void UsbClient::StartWriter() {
+void TcpConnection::StartWriter() {
   write_thread_.submit(
       [client_ptr = shared_from_this()]() { client_ptr->WriteMessage(); });
 }
 
-void UsbClient::DisconnectInternal() {
+void TcpConnection::DisconnectInternal() {
   // DisconnectInternal only handles transport/read-loop shutdown. Stop()
   // idempotence is guarded by stop_started_.
   BeginTransportShutdown();
 }
 
-bool UsbClient::Send(const std::string &message) {
-  LOGI("UsbClient: Send.");
+bool TcpConnection::Send(const std::string &message) {
+  LOGI("TcpConnection: Send.");
   if (stopping_.load(std::memory_order_relaxed) ||
       stop_started_.load(std::memory_order_relaxed)) {
-    LOGI("UsbClient: dropping send while stopping.");
+    LOGI("TcpConnection: dropping send while stopping.");
     return false;
   }
   if (message.size() >
@@ -484,12 +484,12 @@ bool UsbClient::Send(const std::string &message) {
   return true;
 }
 
-void UsbClient::Stop() {
+void TcpConnection::Stop() {
   bool expected = false;
   if (!stop_started_.compare_exchange_strong(expected, true,
                                              std::memory_order_acq_rel,
                                              std::memory_order_acquire)) {
-    LOGI("UsbClient: Stop already in progress or completed.");
+    LOGI("TcpConnection: Stop already in progress or completed.");
     return;
   }
 
@@ -502,29 +502,29 @@ void UsbClient::Stop() {
 
   incoming_message_queue_.clear();
   outgoing_message_queue_.clear();
-  connect_status_.store(USBConnectStatus::DISCONNECTED,
+  connect_status_.store(TcpConnectionStatus::DISCONNECTED,
                         std::memory_order_relaxed);
 
   auto end_time = std::chrono::steady_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                       end_time - start_time)
                       .count();
-  LOGI("UsbClient: Stop finished in " << duration << "ms");
+  LOGI("TcpConnection: Stop finished in " << duration << "ms");
 }
 
-void UsbClient::SendInternal(const std::string &message) {
-  LOGI("UsbClient: SendInternal.");
+void TcpConnection::SendInternal(const std::string &message) {
+  LOGI("TcpConnection: SendInternal.");
   if (stopping_.load(std::memory_order_relaxed) ||
       connect_status_.load(std::memory_order_relaxed) !=
-          USBConnectStatus::CONNECTED) {
-    LOGI("current usb client is not connected:" << message);
+          TcpConnectionStatus::CONNECTED) {
+    LOGI("current tcp connection is not connected:" << message);
     return;
   }
   std::string non_const_message = message;
   outgoing_message_queue_.put(std::move(non_const_message));
 }
 
-UsbClient::~UsbClient() { Stop(); }
+TcpConnection::~TcpConnection() { Stop(); }
 
 }  // namespace socket_server
 }  // namespace debugrouter

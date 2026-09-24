@@ -22,7 +22,7 @@ extern const SocketType kInvalidSocket;
 #endif
 
 // list of connect status
-enum USBConnectStatus {
+enum TcpConnectionStatus {
   DISCONNECTED,
   CONNECTING,
   CONNECTED,
@@ -30,7 +30,7 @@ enum USBConnectStatus {
 
 typedef uint16_t PORT_TYPE;
 
-// SocketServer listen start with kStartPort
+// TcpServer listen start with kStartPort
 extern const int32_t kInvalidPort;
 extern const PORT_TYPE kStartPort;
 extern const int32_t kTryPortCount;
@@ -38,7 +38,7 @@ extern const int32_t kTryPortCount;
 // max pending connections
 extern const int32_t kConnectionQueueMaxLength;
 
-// SocketServer Connection status
+// TcpServer Connection status
 enum ConnectionStatus { kError = -2, kDisconnected = -1, kConnected = 0 };
 
 extern const int kFrameHeaderLen;

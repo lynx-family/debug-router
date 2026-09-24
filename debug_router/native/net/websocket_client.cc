@@ -49,11 +49,9 @@ bool WebSocketClient::Connect(const std::string &url) {
 }
 
 void WebSocketClient::StartServer() {
-  // for only use usb now, keep null
 }
 
 void WebSocketClient::StopServer() {
-  // for only use usb now, keep null
 }
 
 void WebSocketClient::ConnectInternal(const std::string &url) {

@@ -21,7 +21,7 @@
 
 #include "debug_router/native/core/debug_router_core.h"
 #include "debug_router/native/core/util.h"
-#include "debug_router/native/socket/socket_server_api.h"
+#include "debug_router/native/socket/tcp_server.h"
 #include "debug_router/native/thread/debug_router_executor.h"
 #include "gtest/gtest.h"
 
@@ -95,12 +95,12 @@ bool WaitForExecutorTask(int timeout_ms) {
                      [&]() { return finished; });
 }
 
-class RecordingSocketServerListener final
-    : public SocketServerConnectionListener {
+class RecordingTcpServerListener final
+    : public TcpServerConnectionListener {
  public:
   void OnInit(int32_t code, const std::string& info) override {}
 
-  void OnStatusChanged(const std::shared_ptr<UsbClient>& client,
+  void OnStatusChanged(const std::shared_ptr<TcpConnection>& client,
                        ConnectionStatus status, int32_t code,
                        const std::string& info) override {
     last_status_client.store(client.get(), std::memory_order_relaxed);
@@ -114,7 +114,7 @@ class RecordingSocketServerListener final
     cv.notify_all();
   }
 
-  void OnMessage(const std::shared_ptr<UsbClient>& client,
+  void OnMessage(const std::shared_ptr<TcpConnection>& client,
                  const std::string&) override {
     last_message_client.store(client.get(), std::memory_order_relaxed);
   }
@@ -132,30 +132,30 @@ class RecordingSocketServerListener final
   std::atomic<int> connected_count{0};
   std::atomic<int> disconnected_count{0};
   std::atomic<int> error_count{0};
-  std::atomic<UsbClient*> last_status_client{nullptr};
-  std::atomic<UsbClient*> last_message_client{nullptr};
+  std::atomic<TcpConnection*> last_status_client{nullptr};
+  std::atomic<TcpConnection*> last_message_client{nullptr};
 };
 
-class TestSocketServer final : public SocketServer {
+class TestTcpServer final : public TcpServer {
  public:
-  explicit TestSocketServer(
-      const std::shared_ptr<SocketServerConnectionListener>& listener)
-      : SocketServer(listener) {}
+  explicit TestTcpServer(
+      const std::shared_ptr<TcpServerConnectionListener>& listener)
+      : TcpServer(listener) {}
 
   void Start() override {}
   int GetErrorMessage() override { return 0; }
   void CloseSocket(int socket_fd) override {}
 
-  void SeedClients(const std::shared_ptr<UsbClient>& current,
-                   const std::shared_ptr<UsbClient>& pending) {
+  void SeedClients(const std::shared_ptr<TcpConnection>& current,
+                   const std::shared_ptr<TcpConnection>& pending) {
     std::lock_guard<std::mutex> lock(client_lock_);
-    usb_client_ = current;
-    temp_usb_client_ = pending;
+    tcp_connection_ = current;
+    temp_tcp_connection_ = pending;
   }
 
-  std::shared_ptr<UsbClient> CurrentClient() {
+  std::shared_ptr<TcpConnection> CurrentClient() {
     std::lock_guard<std::mutex> lock(client_lock_);
-    return usb_client_;
+    return tcp_connection_;
   }
 
   bool WaitUntil(std::function<bool()> predicate, int timeout_ms) {
@@ -171,7 +171,7 @@ class TestSocketServer final : public SocketServer {
   }
 };
 
-class UsbReconnectRaceTestSuite : public testing::Test {
+class TcpReconnectRaceTestSuite : public testing::Test {
  protected:
   static void SetUpTestSuite() { core::DebugRouterCore::GetInstance(); }
 
@@ -179,7 +179,7 @@ class UsbReconnectRaceTestSuite : public testing::Test {
 };
 
 class IntegrationConnectionListener final
-    : public SocketServerConnectionListener {
+    : public TcpServerConnectionListener {
  public:
   void OnInit(int32_t code, const std::string& info) override {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -188,7 +188,7 @@ class IntegrationConnectionListener final
     cv_.notify_all();
   }
 
-  void OnStatusChanged(const std::shared_ptr<UsbClient>&,
+  void OnStatusChanged(const std::shared_ptr<TcpConnection>&,
                        ConnectionStatus status, int32_t code,
                        const std::string& info) override {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -196,7 +196,7 @@ class IntegrationConnectionListener final
     cv_.notify_all();
   }
 
-  void OnMessage(const std::shared_ptr<UsbClient>&,
+  void OnMessage(const std::shared_ptr<TcpConnection>&,
                  const std::string& message) override {
     std::lock_guard<std::mutex> lock(mutex_);
     messages_.push_back(message);
@@ -261,13 +261,13 @@ class IntegrationConnectionListener final
   std::vector<std::string> messages_;
 };
 
-class UsbReconnectIntegrationTest : public testing::Test {
+class TcpReconnectIntegrationTest : public testing::Test {
  protected:
   static void SetUpTestSuite() { core::DebugRouterCore::GetInstance(); }
 
   void SetUp() override {
     listener_ = std::make_shared<IntegrationConnectionListener>();
-    server_ = SocketServer::CreateSocketServer(listener_);
+    server_ = TcpServer::CreateTcpServer(listener_);
     server_->Init();
     server_->StartServer();
     ASSERT_TRUE(listener_->WaitForInit(5000));
@@ -284,17 +284,17 @@ class UsbReconnectIntegrationTest : public testing::Test {
   }
 
   std::shared_ptr<IntegrationConnectionListener> listener_;
-  std::shared_ptr<SocketServer> server_;
+  std::shared_ptr<TcpServer> server_;
   int port_ = -1;
 };
 
-TEST_F(UsbReconnectRaceTestSuite,
+TEST_F(TcpReconnectRaceTestSuite,
        StaleOpenAfterNextAcceptDoesNotPromoteOldClient) {
-  auto listener = std::make_shared<RecordingSocketServerListener>();
-  auto server = std::shared_ptr<TestSocketServer>(
-      new TestSocketServer(listener), [](TestSocketServer*) {});
-  auto old_client = std::make_shared<UsbClient>(kInvalidSocket);
-  auto new_client = std::make_shared<UsbClient>(kInvalidSocket);
+  auto listener = std::make_shared<RecordingTcpServerListener>();
+  auto server = std::shared_ptr<TestTcpServer>(
+      new TestTcpServer(listener), [](TestTcpServer*) {});
+  auto old_client = std::make_shared<TcpConnection>(kInvalidSocket);
+  auto new_client = std::make_shared<TcpConnection>(kInvalidSocket);
 
   server->SeedClients(nullptr, new_client);
 
@@ -316,13 +316,13 @@ TEST_F(UsbReconnectRaceTestSuite,
             new_client.get());
 }
 
-TEST_F(UsbReconnectRaceTestSuite,
+TEST_F(TcpReconnectRaceTestSuite,
        PromotedCloseBeforePendingFailureStillNotifiesDisconnect) {
-  auto listener = std::make_shared<RecordingSocketServerListener>();
-  auto server = std::shared_ptr<TestSocketServer>(
-      new TestSocketServer(listener), [](TestSocketServer*) {});
-  auto old_client = std::make_shared<UsbClient>(kInvalidSocket);
-  auto new_client = std::make_shared<UsbClient>(kInvalidSocket);
+  auto listener = std::make_shared<RecordingTcpServerListener>();
+  auto server = std::shared_ptr<TestTcpServer>(
+      new TestTcpServer(listener), [](TestTcpServer*) {});
+  auto old_client = std::make_shared<TcpConnection>(kInvalidSocket);
+  auto new_client = std::make_shared<TcpConnection>(kInvalidSocket);
 
   server->SeedClients(nullptr, old_client);
   server->HandleOnOpenStatus(old_client, 0, "Init Success!");
@@ -347,13 +347,13 @@ TEST_F(UsbReconnectRaceTestSuite,
   EXPECT_EQ(listener->error_count.load(std::memory_order_relaxed), 0);
 }
 
-TEST_F(UsbReconnectRaceTestSuite,
+TEST_F(TcpReconnectRaceTestSuite,
        PromotedErrorBeforePendingFailureStillNotifiesError) {
-  auto listener = std::make_shared<RecordingSocketServerListener>();
-  auto server = std::shared_ptr<TestSocketServer>(
-      new TestSocketServer(listener), [](TestSocketServer*) {});
-  auto old_client = std::make_shared<UsbClient>(kInvalidSocket);
-  auto new_client = std::make_shared<UsbClient>(kInvalidSocket);
+  auto listener = std::make_shared<RecordingTcpServerListener>();
+  auto server = std::shared_ptr<TestTcpServer>(
+      new TestTcpServer(listener), [](TestTcpServer*) {});
+  auto old_client = std::make_shared<TcpConnection>(kInvalidSocket);
+  auto new_client = std::make_shared<TcpConnection>(kInvalidSocket);
 
   server->SeedClients(nullptr, old_client);
   server->HandleOnOpenStatus(old_client, 0, "Init Success!");
@@ -385,7 +385,7 @@ TEST_F(UsbReconnectRaceTestSuite,
   EXPECT_EQ(listener->disconnected_count.load(std::memory_order_relaxed), 0);
 }
 
-TEST_F(UsbReconnectIntegrationTest,
+TEST_F(TcpReconnectIntegrationTest,
        ImmediateReconnectStillDeliversNewConnectionMessages) {
   int sock_a = ConnectToPort(port_);
   ASSERT_GE(sock_a, 0);
@@ -424,7 +424,7 @@ TEST_F(UsbReconnectIntegrationTest,
   EXPECT_EQ(listener_->StatusCount(kError), error_before_b);
 }
 
-TEST_F(UsbReconnectIntegrationTest, StressNoWaitReconnect) {
+TEST_F(TcpReconnectIntegrationTest, StressNoWaitReconnect) {
   const int num_reconnects = 20;
   const std::string init_msg = R"({"event":"Initialize","data":-1})";
   const std::string cmd_msg =

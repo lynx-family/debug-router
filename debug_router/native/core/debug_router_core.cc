@@ -14,7 +14,7 @@
 #include "debug_router/native/core/native_slot.h"
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
-#include "debug_router/native/net/socket_server_client.h"
+#include "debug_router/native/net/tcp_server_transport.h"
 #include "debug_router/native/net/websocket_client.h"
 #include "debug_router/native/processor/message_handler.h"
 #include "debug_router/native/processor/processor.h"
@@ -188,11 +188,11 @@ DebugRouterCore::DebugRouterCore()
   message_transceivers_[transceiver_count++] =
       std::make_shared<net::WebSocketClient>();
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
-  socket_server_client_ = std::make_shared<net::SocketServerClient>();
-  message_transceivers_[transceiver_count++] = socket_server_client_;
+  tcp_server_transport_ = std::make_shared<net::TcpServerTransport>();
+  message_transceivers_[transceiver_count++] = tcp_server_transport_;
 #else
   message_transceivers_[transceiver_count++] =
-      std::make_shared<net::SocketServerClient>();
+      std::make_shared<net::TcpServerTransport>();
 #endif
 #endif
   for (size_t i = 0; i < kTransceiverCount; ++i) {
@@ -371,8 +371,8 @@ bool DebugRouterCore::SetUSBStartPort(int32_t start_port) {
     return false;
   }
   LOGI("SetUSBStartPort: " << start_port);
-  if (!socket_server_client_) {
-    LOGW("SetUSBStartPort ignored because usb server is unavailable.");
+  if (!tcp_server_transport_) {
+    LOGW("SetUSBStartPort ignored because TCP server is unavailable.");
     return false;
   }
   if (server_running_.load(std::memory_order_relaxed)) {
@@ -383,14 +383,14 @@ bool DebugRouterCore::SetUSBStartPort(int32_t start_port) {
         current_transceiver_->Disconnect();
       }
       usb_port_.store(socket_server::kInvalidPort, std::memory_order_relaxed);
-      socket_server_client_->StopServer();
-      socket_server_client_->SetStartPort(start_port);
+      tcp_server_transport_->StopServer();
+      tcp_server_transport_->SetStartPort(start_port);
       if (should_run) {
-        socket_server_client_->StartServer();
+        tcp_server_transport_->StartServer();
       }
     });
   } else {
-    socket_server_client_->SetStartPort(start_port);
+    tcp_server_transport_->SetStartPort(start_port);
   }
   return true;
 }

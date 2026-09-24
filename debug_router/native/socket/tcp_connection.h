@@ -2,8 +2,8 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#ifndef DEBUGROUTER_NATIVE_SOCKET_USB_CLIENT_H_
-#define DEBUGROUTER_NATIVE_SOCKET_USB_CLIENT_H_
+#ifndef DEBUGROUTER_NATIVE_SOCKET_TCP_CONNECTION_H_
+#define DEBUGROUTER_NATIVE_SOCKET_TCP_CONNECTION_H_
 
 #include <atomic>
 
@@ -11,7 +11,7 @@
 #include "debug_router/native/socket/blocking_queue.h"
 #include "debug_router/native/socket/count_down_latch.h"
 #include "debug_router/native/socket/socket_server_type.h"
-#include "debug_router/native/socket/usb_client_listener.h"
+#include "debug_router/native/socket/tcp_connection_listener.h"
 #include "debug_router/native/socket/work_thread_executor.h"
 
 namespace debugrouter {
@@ -19,28 +19,28 @@ namespace base {
 class WorkThreadExecutor;
 }
 namespace socket_server {
-class UsbClientListener;
+class TcpConnectionListener;
 
 extern const char *kMessageQuit;
 
-// Client of socket_server
-class UsbClient : public std::enable_shared_from_this<UsbClient> {
+// A TCP connection accepted by TcpServer, including USB-forwarded peers.
+class TcpConnection : public std::enable_shared_from_this<TcpConnection> {
  public:
   void Init();
   // below three functions work only on one work thread
-  void StartUp(const std::shared_ptr<UsbClientListener> &listener);
+  void StartUp(const std::shared_ptr<TcpConnectionListener> &listener);
   // true means the message are added to message queue
   bool Send(const std::string &message);
 
   void Stop();
 
-  explicit UsbClient(SocketType socket_fd);
-  ~UsbClient();
+  explicit TcpConnection(SocketType socket_fd);
+  ~TcpConnection();
 
-  void SetConnectStatus(USBConnectStatus status);
+  void SetConnectStatus(TcpConnectionStatus status);
 
 #ifdef TESTING
-  void SetListenerForTest(const std::shared_ptr<UsbClientListener> &listener) {
+  void SetListenerForTest(const std::shared_ptr<TcpConnectionListener> &listener) {
     listener_ = listener;
   }
 
@@ -68,7 +68,7 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   void BeginTransportShutdown();
   void NotifyErrorOnce(int32_t code, const std::string &message);
   void NotifyCloseOnce(int32_t code, const std::string &reason);
-  void StartInternal(const std::shared_ptr<UsbClientListener> &listener);
+  void StartInternal(const std::shared_ptr<TcpConnectionListener> &listener);
   // Marks the client as stopping before closing the socket so read/write loops
   // can exit even if DisconnectInternal() is called outside Stop() later.
   void DisconnectInternal();
@@ -121,8 +121,8 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   base::WorkThreadExecutor read_thread_;
   base::WorkThreadExecutor write_thread_;
   base::WorkThreadExecutor dispatch_thread_;
-  std::shared_ptr<UsbClientListener> listener_;
-  std::atomic<USBConnectStatus> connect_status_{USBConnectStatus::DISCONNECTED};
+  std::shared_ptr<TcpConnectionListener> listener_;
+  std::atomic<TcpConnectionStatus> connect_status_{TcpConnectionStatus::DISCONNECTED};
   std::unique_ptr<CountDownLatch> latch_;
 
   base::SocketGuard socket_guard_;
@@ -142,4 +142,4 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
 }  // namespace socket_server
 }  // namespace debugrouter
 
-#endif  // DEBUGROUTER_NATIVE_SOCKET_USB_CLIENT_H_
+#endif  // DEBUGROUTER_NATIVE_SOCKET_TCP_CONNECTION_H_

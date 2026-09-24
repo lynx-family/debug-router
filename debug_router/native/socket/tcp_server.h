@@ -2,8 +2,8 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#ifndef DEBUGROUTER_NATIVE_SOCKET_SOCKET_SERVER_API_H
-#define DEBUGROUTER_NATIVE_SOCKET_SOCKET_SERVER_API_H
+#ifndef DEBUGROUTER_NATIVE_SOCKET_TCP_SERVER_H
+#define DEBUGROUTER_NATIVE_SOCKET_TCP_SERVER_H
 
 #include <atomic>
 #include <mutex>
@@ -14,27 +14,27 @@
 #include "debug_router/native/log/logging.h"
 #include "debug_router/native/socket/count_down_latch.h"
 #include "debug_router/native/socket/socket_server_type.h"
-#include "debug_router/native/socket/usb_client_listener.h"
+#include "debug_router/native/socket/tcp_connection_listener.h"
 #include "debug_router/native/socket/work_thread_executor.h"
 
 namespace debugrouter {
 namespace socket_server {
 
-class SocketServerConnectionListener {
+class TcpServerConnectionListener {
  public:
   virtual void OnInit(int32_t code, const std::string &info) = 0;
-  virtual void OnStatusChanged(const std::shared_ptr<UsbClient> &client,
+  virtual void OnStatusChanged(const std::shared_ptr<TcpConnection> &client,
                                ConnectionStatus status, int32_t code,
                                const std::string &info) = 0;
-  virtual void OnMessage(const std::shared_ptr<UsbClient> &client,
+  virtual void OnMessage(const std::shared_ptr<TcpConnection> &client,
                          const std::string &message) = 0;
 };
 
-class SocketServer : public std::enable_shared_from_this<SocketServer> {
+class TcpServer : public std::enable_shared_from_this<TcpServer> {
  public:
-  explicit SocketServer(
-      const std::shared_ptr<SocketServerConnectionListener> &listener);
-  virtual ~SocketServer();
+  explicit TcpServer(
+      const std::shared_ptr<TcpServerConnectionListener> &listener);
+  virtual ~TcpServer();
 
   void Init();
   bool Send(const std::string &message);
@@ -43,26 +43,26 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   bool SetStartPort(int32_t start_port);
 #endif
 
-  void HandleOnOpenStatus(std::shared_ptr<UsbClient> client, int32_t code,
+  void HandleOnOpenStatus(std::shared_ptr<TcpConnection> client, int32_t code,
                           const std::string &reason);
-  void HandleOnMessageStatus(std::shared_ptr<UsbClient> client,
+  void HandleOnMessageStatus(std::shared_ptr<TcpConnection> client,
                              const std::string &message);
-  void HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
+  void HandleOnCloseStatus(std::shared_ptr<TcpConnection> client,
                            ConnectionStatus status, int32_t code,
                            const std::string &reason);
-  void HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
+  void HandleOnErrorStatus(std::shared_ptr<TcpConnection> client,
                            ConnectionStatus status, int32_t code,
                            const std::string &reason);
-  void ScheduleClientStop(const std::shared_ptr<UsbClient> &client);
+  void ScheduleClientStop(const std::shared_ptr<TcpConnection> &client);
 
-  static std::shared_ptr<SocketServer> CreateSocketServer(
-      const std::shared_ptr<SocketServerConnectionListener> &listener);
+  static std::shared_ptr<TcpServer> CreateTcpServer(
+      const std::shared_ptr<TcpServerConnectionListener> &listener);
 
   void StartServer();
   void StopServer();
 
  protected:
-  static void ThreadFunc(std::shared_ptr<SocketServer> socket_server);
+  static void ThreadFunc(std::shared_ptr<TcpServer> tcp_server);
 
   virtual void Start() = 0;
   virtual int GetErrorMessage() = 0;
@@ -75,15 +75,15 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
 
   void setEnableServer(bool enable);
 
-  std::weak_ptr<SocketServerConnectionListener> listener_;
+  std::weak_ptr<TcpServerConnectionListener> listener_;
   std::queue<std::string> writer_message_queue_;
   std::condition_variable queue_available_;
   std::unique_ptr<CountDownLatch> latch_;
   std::mutex queue_lock_;
   std::mutex client_lock_;
   debugrouter::base::WorkThreadExecutor clean_executor_;
-  std::shared_ptr<UsbClient> usb_client_;
-  std::shared_ptr<UsbClient> temp_usb_client_;
+  std::shared_ptr<TcpConnection> tcp_connection_;
+  std::shared_ptr<TcpConnection> temp_tcp_connection_;
 
   std::atomic<SocketType> socket_fd_{kInvalidSocket};
 
@@ -99,52 +99,51 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   std::mutex serving_mutex_;
 };
 
-// ClientListener
-class ClientListener : public UsbClientListener {
+class TcpConnectionForwarder : public TcpConnectionListener {
  public:
-  ClientListener(std::shared_ptr<SocketServer> socket_server)
-      : socket_server_(socket_server) {}
+  TcpConnectionForwarder(std::shared_ptr<TcpServer> tcp_server)
+      : tcp_server_(tcp_server) {}
 
-  virtual ~ClientListener() = default;
+  virtual ~TcpConnectionForwarder() = default;
 
-  void OnOpen(std::shared_ptr<UsbClient> client, int32_t code,
+  void OnOpen(std::shared_ptr<TcpConnection> client, int32_t code,
               const std::string &reason) override {
-    if (auto socket_server = socket_server_.lock()) {
-      socket_server->HandleOnOpenStatus(client, code, reason);
+    if (auto tcp_server = tcp_server_.lock()) {
+      tcp_server->HandleOnOpenStatus(client, code, reason);
     }
-    client->SetConnectStatus(USBConnectStatus::CONNECTED);
+    client->SetConnectStatus(TcpConnectionStatus::CONNECTED);
   }
 
-  void OnMessage(std::shared_ptr<UsbClient> client,
+  void OnMessage(std::shared_ptr<TcpConnection> client,
                  const std::string &message) override {
-    if (auto socket_server = socket_server_.lock()) {
-      socket_server->HandleOnMessageStatus(client, message);
+    if (auto tcp_server = tcp_server_.lock()) {
+      tcp_server->HandleOnMessageStatus(client, message);
     }
   }
 
-  void OnClose(std::shared_ptr<UsbClient> client, int32_t code,
+  void OnClose(std::shared_ptr<TcpConnection> client, int32_t code,
                const std::string &reason) override {
-    if (auto socket_server = socket_server_.lock()) {
-      socket_server->HandleOnCloseStatus(
+    if (auto tcp_server = tcp_server_.lock()) {
+      tcp_server->HandleOnCloseStatus(
           client, ConnectionStatus::kDisconnected, code, reason);
     }
-    client->SetConnectStatus(USBConnectStatus::DISCONNECTED);
+    client->SetConnectStatus(TcpConnectionStatus::DISCONNECTED);
   }
 
-  void OnError(std::shared_ptr<UsbClient> client, int32_t code,
+  void OnError(std::shared_ptr<TcpConnection> client, int32_t code,
                const std::string &message) override {
-    if (auto socket_server = socket_server_.lock()) {
-      socket_server->HandleOnErrorStatus(client, ConnectionStatus::kError, code,
+    if (auto tcp_server = tcp_server_.lock()) {
+      tcp_server->HandleOnErrorStatus(client, ConnectionStatus::kError, code,
                                          message);
     }
-    client->SetConnectStatus(USBConnectStatus::DISCONNECTED);
+    client->SetConnectStatus(TcpConnectionStatus::DISCONNECTED);
   }
 
  private:
-  std::weak_ptr<SocketServer> socket_server_;
+  std::weak_ptr<TcpServer> tcp_server_;
 };
 
 }  // namespace socket_server
 }  // namespace debugrouter
 
-#endif  // DEBUGROUTER_NATIVE_SOCKET_SOCKET_SERVER_API_H
+#endif  // DEBUGROUTER_NATIVE_SOCKET_TCP_SERVER_H

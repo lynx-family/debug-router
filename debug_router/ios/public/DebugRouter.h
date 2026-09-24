@@ -9,6 +9,8 @@
 #import "DebugRouterMessageHandler.h"
 #import "DebugRouterSessionHandler.h"
 
+// ConnectionTypeUSB is the existing name for connections accepted by the TCP server,
+// including USB-forwarded and direct TCP connections.
 typedef enum : NSUInteger { ConnectionTypeWebSocket, ConnectionTypeUSB, Unknown } ConnectionType;
 
 @protocol DebugRouterStateListener <NSObject>
@@ -28,7 +30,7 @@ typedef enum : NSUInteger { ConnectionTypeWebSocket, ConnectionTypeUSB, Unknown 
 
 @property(readonly, nonnull) NSString *room_id;
 @property(readonly, nonnull) NSString *server_url;
-@property(readonly) int usb_port;
+@property(readonly) int usb_port;  // TCP listening port; name retained for API compatibility.
 @property(readonly) ConnectionState connection_state;
 
 @property(nonatomic, readwrite, nonnull, strong) NSMutableDictionary *app_info
@@ -40,6 +42,7 @@ typedef enum : NSUInteger { ConnectionTypeWebSocket, ConnectionTypeUSB, Unknown 
 
 + (nonnull DebugRouter *)instance;
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+// Sets the TCP listening port; name retained for API compatibility.
 + (BOOL)setUSBStartPort:(int)startPort;
 #endif
 

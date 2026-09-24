@@ -280,8 +280,8 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 - (void)handleDidBecomeActive:(NSNotification *)notification {
   LLogInfo(@"handleDidBecomeActive");
   if (appState_ == BACKGROUND && self.connection_state == DISCONNECTED) {
-    LLogInfo(@"create new usb server");
-    // create new usb server TODO(zhoumingsong.smile)
+    LLogInfo(@"create new TCP server");
+    // create new TCP server TODO(zhoumingsong.smile)
   }
   appState_ = FOREGROUND;
 }

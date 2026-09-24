@@ -6,4 +6,5 @@ package com.lynx.debugrouter;
 
 import androidx.annotation.Keep;
 
+// USB is the existing API name for connections accepted by the TCP server.
 @Keep public enum ConnectionType { WebSocket, USB }

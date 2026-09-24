@@ -13,6 +13,7 @@ namespace core {
 
 enum class ConnectionType {
   kWebSocket,
+  // Existing public name for connections accepted by the TCP server.
   kUsb,
 };
 

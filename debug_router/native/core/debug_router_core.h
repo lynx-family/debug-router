@@ -33,7 +33,7 @@ class Processor;
 }
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
 namespace net {
-class SocketServerClient;
+class TcpServerTransport;
 }
 #endif
 
@@ -108,9 +108,11 @@ class DebugRouterCore : public MessageTransceiverDelegate {
 
   int32_t Plug(const std::shared_ptr<core::NativeSlot> &slot);
 
+  // Existing API name for the TCP listening port (USB-forwarded or direct).
   int32_t GetUSBPort();
 
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+  // Sets the same TCP listening port; existing API name is retained.
   bool SetUSBStartPort(int32_t start_port);
 #endif
 
@@ -202,7 +204,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   std::array<std::shared_ptr<MessageTransceiver>, kTransceiverCount>
       message_transceivers_;
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
-  std::shared_ptr<net::SocketServerClient> socket_server_client_;
+  std::shared_ptr<net::TcpServerTransport> tcp_server_transport_;
 #endif
   int32_t max_session_id_;
   std::unique_ptr<report::DebugRouterNativeReport> report_;

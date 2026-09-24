@@ -2,7 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/native/net/socket_server_client.h"
+#include "debug_router/native/net/tcp_server_transport.h"
 
 #include "debug_router/native/log/logging.h"
 
@@ -10,7 +10,7 @@ namespace debugrouter {
 namespace net {
 
 class ConnectionListener
-    : public debugrouter::socket_server::SocketServerConnectionListener {
+    : public debugrouter::socket_server::TcpServerConnectionListener {
  public:
   ConnectionListener(std::shared_ptr<core::MessageTransceiver> client)
       : client_(client) {}
@@ -28,7 +28,7 @@ class ConnectionListener
     }
   }
 
-  void OnStatusChanged(const std::shared_ptr<socket_server::UsbClient> &,
+  void OnStatusChanged(const std::shared_ptr<socket_server::TcpConnection> &,
                        debugrouter::socket_server::ConnectionStatus status,
                        int32_t code, const std::string &info) {
     if (auto client = client_.lock()) {
@@ -51,7 +51,7 @@ class ConnectionListener
     }
   }
 
-  void OnMessage(const std::shared_ptr<socket_server::UsbClient> &,
+  void OnMessage(const std::shared_ptr<socket_server::TcpConnection> &,
                  const std::string &message) {
     if (auto client = client_.lock()) {
       core::MessageTransceiverDelegate *delegate = client->delegate();
@@ -67,45 +67,45 @@ class ConnectionListener
   std::weak_ptr<core::MessageTransceiver> client_;
 };
 
-SocketServerClient::SocketServerClient() {}
+TcpServerTransport::TcpServerTransport() {}
 
-void SocketServerClient::Init() {
+void TcpServerTransport::Init() {
   listener_ = std::make_shared<ConnectionListener>(shared_from_this());
-  socket_server_ = socket_server::SocketServer::CreateSocketServer(listener_);
-  socket_server_->Init();
+  tcp_server_ = socket_server::TcpServer::CreateTcpServer(listener_);
+  tcp_server_->Init();
 }
 
-bool SocketServerClient::Connect(const std::string &url) { return false; }
+bool TcpServerTransport::Connect(const std::string &url) { return false; }
 
-void SocketServerClient::Disconnect() { socket_server_->Disconnect(); }
+void TcpServerTransport::Disconnect() { tcp_server_->Disconnect(); }
 
-core::ConnectionType SocketServerClient::GetType() {
+core::ConnectionType TcpServerTransport::GetType() {
   return core::ConnectionType::kUsb;
 }
 
-void SocketServerClient::Send(const std::string &data) {
-  socket_server_->Send(data);
+void TcpServerTransport::Send(const std::string &data) {
+  tcp_server_->Send(data);
 }
 
-void SocketServerClient::HandleReceivedMessage(const std::string &message) {
+void TcpServerTransport::HandleReceivedMessage(const std::string &message) {
   // empty
 }
 
-void SocketServerClient::StartServer() {
-  if (socket_server_) {
-    socket_server_->StartServer();
+void TcpServerTransport::StartServer() {
+  if (tcp_server_) {
+    tcp_server_->StartServer();
   }
 }
 
-void SocketServerClient::StopServer() {
-  if (socket_server_) {
-    socket_server_->StopServer();
+void TcpServerTransport::StopServer() {
+  if (tcp_server_) {
+    tcp_server_->StopServer();
   }
 }
 
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
-bool SocketServerClient::SetStartPort(int32_t start_port) {
-  return socket_server_ && socket_server_->SetStartPort(start_port);
+bool TcpServerTransport::SetStartPort(int32_t start_port) {
+  return tcp_server_ && tcp_server_->SetStartPort(start_port);
 }
 #endif
 

@@ -5,29 +5,29 @@
 #include <memory>
 #include <string>
 
-#include "debug_router/native/socket/socket_server_api.h"
+#include "debug_router/native/socket/tcp_server.h"
 #include "gtest/gtest.h"
 
 namespace debugrouter {
 namespace socket_server {
 namespace {
 
-class NoopSocketServerListener final : public SocketServerConnectionListener {
+class NoopTcpServerListener final : public TcpServerConnectionListener {
  public:
   void OnInit(int32_t, const std::string&) override {}
-  void OnStatusChanged(const std::shared_ptr<UsbClient>&, ConnectionStatus,
+  void OnStatusChanged(const std::shared_ptr<TcpConnection>&, ConnectionStatus,
                        int32_t, const std::string&) override {
   }
-  void OnMessage(const std::shared_ptr<UsbClient>&,
+  void OnMessage(const std::shared_ptr<TcpConnection>&,
                  const std::string&) override {}
 };
 
-TEST(SocketServerSmokeTestSuite,
+TEST(TcpServerSmokeTestSuite,
      ConstructAndImmediateDestroyWithoutStartDoesNotCrash) {
   ASSERT_EXIT(
       {
-        auto listener = std::make_shared<NoopSocketServerListener>();
-        auto server = SocketServer::CreateSocketServer(listener);
+        auto listener = std::make_shared<NoopTcpServerListener>();
+        auto server = TcpServer::CreateTcpServer(listener);
         server.reset();
         _exit(0);
       },
