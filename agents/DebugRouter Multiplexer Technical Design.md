@@ -419,8 +419,8 @@ type Snapshot = {
 };
 
 type DeviceSnapshot = DeviceDescription & {
-  ports?: number[];
-  host?: string;
+  ports: number[];
+  host: string;
 };
 
 type ClientSnapshot = ClientDescription;
@@ -481,8 +481,8 @@ To preserve downstream imports without reviving duplicate request handling, `Cli
 
 - `startWatchClient()` -> `startDeviceClientWatcher({ deviceId })`
 - `stopWatchClient()` -> `stopDeviceClientWatcher({ deviceId })`
-- `disConnect()` -> `disconnectDevice`
-- `getHost()` returns the snapshot host, or `127.0.0.1` if missing.
+- `disconnect()` -> `disconnectDevice`
+- `getHost()` returns the required snapshot host serialized from the physical device's `getHost()`.
 
 `MultiplexerUsbClient` is a runtime client proxy object in the connector process. It keeps the original `Client` API shape:
 
@@ -497,7 +497,7 @@ To preserve downstream imports without reviving duplicate request handling, `Cli
 
 `sendRawMessage`, `sendMessage`, and `close` map to the `sendMessageWithReply`, `sendMessageWithoutReply`, and `closeClient` daemon RPCs respectively. `sendCustomizedMessage` and `sendClientMessage` assemble their `Customized` request locally and reuse the `sendMessageWithReply` RPC. `handleMessage()` only handles `client-message` events whose source is `usb-runtime`: CDP/App notifications trigger local events by method, while request-response replies are handled by the daemon-side route table.
 
-`MultiplexerWebSocketClient` is a connector-process compatibility proxy for a real daemon-side WebSocket client. It refreshes `id`, `type`, and `raw_info` from `WebSocketClientSnapshot`, but does not own a real socket. `sendMessage()` selects the `sendMessageWithoutReply` RPC target from the snapshot type: Driver proxies target the specified Web Driver, while other proxies target the WiFi Runtime App. `sendCustomizedMessage()` assembles the request locally and reuses `sendMessageWithReply`; `close()` remains a direct runtime operation. Driver-type proxies also retain `handleListClients()` behavior and build a compatible `ClientList` from the facade's current WiFi and USB mirrors, then send it only to the requesting Driver.
+`MultiplexerWebSocketClient` extends `Client` directly and is a connector-process compatibility proxy for a real daemon-side WebSocket client. It stores a cloned `WebSocketClientSnapshot` in its readonly `info` field and does not construct a socket or WebSocket controller. `sendMessage()` selects the `sendMessageWithoutReply` RPC target from the snapshot type: Driver proxies target the specified Web Driver, while other proxies target the WiFi Runtime App. `sendCustomizedMessage()` assembles the request locally and reuses `sendMessageWithReply`; `close()` calls the `closeClient` RPC. `handleListClients()` remains on the daemon-side `WebSocketClient`, which builds and sends the runtime list to the requesting Driver.
 
 Local mirror synchronization rules:
 
