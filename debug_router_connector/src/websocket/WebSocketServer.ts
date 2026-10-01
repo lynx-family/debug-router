@@ -81,7 +81,9 @@ export class WebSocketController {
       this.driver.emit("websocket-web-client-disconnected", id);
     }
 
-    this.sendClientList();
+    if (client) {
+      this.sendClientList();
+    }
   }
 
   async handleConnection(socket: WebSocket) {
@@ -104,12 +106,13 @@ export class WebSocketController {
     if (info.type === "Driver") {
       this.webClients.set(info.id, client);
       this.driver.emit("websocket-web-client-connected", client);
+      client.handleListClients();
     } else {
       this.websocketAppClients.set(info.id, client);
       this.driver.emit("websocket-app-client-connected", client);
       this.driver.emit("app-client-connected", client);
+      this.sendClientList();
     }
-    this.sendClientList();
   }
 
   onConnection(socket: WebSocket): Promise<WebSocketClientInfo | undefined> {
