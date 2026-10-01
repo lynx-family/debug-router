@@ -55,6 +55,50 @@ inline SocketSendResult SendNoSigPipe(SocketType sock, const void* buffer,
 #endif
 }
 
+namespace internal {
+
+inline bool IsSocketSendInterrupted() {
+#if defined(_WIN32)
+  return WSAGetLastError() == WSAEINTR;
+#else
+  return errno == EINTR;
+#endif
+}
+
+template <typename SendOperation>
+bool SendAllWith(const void* buffer, size_t length,
+                 SendOperation send_operation) {
+  const char* next = static_cast<const char*>(buffer);
+  size_t remaining = length;
+  while (remaining > 0) {
+    const SocketSendResult result = send_operation(next, remaining);
+    if (result > 0) {
+      const size_t sent = static_cast<size_t>(result);
+      if (sent > remaining) {
+        return false;
+      }
+      next += sent;
+      remaining -= sent;
+      continue;
+    }
+    if (result < 0 && IsSocketSendInterrupted()) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+inline bool SendAllNoSigPipe(SocketType sock, const void* buffer,
+                             size_t length) {
+  return SendAllWith(buffer, length,
+                     [sock](const void* remaining, size_t remaining_length) {
+                       return SendNoSigPipe(sock, remaining, remaining_length);
+                     });
+}
+
+}  // namespace internal
+
 class SocketGuard {
  public:
   SocketType Get() {

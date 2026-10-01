@@ -439,8 +439,9 @@ void UsbClient::WriteMessage() {
       }
       std::string result_message;
       WrapHeader(message, result_message);
-      if (base::SendNoSigPipe(socket_guard_.Get(), result_message.c_str(),
-                              result_message.size()) == -1) {
+      if (!base::internal::SendAllNoSigPipe(socket_guard_.Get(),
+                                            result_message.c_str(),
+                                            result_message.size())) {
         LOGE("send error: " << GetErrorMessage() << " message:" << message);
         BeginTransportShutdown();
         NotifyErrorOnce(GetErrorMessage(),
