@@ -103,6 +103,10 @@ export class UsbClient extends Client {
   }
 
   // just send message
+  canSendMessage(): boolean {
+    return this.connection.canSend();
+  }
+
   sendMessage(message: any) {
     this.connection.send(message);
   }

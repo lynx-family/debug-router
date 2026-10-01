@@ -155,14 +155,30 @@ export class WebSocketController {
     });
   }
 
-  sendMessageToApp(id: number, message: string) {
+  sendMessageToDriver(id: number, message: string) {
+    this.webClients.get(id)?.sendMessage(message);
+  }
+
+  sendMessageToApp(id: number, message: string, originId?: number) {
+    try {
+      const data = JSON.parse(message);
+      if (
+        data?.event === "Customized" &&
+        typeof data.debugRouterId === "string"
+      ) {
+        this.driver.handleWsMessage(id, message, originId);
+        return;
+      }
+    } catch {
+      // Preserve legacy handling for malformed messages.
+    }
     const client = this.websocketAppClients.get(id);
     if (client) {
       // send to ws client app
       client.sendMessage(message);
     } else {
       // send to usb client app
-      this.driver.handleWsMessage(id, message);
+      this.driver.handleWsMessage(id, message, originId);
     }
   }
 
