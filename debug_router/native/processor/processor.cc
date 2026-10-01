@@ -223,7 +223,7 @@ void Processor::HandleAppAction(
   if (message_handler_) {
     result = message_handler_->HandleAppAction(app_message_data->method_,
                                                app_message_data->params_);
-    LOGI("MessageHandler: sync result:" << result);
+    LOGV("MessageHandler: sync result:" << result);
   }
   const std::string method =
       (app_message_data ? app_message_data->method_ : "");
