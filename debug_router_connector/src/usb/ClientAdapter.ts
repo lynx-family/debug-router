@@ -182,12 +182,21 @@ export default class ClientAdapter {
       await this.handleConnection(message);
       return;
     }
+
+    const response: any = JSON.parse(message);
+    if (
+      isTypedSocketMessage(response, SocketEvent.Customized) &&
+      this.connection &&
+      !this.connection.shouldAcceptCustomizedResponse(response)
+    ) {
+      return;
+    }
+
     this.driver.emit("usb-client-message", { id: this.id, message });
     if (this.driver.enableWebSocket) {
       this.driver.handleUsbMessage(this.id, message);
     }
 
-    const response: any = JSON.parse(message);
     const data = response.data;
     let callback = null;
     if (isTypedSocketMessage(response, SocketEvent.Customized)) {
@@ -204,7 +213,7 @@ export default class ClientAdapter {
         }
       } else {
         const cdpMessage: any = JSON.parse(data.data.message);
-        if (cdpMessage?.id && this.connection) {
+        if (cdpMessage?.id !== undefined && this.connection) {
           callback = this.connection.matchPendingRequest(
             cdpMessage.id.toString(),
           );

@@ -14,6 +14,7 @@ import {
   ResponseMessageType,
   SocketEvent,
 } from "../utils/type";
+import { CustomizedMessageCorrelation } from "../utils/customized_message_correlation";
 
 export type WebSocketClientInfo = {
   id: number;
@@ -28,6 +29,7 @@ export type WebSocketClientInfo = {
 };
 
 export class WebSocketClient extends Client {
+  private readonly messageCorrelation = new CustomizedMessageCorrelation();
   private pendingRequests: Map<
     string,
     { resolve: (message: string) => void; reject: (err: Error) => void }
@@ -51,7 +53,21 @@ export class WebSocketClient extends Client {
   }
 
   sendMessage(message: string) {
-    this.socket.send(message);
+    let outgoingMessage = message;
+    try {
+      const parsedMessage = JSON.parse(message);
+      const preparedMessage = this.messageCorrelation.prepareRequest(
+        parsedMessage,
+      );
+      if (preparedMessage !== parsedMessage) {
+        outgoingMessage = JSON.stringify(preparedMessage);
+      }
+    } catch (error: any) {
+      defaultLogger.debug(
+        "webSocketClient sendMessage parse error:" + error?.message,
+      );
+    }
+    this.socket.send(outgoingMessage);
   }
 
   close() {
@@ -129,6 +145,12 @@ export class WebSocketClient extends Client {
       defaultLogger.debug("handleMessage received data with type 'string'");
     }
     const message = JSON.parse(dataString);
+    if (
+      this.type() !== "Driver" &&
+      !this.messageCorrelation.shouldAcceptResponse(message)
+    ) {
+      return;
+    }
     if (this.type() === "Driver") {
       this.server.emitEvent("ws-web-message", this.clientId(), dataString);
     } else {
@@ -144,7 +166,7 @@ export class WebSocketClient extends Client {
         const payload = message?.data?.data?.message;
         if (typeof payload === "string") {
           const cdpMessage = JSON.parse(payload);
-          if (cdpMessage?.id) {
+          if (cdpMessage?.id !== undefined) {
             const key = cdpMessage.id.toString();
             const pending = this.pendingRequests.get(key);
             if (pending) {
@@ -241,7 +263,7 @@ export class WebSocketClient extends Client {
         },
       });
 
-      this.socket.send(JSON.stringify(msg));
+      this.sendMessage(JSON.stringify(msg));
     });
   }
 }
