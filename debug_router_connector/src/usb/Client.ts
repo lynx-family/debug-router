@@ -107,6 +107,10 @@ export class UsbClient extends Client {
     this.connection.send(message);
   }
 
+  trySendMessage(message: any): boolean {
+    return this.connection.trySend(message);
+  }
+
   // send ClientMessageHandler message and wait result
   sendClientMessage(method: string, params: Object = {}): Promise<string> {
     return this.sendCustomizedMessage(method, params, -1, "App");
