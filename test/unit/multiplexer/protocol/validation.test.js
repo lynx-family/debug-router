@@ -318,7 +318,10 @@ describe("multiplexer protocol validation", function () {
       const snapshot = { ...createSnapshot(), devices: [device] };
       assert.strictEqual(isDeviceSnapshot(device), valid);
       assert.strictEqual(isSnapshot(snapshot), valid);
-      assert.strictEqual(isControlEvent(createEvent("snapshot", snapshot)), valid);
+      assert.strictEqual(
+        isControlEvent(createEvent("snapshot", snapshot)),
+        valid
+      );
       assert.strictEqual(
         isControlRpcResponse(...createRpcResponse([device], "connectDevices")),
         valid
@@ -438,6 +441,13 @@ describe("multiplexer protocol validation", function () {
         },
       ],
       ["connectUsbClients", { deviceId: "device-1", clientName: "demo" }],
+      [
+        "watchNetworkDeviceAtIp",
+        { ip: "127.0.0.1", port: [8901, 0, -1, 65536, 1.5] },
+      ],
+      ["watchNetworkDeviceAtIp", { ip: "127.0.0.2", port: [] }],
+      ["watchNetworkDeviceAtIp", { ip: "127.0.0.1" }],
+      ["watchNetworkDeviceAtIp", { ip: "127.0.0.1", port: undefined }],
       ["startDeviceClientWatcher", { deviceId: "device-1" }],
       ["stopDeviceClientWatcher", { deviceId: "device-1" }],
       ["disconnectDevice", { deviceId: "device-1" }],
@@ -526,6 +536,16 @@ describe("multiplexer protocol validation", function () {
         action: "start",
         deviceId: "device-1",
       }),
+      ...[
+        {},
+        { ip: "", port: [8901] },
+        { ip: 1, port: [8901] },
+        { ip: "127.0.0.1", port: "8901" },
+        { ip: "127.0.0.1", port: null },
+        { ip: "127.0.0.1", extra: true },
+        { ip: "127.0.0.1", port: ["8901"] },
+        { ip: "127.0.0.1", port: [8901], extra: true },
+      ].map((params) => createRpcRequest("watchNetworkDeviceAtIp", params)),
       createRpcRequest("startDeviceClientWatcher", {}),
       createRpcRequest("startDeviceClientWatcher", { deviceId: 1 }),
       createRpcRequest("startDeviceClientWatcher", { deviceId: "" }),
@@ -621,6 +641,7 @@ describe("multiplexer protocol validation", function () {
         },
       }),
       createRpcResponse([createClientSnapshot()], "connectUsbClients"),
+      createRpcResponse({}, "watchNetworkDeviceAtIp"),
       createRpcResponse({}, "startDeviceClientWatcher"),
       createRpcResponse({}, "stopDeviceClientWatcher"),
       createRpcResponse({}, "startAllDeviceClientWatchers"),

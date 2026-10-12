@@ -27,6 +27,7 @@ type JsonRecord = Record<string, unknown>;
 const CONTROL_RPC_METHODS: ControlRpcMethod[] = [
   "connectDevices",
   "connectUsbClients",
+  "watchNetworkDeviceAtIp",
   "startDeviceClientWatcher",
   "stopDeviceClientWatcher",
   "disconnectDevice",
@@ -314,6 +315,13 @@ export function isControlRpcParams(
         isOptional(params.waitTimeout, isBoolean) &&
         isOptionalStringOrNull(params.clientName)
       );
+    case "watchNetworkDeviceAtIp":
+      return (
+        isString(params.ip) &&
+        params.ip.length > 0 &&
+        isOptional(params.port, isNumberArray) &&
+        Object.keys(params).every((key) => key === "ip" || key === "port")
+      );
     case "startDeviceClientWatcher":
     case "stopDeviceClientWatcher":
       return (
@@ -364,6 +372,7 @@ function isControlRpcResult(
       return isResponseMessage(result);
     case "startWSServer":
       return isWebSocketServerInfo(result);
+    case "watchNetworkDeviceAtIp":
     case "startDeviceClientWatcher":
     case "stopDeviceClientWatcher":
     case "startAllDeviceClientWatchers":

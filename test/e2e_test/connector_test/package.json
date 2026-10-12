@@ -7,7 +7,7 @@
     "test": "npm run test:without-device",
     "test:without-device": "npm run test:multiplexer:without-device",
     "test:legacy:without-device": "node debug_router_connector_auto_test.js --mode no-device",
-    "test:multiplexer:without-device": "node multiplexer/no_device.js && node multiplexer/websocket_routing.js && node multiplexer/wifi_runtime.js",
+    "test:multiplexer:without-device": "node multiplexer/no_device.js && node multiplexer/websocket_routing.js && node multiplexer/wifi_runtime.js && node multiplexer/network_runtime.js",
     "test:multiplexer:wifi-runtime": "node multiplexer/wifi_runtime.js",
     "test:with-device": "npm run test:multiplexer:with-device",
     "test:multiplexer:with-device": "node multiplexer/real_device.js --platform all",

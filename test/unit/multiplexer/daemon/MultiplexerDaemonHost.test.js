@@ -626,23 +626,24 @@ function replaceControlServerForStart() {
 
 function replaceWebSocketStartDependencies({
   detectPortImpl = async (port) => port,
-  addressImpl = () => "127.0.0.1",
+  detectIPv4Impl = async () => ({ selected: { address: "127.0.0.1" } }),
   WebSocketControllerCtor,
 }) {
   const detectPortImport = hostModule.__get__("detect_port_1");
-  const ipImport = hostModule.__get__("ip_1");
+  const detector = hostModule.__get__("InternalIpDetector_1")
+    .InternalIpDetector;
   const webSocketServerImport = hostModule.__get__("WebSocketServer_1");
   const originalDetectPort = detectPortImport.default;
-  const originalAddress = ipImport.address;
+  const originalDetectIPv4 = detector.detectInternalIPv4;
   const originalWebSocketController = webSocketServerImport.WebSocketController;
 
   detectPortImport.default = detectPortImpl;
-  ipImport.address = addressImpl;
+  detector.detectInternalIPv4 = detectIPv4Impl;
   webSocketServerImport.WebSocketController = WebSocketControllerCtor;
 
   return () => {
     detectPortImport.default = originalDetectPort;
-    ipImport.address = originalAddress;
+    detector.detectInternalIPv4 = originalDetectIPv4;
     webSocketServerImport.WebSocketController = originalWebSocketController;
   };
 }
@@ -2802,7 +2803,7 @@ describe("MultiplexerDaemonHost", function () {
         assert.strictEqual(port, 19783);
         return 19001;
       },
-      addressImpl: () => "10.0.0.5",
+      detectIPv4Impl: async () => ({ selected: { address: "10.0.0.5" } }),
       WebSocketControllerCtor: FakeWebSocketController,
     });
     const { host, physical } = createHost({
@@ -2882,7 +2883,7 @@ describe("MultiplexerDaemonHost", function () {
     }
     const reset = replaceWebSocketStartDependencies({
       detectPortImpl: async () => 19001,
-      addressImpl: () => "127.0.0.1",
+      detectIPv4Impl: async () => ({ selected: { address: "127.0.0.1" } }),
       WebSocketControllerCtor: FakeWebSocketController,
     });
     const trace = [];

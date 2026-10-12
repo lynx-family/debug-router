@@ -74,7 +74,7 @@ type WebSocketServerCompat = {
  * | adbHostPort                  | ADB server endpoint; optional host and port use transport defaults. |
  * | hdcHostPort                  | HDC server endpoint; optional host and port use transport defaults. |
  * | usbConnectOpt                | USB connection settings; retryTime is in ms, default/minimum 3000.  |
- * | networkDeviceOpt             | Network target: required IP and array of debugger client ports.     |
+ * | networkDeviceOpt             | Network target: required IP and optional debugger client ports.     |
  * | websocketOption              | Optional shared WebSocket settings; see nested fields below.        |
  * | websocketOption.port         | Legacy compatibility field; ignored, port selection starts at 19783. |
  * | websocketOption.roomId       | Optional room identifier returned in WebSocket RoomJoined.          |
@@ -384,6 +384,13 @@ export class DebugRouterConnector {
     return this.upsertClientSnapshots(snapshots);
   }
 
+  async watchNetworkDeviceAtIp(options: {
+    ip: string;
+    port?: number[];
+  }): Promise<void> {
+    await this.daemonClient.call("watchNetworkDeviceAtIp", options);
+  }
+
   selecteUsbClient(id: number): void {
     if (this.usbClients.has(id)) {
       this.selectedClient = this.usbClients.get(id);
@@ -393,16 +400,6 @@ export class DebugRouterConnector {
   addDeviceManager(_manager: DeviceManager): void {
     defaultLogger.warn(
       "addDeviceManager is ignored by the Multiplexer-only DebugRouterConnector; physical device managers live in the daemon.",
-    );
-  }
-
-  /** TODO: Implement network device watching through the daemon; currently only logs a warning. */
-  async watchNetworkDeviceAtIp(_options: {
-    ip: string;
-    port: number[];
-  }): Promise<void> {
-    defaultLogger.warn(
-      "watchNetworkDeviceAtIp is not implemented on DebugRouterConnector yet; no network device watcher was started.",
     );
   }
 

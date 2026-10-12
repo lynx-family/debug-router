@@ -7,13 +7,14 @@ import NetworkDevice from "./NetworkDevice";
 import { DeviceManager } from "../DeviceManager";
 
 export default class NetworkDeviceManager extends DeviceManager {
-  private readonly networkDeviceOpt:
-    | {
-        ip: string;
-        port: number[];
-      }
-    | undefined;
-  constructor(driver: PhysicalConnector, options: any) {
+  private readonly networkDeviceOpt: {
+    ip: string;
+    port?: number[];
+  };
+  constructor(
+    driver: PhysicalConnector,
+    options: { ip: string; port?: number[] },
+  ) {
     super(driver);
     this.networkDeviceOpt = options;
   }
@@ -21,8 +22,8 @@ export default class NetworkDeviceManager extends DeviceManager {
   async watchDevices() {
     const device = new NetworkDevice(
       this.driver,
-      this.networkDeviceOpt!.ip,
-      this.networkDeviceOpt!.port,
+      this.networkDeviceOpt.ip,
+      this.networkDeviceOpt.port,
     );
     if (!this.driver.devices.has(device.serial)) {
       this.driver.traceRecorder?.recordDevicePlug(device.serial, {
