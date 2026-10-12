@@ -8,13 +8,15 @@ import { PhysicalConnector } from "../../physical";
 import { getDriverReportService } from "../../report/interface/DriverReportService";
 
 export default class NetworkDevice extends BaseDevice {
-  constructor(driver: PhysicalConnector, ip: string, ports: number[]) {
+  constructor(driver: PhysicalConnector, ip: string, ports?: number[]) {
     super(driver, {
       serial: ip,
       title: "NetworkDevice_" + ip,
       os: DeviceOS.Network,
     });
-    this.port = ports;
+    if (ports !== undefined) {
+      this.port = ports;
+    }
   }
 
   getHost(): string {

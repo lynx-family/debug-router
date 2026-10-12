@@ -44,7 +44,7 @@ export type PhysicalConnectorOption = {
   networkDeviceOpt?: {
     ip: string;
     // a network device can have multi debugger clients
-    port: number[];
+    port?: number[];
   };
   traceRecorder?: ConnectionTraceRecorder | null;
 };
@@ -63,7 +63,7 @@ export class PhysicalConnector {
   private readonly networkDeviceOpt:
     | {
         ip: string;
-        port: number[];
+        port?: number[];
       }
     | undefined;
   readonly adbOption: any;
@@ -73,6 +73,10 @@ export class PhysicalConnector {
   };
   private closed: boolean = false;
   private devicesManager: Set<DeviceManager>;
+  private readonly networkDeviceManagers = new Map<
+    string,
+    NetworkDeviceManager
+  >();
 
   constructor(
     option: PhysicalConnectorOption = {
@@ -136,9 +140,15 @@ export class PhysicalConnector {
     if (this.enableNetworkDevice) {
       if (this.networkDeviceOpt) {
         // NetWorkDevices use ip as their serial.
-        this.devicesManager.add(
-          new NetworkDeviceManager(this, this.networkDeviceOpt),
+        const networkDeviceManager = new NetworkDeviceManager(
+          this,
+          this.networkDeviceOpt,
         );
+        this.networkDeviceManagers.set(
+          this.networkDeviceOpt.ip,
+          networkDeviceManager,
+        );
+        this.devicesManager.add(networkDeviceManager);
       } else {
         getDriverReportService()?.report("network_connect_error", null, {
           msg: "networkDeviceOpt == undefined",
@@ -168,6 +178,25 @@ export class PhysicalConnector {
   ): Promise<BaseDevice[]> {
     await this.startDeviceListeners();
     return this.getDevices(timeout, serial);
+  }
+
+  async watchNetworkDeviceAtIp(options: {
+    ip: string;
+    port?: number[];
+  }): Promise<void> {
+    if (this.networkDeviceManagers.has(options.ip)) {
+      return;
+    }
+    const networkDeviceManager = new NetworkDeviceManager(this, options);
+    this.networkDeviceManagers.set(options.ip, networkDeviceManager);
+    this.devicesManager.add(networkDeviceManager);
+    await networkDeviceManager.watchDevices().catch((e) => {
+      getDriverReportService()?.report("device_connect_error", null, {
+        msg: "watchDevices error:" + e?.message,
+        stage: "device",
+      });
+      throw e;
+    });
   }
 
   private async startDeviceListeners() {

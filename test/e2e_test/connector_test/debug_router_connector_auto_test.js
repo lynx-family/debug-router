@@ -631,10 +631,14 @@ async function main() {
   logStep("TEST SUCCESS");
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error("[connector-auto-test] TEST FAILED");
-    console.error(error && error.stack ? error.stack : error);
-    process.exit(1);
-  });
+module.exports = { startFakeDebugRouterAppServer };
+
+if (require.main === module) {
+  main()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error("[connector-auto-test] TEST FAILED");
+      console.error(error && error.stack ? error.stack : error);
+      process.exit(1);
+    });
+}

@@ -4,7 +4,7 @@
 
 import { BaseDevice } from "../../device/BaseDevice";
 import detectPort from "detect-port";
-import { address } from "ip";
+import { InternalIpDetector } from "../../utils/InternalIpDetector";
 import {
   PhysicalConnector,
   PhysicalConnectorOption,
@@ -613,6 +613,13 @@ export class MultiplexerDaemonHost {
         return this.connectUsbClients(
           message.params as ControlRpcParams["connectUsbClients"],
         );
+      case "watchNetworkDeviceAtIp":
+        await this.physicalConnector.watchNetworkDeviceAtIp(
+          message.params as ControlRpcParams["watchNetworkDeviceAtIp"],
+        );
+        // A repeated watch may not emit a device event; replay for this caller.
+        this.sendSnapshot([controlId]);
+        return undefined;
       case "startDeviceClientWatcher":
         return this.startWatchClient(
           (message.params as ControlRpcParams["startDeviceClientWatcher"])
@@ -913,7 +920,8 @@ export class MultiplexerDaemonHost {
 
   private async startWebSocketServerInternal(): Promise<WebSocketServerInfo> {
     const wssPort = await detectPort(DEFAULT_DEV_SERVE_PORT);
-    const wssHost = `${address()}:${wssPort}`;
+    const detectionResult = await InternalIpDetector.detectInternalIPv4();
+    const wssHost = `${detectionResult.selected.address}:${wssPort}`;
     const info: WebSocketServerInfo = {
       port: wssPort,
       host: wssHost,

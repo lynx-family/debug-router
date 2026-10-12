@@ -77,6 +77,7 @@ export type WebSocketServerInfo = {
 export type ControlRpcMethod =
   | "connectDevices"
   | "connectUsbClients"
+  | "watchNetworkDeviceAtIp"
   | "startDeviceClientWatcher"
   | "stopDeviceClientWatcher"
   | "disconnectDevice"
@@ -99,6 +100,10 @@ export type ControlRpcParams = {
     timeout?: number;
     waitTimeout?: boolean;
     clientName?: string | null;
+  };
+  watchNetworkDeviceAtIp: {
+    ip: string;
+    port?: number[];
   };
   startDeviceClientWatcher: {
     deviceId: string;
@@ -149,6 +154,7 @@ export type ControlRpcParams = {
 export type ControlRpcResult = {
   connectDevices: DeviceSnapshot[];
   connectUsbClients: ClientSnapshot[];
+  watchNetworkDeviceAtIp: {};
   startDeviceClientWatcher: {};
   stopDeviceClientWatcher: {};
   disconnectDevice: {};

@@ -261,6 +261,11 @@ There is no separate `MultiplexerDaemon` lifecycle wrapper. Host options are pro
 - Owning the real `PhysicalConnector`.
 - Starting the fixed local control server and handling health/register first-message handshakes.
 - Starting the WebSocket server that continues to use `/mdevices/page/android`.
+- Selecting its advertised IPv4 with `InternalIpDetector`: use the OS UDP route
+  to `223.5.5.5` (without sending a packet), then fall back to the first
+  non-loopback, non-link-local IPv4 interface if the probe fails or times out.
+  Startup rejects when no address is available; the existing shared-start
+  promise allows callers to retry after the failure.
 - Managing device watchers, runtime client watchers, and WebSocket clients.
 - Serializing snapshots and broadcasting control events.
 - Rewriting message IDs, managing pending routes, and routing responses.
@@ -338,6 +343,7 @@ The current method contracts are:
 | ------------------------------ | --------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------- |
 | `connectDevices`               | `{ timeout?, serial?, isAutoListenClients? }`       | `DeviceSnapshot[]`    | Start physical discovery and return the current matching devices.            |
 | `connectUsbClients`            | `{ deviceId, timeout?, waitTimeout?, clientName? }` | `ClientSnapshot[]`    | Start one device's runtime watcher and return the current matching runtimes. |
+| `watchNetworkDeviceAtIp`       | `{ ip, port?: number[] }`                            | `{}`                  | Add a daemon-owned network device at runtime, deduplicated by IP.             |
 | `startDeviceClientWatcher`     | `{ deviceId }`                                      | `{}`                  | Start one device's runtime watcher without returning a snapshot.             |
 | `stopDeviceClientWatcher`      | `{ deviceId }`                                      | `{}`                  | Stop one device's runtime watcher without disconnecting the device.          |
 | `disconnectDevice`             | `{ deviceId }`                                      | `{}`                  | Disconnect one physical device.                                              |
@@ -362,6 +368,19 @@ Single-device watching uses separate `startDeviceClientWatcher({ deviceId })` an
 `MultiplexerDaemonClient` validates the complete request before connecting and sending, and `MultiplexerControlConnection` validates it again on receipt. The client first accepts the common response envelope, then validates a successful `result` against the pending RPC's method. Recognized optional fields and most DTOs allow unknown additional fields for additive protocol evolution; exact no-parameter RPCs and the two single-device watcher parameter objects intentionally reject extra fields.
 
 The default RPC timeout is 5000 ms. RPCs with a positive operation `timeout` use `max(rpcTimeout, timeout + 1000ms)`; RPCs without an operation timeout continue to use the default timeout, with no method-specific exception.
+
+`watchNetworkDeviceAtIp` requires a non-empty `ip` and accepts an optional numeric `port` array;
+it does not restrict the numbers to integers or a port range. Omitting `port` uses
+BaseDevice defaults (8901–8919, with the count overridable by `DriverPortCount`).
+An explicit empty array registers only the device. Host
+delegates to `PhysicalConnector`, which retains one manager per IP, including
+the constructor-configured network device. The first ports for that IP win.
+Host sends a snapshot to each caller even when a repeated watch emits no new
+device event. Existing Host `manualConnect` behavior controls automatic runtime
+client watching. The facade only forwards the RPC and filters network devices
+using `enableNetworkDevice`. It does not retain watch parameters or replay
+dynamic watches after a daemon restart; callers must request them again.
+The new RPC remains part of protocol version 1.
 
 ### 8.3 Event
 
@@ -524,7 +543,7 @@ Local mirror synchronization rules:
 `startWSServer` RPC runs inside the daemon:
 
 1. Start from the legacy default port `19783` and use `detect-port` to avoid conflicts. The public `websocketOption.port` field is retained but ignored, matching the legacy Connector behavior.
-2. Use `ip.address()` to build the host and return `WebSocketServerInfo`.
+2. Use `InternalIpDetector.detectInternalIPv4()` to select the OS-routed IPv4 (with an interface fallback), build the host, and return `WebSocketServerInfo`.
 3. Create `WebSocketController` and listen on `/mdevices/page/android`.
 
 The Connector facade forwards each enabled `startWSServer()` call to Host. Its existing desired-start state allows snapshots arriving before the RPC response to be exposed locally; startup idempotency and requester tracking belong to Host. Failed startup RPCs clear local WebSocket client mirrors and schedule recovery.
