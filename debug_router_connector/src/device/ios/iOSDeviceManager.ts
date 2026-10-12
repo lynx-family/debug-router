@@ -5,7 +5,7 @@
 import * as plist from "plist";
 import iOSDevice from "./iOSDevice";
 import { DeviceManager } from "../DeviceManager";
-import { DebugRouterConnector } from "../../connector";
+import { PhysicalConnector } from "../../physical";
 import { defaultLogger } from "../../utils/logger";
 import { getDriverReportService } from "../../report/interface/DriverReportService";
 import { Socket } from "net";
@@ -21,7 +21,7 @@ export default class IOSDeviceManager extends DeviceManager {
   // lockdown port
   private readonly LOCKDOWN_PORT: number = 62078;
   private listener: DeviceWatchStatusSocket | null = null;
-  constructor(driver: DebugRouterConnector) {
+  constructor(driver: PhysicalConnector) {
     super(driver);
   }
 

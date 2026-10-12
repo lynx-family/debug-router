@@ -59,10 +59,9 @@ function createClient(id, type = "Driver") {
   };
 }
 
-function createController(hostOverrides = {}) {
+function createController() {
   const calls = {
     emitted: [],
-    handleWsMessage: [],
     handleWebSocketDriverMessage: [],
     handleWebSocketAppMessage: [],
     createClientId: 0,
@@ -104,12 +103,6 @@ function createController(hostOverrides = {}) {
         payload,
       });
     },
-    handleWsMessage(id, message) {
-      calls.handleWsMessage.push({
-        id,
-        message,
-      });
-    },
     handleWebSocketDriverMessage(webClientId, targetClientId, message) {
       calls.handleWebSocketDriverMessage.push({
         webClientId,
@@ -123,7 +116,6 @@ function createController(hostOverrides = {}) {
         message,
       });
     },
-    ...hostOverrides,
   };
   const controller = Object.create(WebSocketController.prototype);
   controller.controllerHost = host;
@@ -147,47 +139,30 @@ function createController(hostOverrides = {}) {
 }
 
 describe("WebSocketController", function () {
-  it("routes web-originated messages through the host instead of direct app delivery", function () {
+  it("routes web-originated WiFi and USB messages through the host", function () {
     const { controller, calls } = createController();
     const app = createClient(10, "runtime");
     controller.websocketAppClients.set(10, app);
 
-    controller.sendMessageToApp(10, "from-control");
-    controller.sendMessageToApp(10, "from-web", 99);
-    controller.sendMessageToApp(11, "to-usb");
+    controller.sendMessageToApp(10, "to-wifi", 99);
+    controller.sendMessageToApp(11, "to-usb", 100);
 
-    assert.deepStrictEqual(app.sent, ["from-control"]);
+    assert.deepStrictEqual(app.sent, []);
     assert.deepStrictEqual(calls.handleWebSocketDriverMessage, [
       {
         webClientId: 99,
         targetClientId: 10,
-        message: "from-web",
+        message: "to-wifi",
       },
-    ]);
-    assert.deepStrictEqual(calls.handleWsMessage, [
       {
-        id: 11,
+        webClientId: 100,
+        targetClientId: 11,
         message: "to-usb",
       },
     ]);
   });
 
-  it("falls back to legacy websocket app broadcasting when the host app-message hook is absent", function () {
-    const { controller, calls } = createController();
-    delete controller.controllerHost.handleWebSocketAppMessage;
-    const firstWeb = createClient(1, "Driver");
-    const secondWeb = createClient(2, "Driver");
-    controller.webClients.set(1, firstWeb);
-    controller.webClients.set(2, secondWeb);
-
-    controller.handleWebSocketAppMessage(40, "app-message");
-
-    assert.deepStrictEqual(firstWeb.sent, ["app-message"]);
-    assert.deepStrictEqual(secondWeb.sent, ["app-message"]);
-    assert.deepStrictEqual(calls.handleWebSocketAppMessage, []);
-  });
-
-  it("delegates websocket app messages to the host when the hook exists", function () {
+  it("delegates websocket app messages to the host without broadcasting", function () {
     const { controller, calls } = createController();
     const web = createClient(1, "Driver");
     controller.webClients.set(1, web);

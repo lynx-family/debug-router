@@ -3,7 +3,7 @@ import TargetClient from "../../utils/hdc/TargetClient";
 import Forward from "../../utils/hdc/Forward";
 
 import { defaultLogger } from "../../utils/logger";
-import { DebugRouterConnector } from "../../connector";
+import { PhysicalConnector } from "../../physical";
 import { BaseDevice } from "../BaseDevice";
 import detectPort from "detect-port";
 import { DeviceOS } from "../../utils/type";
@@ -14,7 +14,7 @@ export default class HarmonyDevice extends BaseDevice {
   private static readonly localBasePort: number = 15000;
 
   constructor(
-    driver: DebugRouterConnector,
+    driver: PhysicalConnector,
     serial: string,
     title: string,
     hdc: Client,

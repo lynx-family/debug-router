@@ -254,7 +254,7 @@ The responsibility boundary is:
 
 There is no separate `MultiplexerDaemon` lifecycle wrapper. Host options are provided once at construction, and `host.start()` only activates the resources represented by that configuration. Host-requested idle or explicit shutdown is routed back to entry, which stops Host before ending the process.
 
-`MultiplexerControlServer` now accepts the concrete `MultiplexerDaemonHost` type because the facade migration is complete and no separate control-host interface is needed. `WebSocketController` retains its smaller structural host contract because the same server-side connection component still delegates device/runtime access and message routing through that boundary.
+`MultiplexerControlServer` and `WebSocketController` both accept the concrete `MultiplexerDaemonHost` type now that the facade migration is complete. They delegate device/runtime access and message routing directly to the daemon Host.
 
 `MultiplexerDaemonHost` is the core daemon object. It is responsible for:
 
@@ -513,13 +513,15 @@ Local mirror synchronization rules:
 
 ## 10. WebSocket Frontend Path
 
-`WebSocketController` has been decoupled from the concrete `DebugRouterConnector` class and depends on the structural `WebSocketControllerHost`. In the current Multiplexer implementation, that host is the daemon-side `MultiplexerDaemonHost`.
+`WebSocketController` depends directly on the daemon-side `MultiplexerDaemonHost`, which owns device/runtime access and message routing.
 
 `startWSServer` RPC runs inside the daemon:
 
 1. Start from the legacy default port `19783` and use `detect-port` to avoid conflicts. The public `websocketOption.port` field is retained but ignored, matching the legacy Connector behavior.
 2. Use `ip.address()` to build the host and return `WebSocketServerInfo`.
 3. Create `WebSocketController` and listen on `/mdevices/page/android`.
+
+The Connector facade forwards each enabled `startWSServer()` call to Host. Its existing desired-start state allows snapshots arriving before the RPC response to be exposed locally; startup idempotency and requester tracking belong to Host. Failed startup RPCs clear local WebSocket client mirrors and schedule recovery.
 
 Concurrent requesters share one `webSocketServerStarting` Promise. Host marks the server started and stores `WebSocketServerInfo` only after that Promise succeeds. If startup fails, it removes the current requester, clears and closes the partially created controller, and clears the in-flight Promise so a later request can retry; fields that were never committed as started do not need duplicate reset assignments.
 
@@ -543,7 +545,7 @@ Message paths:
 
 Current implementation boundaries:
 
-- `WebSocketController` still keeps a compatibility branch that sends directly to `websocketAppClients` when `fromWebClientId` is missing.
+- `WebSocketController.sendMessageToApp()` requires `fromWebClientId` and always delegates to Host routing. App-originated messages likewise go directly to Host through `handleWebSocketAppMessage()`.
 - In the current daemon path, Driver frontend `Customized` messages carry `fromWebClientId`, so they enter Host unified routing.
 - Host unified outbound routing supports both `PhysicalConnector.usbClients` and `WebSocketController.websocketAppClients`; both runtime types share message-ID rewriting, pending routes, and targeted response delivery.
 - `sendMessageWithReply` remains a Runtime-only RPC operation. The public `sendCustomizedMessage` helper reuses it. `closeClient` checks WebSocket App clients, then WebSocket Driver clients, then USB clients. `sendMessageWithoutReply` selects the client identity domain first: `target: "app"` checks only WebSocket App and USB clients, while `target: "web"` routes only through the Web Driver controller, so overlapping numeric ids cannot redirect a message across domains.

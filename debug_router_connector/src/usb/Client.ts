@@ -4,15 +4,11 @@
 
 import { Client } from "../connector/Client";
 import {
-  ClientDescription,
-  CustomizedEventType,
-  CustomizeResponseType,
   CDPEventHandler,
+  ClientDescription,
   EventHandler,
-  isCustomizedEventType,
   RequireMessageType,
   ResponseMessageType,
-  SocketEvent,
 } from "../utils/type";
 import { Connection } from "./Connection";
 
@@ -36,77 +32,40 @@ export class UsbClient extends Client {
     this.connection.close();
   }
 
-  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
-  on(event: string, callback: EventHandler) {
-    this.connection.on(event, callback);
+  on(event: string, callback: EventHandler): void {
+    // This functionality has moved to the corresponding multiplexer mirror.
   }
 
-  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
-  onAllEvents(callback: CDPEventHandler) {
-    this.connection.onAllEvents(callback);
+  onAllEvents(callback: CDPEventHandler): void {
+    // This functionality has moved to the corresponding multiplexer mirror.
   }
 
-  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
-  off(event: string, callback: EventHandler) {
-    this.connection.off(event, callback);
+  off(event: string, callback: EventHandler): void {
+    // This functionality has moved to the corresponding multiplexer mirror.
   }
 
-  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
-  once(event: string, callback: EventHandler) {
-    this.connection.once(event, callback);
+  once(event: string, callback: EventHandler): void {
+    // This functionality has moved to the corresponding multiplexer mirror.
   }
 
-  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   protected rawSend(message: RequireMessageType): Promise<ResponseMessageType> {
-    return new Promise(async (resolve, reject) => {
-      const response = await this.connection.sendExpectResponse(message);
-      resolve(response);
-    });
+    // This functionality has moved to the corresponding multiplexer mirror.
+    return Promise.resolve({} as ResponseMessageType);
   }
 
-  // send sendCustomizedMessage and wait result
-  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   sendCustomizedMessage(
     method: string,
     params: Object = "",
     sessionId: number = -1,
     type: string = "CDP",
   ): Promise<string> {
-    const id = Client.messageIdCounter++;
-    const msg: RequireMessageType = {
-      event: SocketEvent.Customized,
-      data: {
-        type: type,
-        data: {
-          client_id: -1,
-          session_id: sessionId,
-          message: {
-            id: id,
-            method: method,
-            params: params,
-          },
-        },
-        sender: 0,
-      },
-    };
-    return new Promise(async (resolve, reject) => {
-      const response: ResponseMessageType = (await this.rawSend(
-        msg,
-      )) as CustomizeResponseType;
-      if (
-        isCustomizedEventType(response, CustomizedEventType.CDP) ||
-        isCustomizedEventType(response, CustomizedEventType.App)
-      ) {
-        // @ts-ignore
-        resolve(response.data.data.message);
-      }
-    });
+    // This functionality has moved to the corresponding multiplexer mirror.
+    return Promise.resolve("");
   }
 
-  // send message and wait result
-  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   sendRawMessage(message: RequireMessageType): Promise<ResponseMessageType> {
-    return this.rawSend(message);
+    // This functionality has moved to the corresponding multiplexer mirror.
+    return Promise.resolve({} as ResponseMessageType);
   }
 
   // just send message
@@ -114,9 +73,8 @@ export class UsbClient extends Client {
     this.connection.send(message);
   }
 
-  // send ClientMessageHandler message and wait result
-  // TODO: Remove this legacy implementation after migrating the DebugRouterConnector entry point.
   sendClientMessage(method: string, params: Object = {}): Promise<string> {
-    return this.sendCustomizedMessage(method, params, -1, "App");
+    // This functionality has moved to the corresponding multiplexer mirror.
+    return Promise.resolve("");
   }
 }
