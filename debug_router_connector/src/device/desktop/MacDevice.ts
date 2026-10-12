@@ -3,11 +3,11 @@
 // LICENSE file in the root directory of this source tree.
 
 import { BaseDevice } from "../BaseDevice";
-import { DebugRouterConnector } from "../../connector/DebugRouterConnector";
+import { PhysicalConnector } from "../../physical";
 import { DeviceOS } from "../../utils/type";
 
 export default class MacDevice extends BaseDevice {
-  constructor(driver: DebugRouterConnector) {
+  constructor(driver: PhysicalConnector) {
     super(driver, {
       serial: "Mac",
       title: "Mac",

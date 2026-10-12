@@ -114,6 +114,12 @@ jobs:
         run: |-
           source tools/envsetup.sh
           python3 test/connect_test/check_android_connection_ci.py -t websocket
+      - name: Run multiplexer Android WiFi E2E tests
+        timeout-minutes: 10
+        run: |-
+          source tools/envsetup.sh
+          cd test/e2e_test/connector_test
+          npm run test:multiplexer:with-device:wifi:android
 
   android-usb-connection-ci-check:
     runs-on: lynx-ubuntu-22.04-physical-medium
@@ -138,6 +144,12 @@ jobs:
         run: |-
           source tools/envsetup.sh
           python3 test/connect_test/check_android_connection_ci.py -t usb
+      - name: Run multiplexer Android USB E2E tests
+        timeout-minutes: 10
+        run: |-
+          source tools/envsetup.sh
+          cd test/e2e_test/connector_test
+          npm run test:multiplexer:with-device:android -- --require-message-roundtrip
 
   android-unittest-check:
     runs-on: lynx-ubuntu-22.04-physical-medium
@@ -289,6 +301,16 @@ jobs:
       - name: Run multiplexer unit tests
         working-directory: debug_router_connector
         run: npm run test:multiplexer
+      - name: Run multiplexer integration tests
+        working-directory: debug_router_connector
+        run: npm run test:integration:multiplexer
+      - name: Install connector E2E dependencies
+        working-directory: test/e2e_test/connector_test
+        run: npm ci
+      # Real-device stress suites are manual-only; Android E2E runs in the device jobs.
+      - name: Run multiplexer E2E tests without devices
+        working-directory: test/e2e_test/connector_test
+        run: npm run test:multiplexer:without-device
 
   debug-router-connector-npm-package-build:
     runs-on: lynx-ubuntu-22.04-medium

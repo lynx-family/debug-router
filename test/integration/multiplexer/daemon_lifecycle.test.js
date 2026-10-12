@@ -84,6 +84,17 @@ describe("multiplexer integration daemon lifecycle", function () {
     );
   });
 
+  it("stops an enableDebugMode daemon when its Connector closes", async function () {
+    context = createIntegrationContext("daemon-force-close", {
+      multiplexerDaemonIdleTimeout: 30000,
+    });
+    const connector = context.createConnector({ enableDebugMode: true });
+    await connector.connectDevices(-1, null, false);
+    const info = await waitFor(() => getUsableDiscovery(context.discovery));
+    await connector.close();
+    await waitFor(() => !processExists(info.pid), 2000);
+  });
+
   it("finds an unreachable daemon by argv0 marker and force-stops only the exact match", async function () {
     context = createIntegrationContext("daemon-process-name-cleanup", {
       replacementTimeout: platformTimeout(100),

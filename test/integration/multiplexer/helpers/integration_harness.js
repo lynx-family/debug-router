@@ -12,6 +12,9 @@ const { WebSocket } = require(require.resolve("ws", {
 }));
 
 const {
+  DebugRouterConnector,
+} = require("../../../../debug_router_connector/dist/cjs/src/connector/DebugRouterConnector");
+const {
   MultiplexerDaemonClient,
 } = require("../../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDaemonClient");
 const {
@@ -104,6 +107,7 @@ function createIntegrationContext(name, option = {}) {
   });
 
   const clients = [];
+  const connectors = [];
   const sockets = [];
 
   return {
@@ -167,6 +171,34 @@ function createIntegrationContext(name, option = {}) {
       clients.push(client);
       return client;
     },
+    createConnector(extra = {}) {
+      const connector = new DebugRouterConnector({
+        manualConnect: true,
+        enableDebugMode: extra.enableDebugMode ?? false,
+        enableAndroid: extra.enableAndroid ?? true,
+        enableIOS: extra.enableIOS ?? false,
+        enableHarmony: extra.enableHarmony ?? false,
+        enableDesktop: extra.enableDesktop ?? false,
+        enableNetworkDevice: extra.enableNetworkDevice ?? false,
+        enableWebSocket: extra.enableWebSocket ?? option.enableWebSocket,
+        websocketOption: extra.websocketOption ?? option.websocketOption,
+        multiplexerRootDir: rootDir,
+        multiplexerLegacyDriverDir: legacyDriverDir,
+        multiplexerDaemonEntry: fakeDaemonEntry,
+        multiplexerStartupTimeout:
+          extra.startupTimeout ??
+          option.startupTimeout ??
+          platformTimeout(DEFAULT_STARTUP_TIMEOUT),
+        multiplexerRpcTimeout: extra.rpcTimeout ?? 1000,
+        multiplexerDaemonIdleTimeout:
+          extra.multiplexerDaemonIdleTimeout ??
+          option.multiplexerDaemonIdleTimeout ??
+          DEFAULT_TEST_DAEMON_IDLE_TIMEOUT,
+        connectionTrace: extra.connectionTrace,
+      });
+      connectors.push(connector);
+      return connector;
+    },
     writeState(state) {
       writeFakeState(paths, state);
     },
@@ -189,6 +221,9 @@ function createIntegrationContext(name, option = {}) {
           ) {
             socket.close();
           }
+        }
+        for (const connector of connectors.splice(0)) {
+          await connector.close().catch(() => {});
         }
         for (const client of clients.splice(0)) {
           await client.close().catch(() => {});
@@ -367,6 +402,12 @@ async function getHealth(controlEndpoint) {
     });
   });
   return { statusCode: 200, body };
+}
+
+function collectConnectorEvents(connector, event) {
+  const payloads = [];
+  connector.on(event, (payload) => payloads.push(payload));
+  return payloads;
 }
 
 function createCustomizedEnvelope(clientId, cdpId, marker) {
@@ -604,6 +645,7 @@ async function reconnectDaemonClient(client) {
 
 module.exports = {
   DEFAULT_STATE,
+  collectConnectorEvents,
   connectDriverWebSocket,
   connectRuntimeWebSocket,
   createCustomizedEnvelope,

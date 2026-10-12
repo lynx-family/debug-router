@@ -4,11 +4,11 @@
 
 import { DeviceOS } from "../../utils/type";
 import { BaseDevice } from "../BaseDevice";
-import { DebugRouterConnector } from "../../connector/DebugRouterConnector";
+import { PhysicalConnector } from "../../physical";
 import { getDriverReportService } from "../../report/interface/DriverReportService";
 
 export default class NetworkDevice extends BaseDevice {
-  constructor(driver: DebugRouterConnector, ip: string, ports: number[]) {
+  constructor(driver: PhysicalConnector, ip: string, ports: number[]) {
     super(driver, {
       serial: ip,
       title: "NetworkDevice_" + ip,

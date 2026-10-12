@@ -9,12 +9,10 @@ import { BaseDevice } from "../device/BaseDevice";
 import { getDriverReportService } from "../report/interface/DriverReportService";
 import { defaultLogger } from "../utils/logger";
 import { DebugerRouterDriverEvents } from "../utils/type";
-import type { DebugRouterConnector } from "../connector/DebugRouterConnector";
 import type { MultiplexerDaemonHost } from "../multiplexer/daemon/MultiplexerDaemonHost";
 
 export class WebSocketController {
-  // TODO: Use only MultiplexerDaemonHost after migrating the DebugRouterConnector entry point.
-  private controllerHost: DebugRouterConnector | MultiplexerDaemonHost;
+  private controllerHost: MultiplexerDaemonHost;
   private port: number;
   private host: string;
   private roomId: string;
@@ -27,8 +25,7 @@ export class WebSocketController {
   private webClients: Map<number, WebSocketClient> = new Map();
 
   constructor(
-    // TODO: Accept only MultiplexerDaemonHost after migrating the DebugRouterConnector entry point.
-    host: DebugRouterConnector | MultiplexerDaemonHost,
+    host: MultiplexerDaemonHost,
     option: {
       port: number;
       host: string;
@@ -213,42 +210,16 @@ export class WebSocketController {
     this.webClients.get(id)?.sendMessage(message);
   }
 
-  sendMessageToApp(id: number, message: string, fromWebClientId?: number) {
-    // TODO: Remove the legacy path after migrating the DebugRouterConnector entry point.
-    if (
-      fromWebClientId !== undefined &&
-      "handleWebSocketDriverMessage" in this.controllerHost
-    ) {
-      this.controllerHost.handleWebSocketDriverMessage(
-        fromWebClientId,
-        id,
-        message,
-      );
-      return;
-    }
-
-    // Legacy path.
-    const client = this.websocketAppClients.get(id);
-    if (client) {
-      // send to ws client app
-      client.sendMessage(message);
-    } else if ("handleWsMessage" in this.controllerHost) {
-      // send to usb client app
-      this.controllerHost.handleWsMessage?.(id, message);
-    }
+  sendMessageToApp(id: number, message: string, fromWebClientId: number) {
+    this.controllerHost.handleWebSocketDriverMessage(
+      fromWebClientId,
+      id,
+      message,
+    );
   }
 
   handleWebSocketAppMessage(id: number, message: string) {
-    // TODO: Remove the legacy path after migrating the DebugRouterConnector entry point.
-    if ("handleWebSocketAppMessage" in this.controllerHost) {
-      this.controllerHost.handleWebSocketAppMessage(id, message);
-      return;
-    }
-
-    // Legacy path.
-    // Legacy connectors still consume runtime messages through this event.
-    this.emitEvent("ws-client-message", id, message);
-    this.sendMessageToWeb(message);
+    this.controllerHost.handleWebSocketAppMessage(id, message);
   }
 
   sendClientList() {
