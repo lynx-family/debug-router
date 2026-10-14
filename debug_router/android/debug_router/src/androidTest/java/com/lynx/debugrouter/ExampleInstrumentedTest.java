@@ -25,4 +25,9 @@ public class ExampleInstrumentedTest {
     Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
     assertEquals("com.lynx.debugrouter.test", appContext.getPackageName());
   }
+
+  @Test
+  public void defaultAppInfoIncludesOperatingSystem() {
+    assertEquals("Android", DebugRouter.getInstance().getAppInfoByKey("osType"));
+  }
 }
