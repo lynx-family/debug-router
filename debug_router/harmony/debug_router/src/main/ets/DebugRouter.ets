@@ -14,6 +14,7 @@ export class DebugRouter {
   public static createInstance(): void {
     let uuid: string = util.generateRandomUUID(true);
     DebugRouterHarmony.createInstance();
+    DebugRouter.setAppInfo("osType", "Harmony");
     DebugRouter.setAppInfo("debugRouterId", uuid);
   }
 

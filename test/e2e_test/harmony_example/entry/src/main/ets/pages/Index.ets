@@ -83,7 +83,6 @@ struct Index {
   aboutToAppear() {
     DebugRouter.createInstance();
     DebugRouter.enableAllSessions();
-    DebugRouter.setAppInfo('osType', 'Harmony')
     DebugRouter.setAppInfo('bundle', 'org.lynxjs.debugrouter.testapp')
     DebugRouter.setAppInfo('App', 'DebugRouter')
     DebugRouter.setAppInfo('debugRouterVersion', '0.0.1')

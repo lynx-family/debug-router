@@ -19,7 +19,6 @@ import com.lynx.debugrouter.base.report.DebugRouterReportServiceUtil;
 import com.lynx.debugrouter.base.usb.USBTransTemplateUtil;
 import com.lynx.debugrouter.log.LLog;
 import java.lang.reflect.Method;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.WeakHashMap;
@@ -114,6 +113,7 @@ public class DebugRouter {
 
     nativeSetAppInfo("model", model);
     nativeSetAppInfo("deviceModel", deviceModel);
+    nativeSetAppInfo("osType", "Android");
     nativeSetAppInfo("osVersion", Build.VERSION.RELEASE);
     nativeSetAppInfo("debugRouterVersion", getVersion());
     UUID id_string = UUID.randomUUID();
