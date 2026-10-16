@@ -128,6 +128,9 @@ void WebSocketTask::SendInternal(const std::string &data) {
     LOGI("WebSocketTask: [TX]: Page.screencastFrame Sent.");
   } else if (data.find("Lynx.screenshotCapture") != std::string::npos) {
     LOGI("WebSocketTask: [TX]: Lynx.screenshotCapture Sent.");
+  } else if (util::GetVerboseMessageLogLevel(data) ==
+             util::VerboseMessageLogLevel::kDebug) {
+    LOGD("WebSocketTask: [TX]: " << buf);
   } else {
     LOGI("WebSocketTask: [TX]: " << buf);
   }
@@ -161,7 +164,12 @@ void WebSocketTask::StartInternal() {
 
   std::string msg;
   while (do_read(msg)) {
-    LOGI("[RX]:" << msg);
+    if (util::GetVerboseMessageLogLevel(msg) ==
+        util::VerboseMessageLogLevel::kDebug) {
+      LOGD("[RX]:" << msg);
+    } else {
+      LOGI("[RX]:" << msg);
+    }
     if (core::internal::ShouldDropIncomingBySessionFilter(msg, "WebSocket")) {
       continue;
     }

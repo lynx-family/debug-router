@@ -6,8 +6,35 @@
 
 #include <sstream>
 
+#include "debug_router/native/protocol/protocol.h"
+#include "json/reader.h"
+
 namespace debugrouter {
 namespace util {
+
+namespace {
+
+const char *kEventKey = "event";
+const char *kDataKey = "data";
+const char *kTypeKey = "type";
+
+bool IsBuiltinCustomizedType(const std::string &type) {
+  return type == protocol::kRemoteDebugProtocolBodyData4CDP ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4ListSession ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4MessageHandler ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4SessionList ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4OpenSession ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4CloseSession ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4D2RStopAtEntry ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4R2DStopAtEntry ||
+         type == protocol::
+                     kRemoteDebugProtocolBodyData4Custom4D2RStopLepusAtEntry ||
+         type == protocol::
+                     kRemoteDebugProtocolBodyData4Custom4R2DStopLepusAtEntry ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4OpenCard;
+}
+
+}  // namespace
 
 uint32_t CharToUInt32(char value) { return ((uint32_t)value) & 0xFF; }
 
@@ -104,6 +131,37 @@ std::string decodeURIComponent(const std::string &url) {
     }
   }
   return result_url_.str();
+}
+
+VerboseMessageLogLevel GetVerboseMessageLogLevel(const std::string &message) {
+  Json::Reader reader;
+  Json::Value root;
+  if (!reader.parse(message, root)) {
+    return VerboseMessageLogLevel::kInfo;
+  }
+
+  const Json::Value &event = root[kEventKey];
+  const Json::Value &data = root[kDataKey];
+  if (!event.isString()) {
+    return VerboseMessageLogLevel::kInfo;
+  }
+
+  if (event.asString() != protocol::kRemoteDebugServerEvent4Custom) {
+    return VerboseMessageLogLevel::kInfo;
+  }
+
+  if (!data.isObject()) {
+    return VerboseMessageLogLevel::kInfo;
+  }
+
+  const Json::Value &type = data[kTypeKey];
+  if (!type.isString()) {
+    return VerboseMessageLogLevel::kInfo;
+  }
+
+  return IsBuiltinCustomizedType(type.asString())
+             ? VerboseMessageLogLevel::kInfo
+             : VerboseMessageLogLevel::kDebug;
 }
 
 }  // namespace util
