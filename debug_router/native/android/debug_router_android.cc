@@ -16,9 +16,15 @@
 #include "debug_router/native/android/native_slot_android.h"
 #include "debug_router/native/core/debug_router_config.h"
 #include "debug_router/native/core/debug_router_core.h"
+#include "debug_router/native/core/util.h"
 
 void CreateDebugRouter(JNIEnv *env, jobject jcaller) {
   debugrouter::core::DebugRouterCore::GetInstance();
+}
+
+void SetExtensionMessagePayloadDebugLogEnabled(JNIEnv *env, jclass jcaller,
+                                               jboolean enabled) {
+  debugrouter::util::SetExtensionMessagePayloadDebugLogEnabled(enabled);
 }
 
 void Connect(JNIEnv *env, jobject jcaller, jstring url, jstring room) {

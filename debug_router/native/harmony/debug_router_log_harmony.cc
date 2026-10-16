@@ -34,6 +34,9 @@ void Log(LogMessage* msg) {
     case logging::LOG_VERBOSE:
       priority = LogLevel::LOG_DEBUG;
       break;
+    case logging::LOG_DEBUG:
+      priority = LogLevel::LOG_DEBUG;
+      break;
     case logging::LOG_INFO:
       priority = LogLevel::LOG_INFO;
       break;
