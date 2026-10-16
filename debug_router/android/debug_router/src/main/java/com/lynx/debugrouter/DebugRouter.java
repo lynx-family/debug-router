@@ -82,6 +82,13 @@ public class DebugRouter {
     }
   }
 
+  public static void setExtensionMessagePayloadDebugLogEnabled(boolean enabled) {
+    loadNativeLibrary();
+    nativeSetExtensionMessagePayloadDebugLogEnabled(enabled);
+  }
+
+  private static native void nativeSetExtensionMessagePayloadDebugLogEnabled(boolean enabled);
+
   private native String nativeGetRoomId();
   private native String nativeGetServerUrl();
 

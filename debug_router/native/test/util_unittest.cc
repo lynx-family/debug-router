@@ -122,6 +122,33 @@ TEST(UtilTest, LogExtensionWithNestedAllowlistedTextAsDebug) {
   EXPECT_EQ(VerboseMessageLogLevel::kDebug, GetVerboseMessageLogLevel(message));
 }
 
+TEST(UtilTest, DoNotLogExtensionPayloadDebugByDefault) {
+  SetExtensionMessagePayloadDebugLogEnabled(false);
+  const std::string message = R"({
+    "event":"Customized",
+    "data":{
+      "type":"xdb_jsb"
+    }
+  })";
+
+  EXPECT_FALSE(IsExtensionMessagePayloadDebugLogEnabled());
+  EXPECT_FALSE(ShouldLogExtensionMessagePayloadAsDebug(message));
+}
+
+TEST(UtilTest, LogExtensionPayloadDebugWhenEnabled) {
+  SetExtensionMessagePayloadDebugLogEnabled(true);
+  const std::string message = R"({
+    "event":"Customized",
+    "data":{
+      "type":"xdb_jsb"
+    }
+  })";
+
+  EXPECT_TRUE(IsExtensionMessagePayloadDebugLogEnabled());
+  EXPECT_TRUE(ShouldLogExtensionMessagePayloadAsDebug(message));
+  SetExtensionMessagePayloadDebugLogEnabled(false);
+}
+
 TEST(UtilTest, LogInvalidJsonAsInfo) {
   EXPECT_EQ(VerboseMessageLogLevel::kInfo, GetVerboseMessageLogLevel("CDP"));
 }

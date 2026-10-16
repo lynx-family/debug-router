@@ -41,6 +41,12 @@ enum class VerboseMessageLogLevel {
 
 VerboseMessageLogLevel GetVerboseMessageLogLevel(const std::string &message);
 
+void SetExtensionMessagePayloadDebugLogEnabled(bool enabled);
+
+bool IsExtensionMessagePayloadDebugLogEnabled();
+
+bool ShouldLogExtensionMessagePayloadAsDebug(const std::string &message);
+
 }  // namespace util
 }  // namespace debugrouter
 

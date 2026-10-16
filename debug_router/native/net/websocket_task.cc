@@ -130,7 +130,9 @@ void WebSocketTask::SendInternal(const std::string &data) {
     LOGI("WebSocketTask: [TX]: Lynx.screenshotCapture Sent.");
   } else if (util::GetVerboseMessageLogLevel(data) ==
              util::VerboseMessageLogLevel::kDebug) {
-    LOGD("WebSocketTask: [TX]: " << buf);
+    if (util::ShouldLogExtensionMessagePayloadAsDebug(data)) {
+      LOGD("WebSocketTask: [TX]: " << buf);
+    }
   } else {
     LOGI("WebSocketTask: [TX]: " << buf);
   }
@@ -166,7 +168,9 @@ void WebSocketTask::StartInternal() {
   while (do_read(msg)) {
     if (util::GetVerboseMessageLogLevel(msg) ==
         util::VerboseMessageLogLevel::kDebug) {
-      LOGD("[RX]:" << msg);
+      if (util::ShouldLogExtensionMessagePayloadAsDebug(msg)) {
+        LOGD("[RX]:" << msg);
+      }
     } else {
       LOGI("[RX]:" << msg);
     }

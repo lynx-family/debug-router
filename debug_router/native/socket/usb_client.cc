@@ -344,7 +344,9 @@ void UsbClient::ReadMessage() {
 
     if (util::GetVerboseMessageLogLevel(payload_str) ==
         util::VerboseMessageLogLevel::kDebug) {
-      LOGD("[RX]:" << payload_str);
+      if (util::ShouldLogExtensionMessagePayloadAsDebug(payload_str)) {
+        LOGD("[RX]:" << payload_str);
+      }
     } else {
       LOGI("[RX]:" << payload_str);
     }
@@ -440,8 +442,10 @@ void UsbClient::WriteMessage() {
         LOGI("UsbClient: [TX]: Lynx.screenshotCapture Sent.");
       } else if (util::GetVerboseMessageLogLevel(message) ==
                  util::VerboseMessageLogLevel::kDebug) {
-        LOGD("UsbClient: [TX]:");
-        LOGD(message);
+        if (util::ShouldLogExtensionMessagePayloadAsDebug(message)) {
+          LOGD("UsbClient: [TX]:");
+          LOGD(message);
+        }
       } else {
         LOGI("UsbClient: [TX]:");
         LOGI(message);
@@ -453,7 +457,9 @@ void UsbClient::WriteMessage() {
         if (util::GetVerboseMessageLogLevel(message) ==
             util::VerboseMessageLogLevel::kDebug) {
           LOGE("send error: " << GetErrorMessage());
-          LOGD("send error message:" << message);
+          if (util::ShouldLogExtensionMessagePayloadAsDebug(message)) {
+            LOGD("send error message:" << message);
+          }
         } else {
           LOGE("send error: " << GetErrorMessage() << " message:" << message);
         }
@@ -534,7 +540,9 @@ void UsbClient::SendInternal(const std::string &message) {
           USBConnectStatus::CONNECTED) {
     if (util::GetVerboseMessageLogLevel(message) ==
         util::VerboseMessageLogLevel::kDebug) {
-      LOGD("current usb client is not connected:" << message);
+      if (util::ShouldLogExtensionMessagePayloadAsDebug(message)) {
+        LOGD("current usb client is not connected:" << message);
+      }
     } else {
       LOGI("current usb client is not connected:" << message);
     }

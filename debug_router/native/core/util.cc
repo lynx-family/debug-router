@@ -4,6 +4,7 @@
 
 #include "debug_router/native/core/util.h"
 
+#include <atomic>
 #include <sstream>
 
 #include "debug_router/native/protocol/protocol.h"
@@ -17,6 +18,8 @@ namespace {
 const char *kEventKey = "event";
 const char *kDataKey = "data";
 const char *kTypeKey = "type";
+
+std::atomic<bool> g_extension_message_payload_debug_log_enabled{false};
 
 bool IsBuiltinCustomizedType(const std::string &type) {
   return type == protocol::kRemoteDebugProtocolBodyData4CDP ||
@@ -162,6 +165,21 @@ VerboseMessageLogLevel GetVerboseMessageLogLevel(const std::string &message) {
   return IsBuiltinCustomizedType(type.asString())
              ? VerboseMessageLogLevel::kInfo
              : VerboseMessageLogLevel::kDebug;
+}
+
+void SetExtensionMessagePayloadDebugLogEnabled(bool enabled) {
+  g_extension_message_payload_debug_log_enabled.store(enabled,
+                                                      std::memory_order_relaxed);
+}
+
+bool IsExtensionMessagePayloadDebugLogEnabled() {
+  return g_extension_message_payload_debug_log_enabled.load(
+      std::memory_order_relaxed);
+}
+
+bool ShouldLogExtensionMessagePayloadAsDebug(const std::string &message) {
+  return IsExtensionMessagePayloadDebugLogEnabled() &&
+         GetVerboseMessageLogLevel(message) == VerboseMessageLogLevel::kDebug;
 }
 
 }  // namespace util
