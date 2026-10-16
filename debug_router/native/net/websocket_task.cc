@@ -267,7 +267,10 @@ void WebSocketTask::SendInternal(const std::string &data) {
   } else if (data.find("Lynx.screenshotCapture") != std::string::npos) {
     LOGI("WebSocketTask: [TX]: Lynx.screenshotCapture Sent.");
   } else {
-    LOGI("WebSocketTask: [TX]: " << buf);
+    auto log_level = util::GetVerboseMessageLogLevel(data);
+    if (log_level == util::VerboseMessageLogLevel::kInfo) {
+      LOGI("WebSocketTask: [TX]: " << buf);
+    }
   }
   if (base::SendNoSigPipe(socket_guard_->Get(), prefix, prefix_len) == -1) {
     LOGE("send prefix_len error.");
@@ -299,7 +302,10 @@ void WebSocketTask::StartInternal() {
 
   std::string msg;
   while (do_read(msg)) {
-    LOGI("[RX]:" << msg);
+    auto log_level = util::GetVerboseMessageLogLevel(msg);
+    if (log_level == util::VerboseMessageLogLevel::kInfo) {
+      LOGI("[RX]:" << msg);
+    }
     if (core::internal::ShouldDropIncomingBySessionFilter(msg, "WebSocket")) {
       continue;
     }

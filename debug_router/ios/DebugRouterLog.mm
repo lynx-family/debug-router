@@ -30,11 +30,25 @@ static NSInteger DefaultObserverId = -1;
 static NSInteger CurrentId = 0;
 static NSMutableDictionary *ObserverDic = [[NSMutableDictionary alloc] init];
 static BOOL hasSetDelegate = NO;
-const char *DebugRouterLogLevels[] = {
-    "I", "W", "E", "F",
-    "I",  // log
-    "R"   // report
-};
+static const char *DebugRouterLogLevelName(DebugRouterLogLevel level) {
+  switch (level) {
+    case DebugRouterLogLevelVerbose:
+      return "V";
+    case DebugRouterLogLevelDebug:
+      return "D";
+    case DebugRouterLogLevelInfo:
+      return "I";
+    case DebugRouterLogLevelWarning:
+      return "W";
+    case DebugRouterLogLevelError:
+      return "E";
+    case DebugRouterLogLevelFatal:
+      return "F";
+    case DebugRouterLogLevelReport:
+      return "R";
+  }
+  return "U";
+}
 
 namespace debugrouter {
 namespace logging {
@@ -120,7 +134,7 @@ DebugRouterLogFunction DebugRouterGetLogFunction(void) {
 
 void DebugRouterAddDebugLogObserver() {
   DebugRouterLogFunction defaultLogFunction = ^(DebugRouterLogLevel level, NSString *message) {
-    NSLog(@"%s/debugrouter: %@", DebugRouterLogLevels[level], message);
+    NSLog(@"%s/debugrouter: %@", DebugRouterLogLevelName(level), message);
   };
   DebugRouterLogObserver *observer =
       [[DebugRouterLogObserver alloc] initWithLogFunction:defaultLogFunction
@@ -146,7 +160,7 @@ DebugRouterLogLevel DebugRouterGetMinLogLevel(void) {
 
 DebugRouterLogFunction DebugRouterDefaultLogFunction =
     ^(DebugRouterLogLevel level, NSString *message) {
-      NSLog(@"%s/DebugRouter: %@", DebugRouterLogLevels[level], message);
+      NSLog(@"%s/DebugRouter: %@", DebugRouterLogLevelName(level), message);
     };
 
 void _DebugRouterLogInternal(DebugRouterLogLevel level, NSString *format, ...) {

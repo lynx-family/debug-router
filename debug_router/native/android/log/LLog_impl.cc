@@ -53,9 +53,14 @@ void LoggingDelegateAndroid::Log(debugrouter::logging::LogMessage *msg) {
     return;
   }
 
-  int priority =
-      (msg->severity() < 0) ? ANDROID_LOG_VERBOSE : ANDROID_LOG_UNKNOWN;
+  int priority = ANDROID_LOG_UNKNOWN;
   switch (msg->severity()) {
+    case LOG_VERBOSE:
+      priority = ANDROID_LOG_VERBOSE;
+      break;
+    case LOG_DEBUG:
+      priority = ANDROID_LOG_DEBUG;
+      break;
     case LOG_INFO:
       priority = ANDROID_LOG_INFO;
       break;

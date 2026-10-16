@@ -80,6 +80,7 @@ unit_test("example_unittest") {
     "socket_util_unittest.cc",
     "usb_client_unittest.cc",
     "usb_reconnect_race_unittest.cc",
+    "util_unittest.cc",
     "websocket_task_unittest.cc",
     "work_thread_executor_unittest.cc",
   ]

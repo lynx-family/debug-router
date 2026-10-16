@@ -24,11 +24,11 @@ namespace logging {
 namespace {
 
 const char *const log_severity_names[LOG_NUM_SEVERITIES] = {
-    "VERBOSE", "INFO", "WARNING", "ERROR", "REPORT", "FATAL"};
+    "VERBOSE", "DEBUG", "INFO", "WARNING", "ERROR", "REPORT", "FATAL"};
 
 const char *log_severity_name(int severity) {
   if (severity >= LOG_VERBOSE && severity <= LOG_FATAL) {
-    return log_severity_names[severity + 1];
+    return log_severity_names[severity + 2];
   }
   return "UNKNOWN";
 }
@@ -102,9 +102,14 @@ LogMessage::~LogMessage() {
     } else {  // default implementation
       std::string str_newline(stream_.str());
 #if defined(OS_ANDROID)
-      android_LogPriority priority =
-          (severity_ < 0) ? ANDROID_LOG_VERBOSE : ANDROID_LOG_UNKNOWN;
+      android_LogPriority priority = ANDROID_LOG_UNKNOWN;
       switch (severity_) {
+        case LOG_VERBOSE:
+          priority = ANDROID_LOG_VERBOSE;
+          break;
+        case LOG_DEBUG:
+          priority = ANDROID_LOG_DEBUG;
+          break;
         case LOG_INFO:
           priority = ANDROID_LOG_INFO;
           break;
