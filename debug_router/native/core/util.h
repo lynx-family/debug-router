@@ -34,6 +34,13 @@ bool CheckHeaderThreeBytes(const char *header);
 // decode url
 std::string decodeURIComponent(const std::string &url);
 
+enum class VerboseMessageLogLevel {
+  kNone,
+  kInfo,
+};
+
+VerboseMessageLogLevel GetVerboseMessageLogLevel(const std::string &message);
+
 }  // namespace util
 }  // namespace debugrouter
 

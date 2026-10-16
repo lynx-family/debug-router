@@ -342,7 +342,10 @@ void UsbClient::ReadMessage() {
 
     std::string payload_str(payload.get(), payload_size_int);
 
-    LOGI("[RX]:" << payload_str);
+    auto log_level = util::GetVerboseMessageLogLevel(payload_str);
+    if (log_level == util::VerboseMessageLogLevel::kInfo) {
+      LOGI("[RX]:" << payload_str);
+    }
     if (core::internal::ShouldDropIncomingBySessionFilter(payload_str, "USB")) {
       continue;
     }
@@ -434,14 +437,22 @@ void UsbClient::WriteMessage() {
       } else if (message.find("Lynx.screenshotCapture") != std::string::npos) {
         LOGI("UsbClient: [TX]: Lynx.screenshotCapture Sent.");
       } else {
-        LOGI("UsbClient: [TX]:");
-        LOGI(message);
+        auto log_level = util::GetVerboseMessageLogLevel(message);
+        if (log_level == util::VerboseMessageLogLevel::kInfo) {
+          LOGI("UsbClient: [TX]:");
+          LOGI(message);
+        }
       }
       std::string result_message;
       WrapHeader(message, result_message);
       if (base::SendNoSigPipe(socket_guard_.Get(), result_message.c_str(),
                               result_message.size()) == -1) {
-        LOGE("send error: " << GetErrorMessage() << " message:" << message);
+        if (util::GetVerboseMessageLogLevel(message) ==
+            util::VerboseMessageLogLevel::kNone) {
+          LOGE("send error: " << GetErrorMessage());
+        } else {
+          LOGE("send error: " << GetErrorMessage() << " message:" << message);
+        }
         BeginTransportShutdown();
         NotifyErrorOnce(GetErrorMessage(),
                         "UsbClient::WriteMessage send data failed.");
@@ -517,7 +528,10 @@ void UsbClient::SendInternal(const std::string &message) {
   if (stopping_.load(std::memory_order_relaxed) ||
       connect_status_.load(std::memory_order_relaxed) !=
           USBConnectStatus::CONNECTED) {
-    LOGI("current usb client is not connected:" << message);
+    auto log_level = util::GetVerboseMessageLogLevel(message);
+    if (log_level == util::VerboseMessageLogLevel::kInfo) {
+      LOGI("current usb client is not connected:" << message);
+    }
     return;
   }
   std::string non_const_message = message;

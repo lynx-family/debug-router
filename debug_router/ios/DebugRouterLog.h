@@ -11,6 +11,8 @@
 #endif
 
 #define LLog(...) _DebugRouterLog(DebugRouterLogLevelInfo, __VA_ARGS__)
+#define LLogVerbose(...) _DebugRouterLog(DebugRouterLogLevelVerbose, __VA_ARGS__)
+#define LLogDebug(...) _DebugRouterLog(DebugRouterLogLevelDebug, __VA_ARGS__)
 #define LLogInfo(...) _DebugRouterLog(DebugRouterLogLevelInfo, __VA_ARGS__)
 #define LLogWarn(...) _DebugRouterLog(DebugRouterLogLevelWarning, __VA_ARGS__)
 #define LLogError(...) _DebugRouterLog(DebugRouterLogLevelError, __VA_ARGS__)
@@ -23,6 +25,8 @@
 #define LErrFatal(expression, errCode, ...) _DebugRouterErrorFatal(expression, errCode, __VA_ARGS__)
 
 typedef NS_ENUM(NSInteger, DebugRouterLogLevel) {
+  DebugRouterLogLevelVerbose = -2,
+  DebugRouterLogLevelDebug = -1,
   DebugRouterLogLevelInfo = 0,
   DebugRouterLogLevelWarning = 1,
   DebugRouterLogLevelError = 2,

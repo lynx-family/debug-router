@@ -169,8 +169,8 @@ public class LLog {
   private static void initNativeLogLevelMap() {
     if (sNativeLevelMap == null) {
       sNativeLevelMap = new int[9];
-      sNativeLevelMap[VERBOSE] = -1;
-      sNativeLevelMap[DEBUG] = 0;
+      sNativeLevelMap[VERBOSE] = -2;
+      sNativeLevelMap[DEBUG] = -1;
       sNativeLevelMap[INFO] = 0;
       sNativeLevelMap[WARN] = 1;
       sNativeLevelMap[ERROR] = 2;
