@@ -39,6 +39,9 @@ class WebSocketTask : public base::WorkThreadExecutor {
   }
 
   void NotifyCloseForTest() { onClose(); }
+
+  static bool IsValidWebSocketUrlForTest(const std::string &url);
+  static std::string GetRequestTargetForTest(const std::string &url);
 #endif
 
  private:

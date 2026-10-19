@@ -142,6 +142,53 @@ TEST(WebSocketTaskTestSuite, ConcurrentStopAndFailureCloseOnlyOnce) {
   EXPECT_LE(failure_count, 1);
 }
 
+TEST(WebSocketTaskTestSuite, ParseValidWebSocketUrls) {
+  EXPECT_TRUE(WebSocketTask::IsValidWebSocketUrlForTest("ws://127.0.0.1"));
+  EXPECT_TRUE(
+      WebSocketTask::IsValidWebSocketUrlForTest("ws://localhost:8901/debug"));
+  EXPECT_TRUE(WebSocketTask::IsValidWebSocketUrlForTest(
+      "wss://example.com:443/debug/router?room=1"));
+  EXPECT_TRUE(
+      WebSocketTask::IsValidWebSocketUrlForTest("ws://example.com:80?token=x"));
+}
+
+TEST(WebSocketTaskTestSuite, ParseWebSocketRequestTarget) {
+  EXPECT_EQ("/", WebSocketTask::GetRequestTargetForTest("ws://example.com:80"));
+  EXPECT_EQ("/debug", WebSocketTask::GetRequestTargetForTest(
+                          "ws://example.com:80/debug"));
+  EXPECT_EQ("/?token=x", WebSocketTask::GetRequestTargetForTest(
+                             "ws://example.com:80?token=x"));
+  EXPECT_EQ("/debug?token=x", WebSocketTask::GetRequestTargetForTest(
+                                  "ws://example.com:80/debug?token=x"));
+  EXPECT_EQ("/debug?token=x",
+            WebSocketTask::GetRequestTargetForTest(
+                "ws://example.com:80/debug?token=x#fragment"));
+  EXPECT_EQ("/", WebSocketTask::GetRequestTargetForTest(
+                     "ws://example.com:80#fragment"));
+}
+
+TEST(WebSocketTaskTestSuite, RejectOverlongWebSocketUrlParts) {
+  EXPECT_FALSE(WebSocketTask::IsValidWebSocketUrlForTest(
+      "ws://" + std::string(254, 'a')));
+  EXPECT_FALSE(WebSocketTask::IsValidWebSocketUrlForTest(
+      "ws://localhost/" + std::string(1025, 'a')));
+  EXPECT_FALSE(WebSocketTask::IsValidWebSocketUrlForTest(
+      "ws://localhost/" + std::string(2048, 'a')));
+}
+
+TEST(WebSocketTaskTestSuite, RejectInvalidWebSocketPorts) {
+  EXPECT_FALSE(WebSocketTask::IsValidWebSocketUrlForTest("ws://localhost:"));
+  EXPECT_FALSE(WebSocketTask::IsValidWebSocketUrlForTest("ws://localhost:0"));
+  EXPECT_FALSE(
+      WebSocketTask::IsValidWebSocketUrlForTest("ws://localhost:65536"));
+  EXPECT_FALSE(WebSocketTask::IsValidWebSocketUrlForTest("ws://localhost:abc"));
+}
+
+TEST(WebSocketTaskTestSuite, RejectDecodedControlCharacters) {
+  EXPECT_FALSE(WebSocketTask::IsValidWebSocketUrlForTest(
+      "ws://localhost/%0d%0aInjected:%20x"));
+}
+
 }  // namespace
 }  // namespace net
 }  // namespace debugrouter
