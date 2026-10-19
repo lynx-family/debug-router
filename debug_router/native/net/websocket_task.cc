@@ -30,6 +30,122 @@ const int kUnexpectedOpcode = -104;
 const int kUnexpectedMaskPayloadLen = -105;
 const int kDeflatedMessageUnimplemented = -106;
 
+namespace {
+
+const size_t kMaxDecodedWebSocketUrlLength = 2048;
+const size_t kMaxWebSocketHostLength = 253;
+const size_t kMaxWebSocketPathLength = 1024;
+
+struct ParsedWebSocketUrl {
+  std::string host;
+  std::string request_target;
+  int port = 80;
+};
+
+bool HasControlChar(const std::string &value) {
+  for (char ch : value) {
+    unsigned char byte = static_cast<unsigned char>(ch);
+    if (byte <= 0x20 || byte == 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ParsePort(const std::string &port_str, int *port) {
+  if (port_str.empty() || port == nullptr) {
+    return false;
+  }
+
+  int parsed_port = 0;
+  for (char ch : port_str) {
+    if (ch < '0' || ch > '9') {
+      return false;
+    }
+    parsed_port = parsed_port * 10 + (ch - '0');
+    if (parsed_port > 65535) {
+      return false;
+    }
+  }
+  if (parsed_port <= 0) {
+    return false;
+  }
+  *port = parsed_port;
+  return true;
+}
+
+bool ParseWebSocketUrl(const std::string &decoded_url,
+                       ParsedWebSocketUrl *parsed_url) {
+  if (parsed_url == nullptr || decoded_url.empty() ||
+      decoded_url.size() > kMaxDecodedWebSocketUrlLength ||
+      HasControlChar(decoded_url)) {
+    return false;
+  }
+
+  size_t authority_start = std::string::npos;
+  if (decoded_url.compare(0, 6, "wss://") == 0) {
+    authority_start = 6;
+  } else if (decoded_url.compare(0, 5, "ws://") == 0) {
+    authority_start = 5;
+  } else {
+    return false;
+  }
+
+  const size_t authority_end =
+      decoded_url.find_first_of("/?#", authority_start);
+  const std::string authority =
+      authority_end == std::string::npos
+          ? decoded_url.substr(authority_start)
+          : decoded_url.substr(authority_start,
+                               authority_end - authority_start);
+
+  std::string request_target = "/";
+  if (authority_end != std::string::npos && decoded_url[authority_end] != '#') {
+    const size_t fragment_start = decoded_url.find('#', authority_end);
+    request_target =
+        fragment_start == std::string::npos
+            ? decoded_url.substr(authority_end)
+            : decoded_url.substr(authority_end, fragment_start - authority_end);
+    if (!request_target.empty() && request_target[0] == '?') {
+      request_target.insert(0, "/");
+    }
+  }
+
+  if (authority.empty() || request_target.empty() ||
+      request_target.size() > kMaxWebSocketPathLength ||
+      HasControlChar(request_target)) {
+    return false;
+  }
+
+  const size_t first_colon = authority.find(':');
+  const size_t last_colon = authority.rfind(':');
+  std::string host;
+  int port = 80;
+  if (first_colon == std::string::npos) {
+    host = authority;
+  } else {
+    if (first_colon != last_colon) {
+      return false;
+    }
+    host = authority.substr(0, first_colon);
+    if (!ParsePort(authority.substr(first_colon + 1), &port)) {
+      return false;
+    }
+  }
+
+  if (host.empty() || host.size() > kMaxWebSocketHostLength ||
+      HasControlChar(host)) {
+    return false;
+  }
+
+  parsed_url->host = host;
+  parsed_url->request_target = request_target;
+  parsed_url->port = port;
+  return true;
+}
+
+}  // namespace
+
 // Helper function to convert Windows wide string to narrow string for logging
 #ifdef _WIN32
 std::string WideToNarrow(const WCHAR *wide_str) {
@@ -52,19 +168,26 @@ int GetErrorMessage() {
 }
 
 static int readline(SOCKET sock, char *buf, size_t size) {
+  if (buf == nullptr || size == 0) {
+    return -1;
+  }
+
   char *out = buf;
-  while (static_cast<size_t>(out - buf) < size) {
+  char *end = buf + size - 1;
+  while (out < end) {
     int res = static_cast<int>(recv(sock, out, 1, 0));
     if (res == 1) {
       if (*out++ == '\n') {
-        break;
+        *out = '\0';
+        return static_cast<int>(out - buf);
       }
-    } else if (res == -1) {
-      break;
+      continue;
     }
+    *out = '\0';
+    return res == 0 ? 0 : -1;
   }
   *out = '\0';
-  return static_cast<int>(out - buf);
+  return -1;
 }
 
 WebSocketTask::WebSocketTask(
@@ -76,6 +199,21 @@ WebSocketTask::WebSocketTask(
           std::make_unique<base::SocketGuard>(socket_server::kInvalidSocket)) {}
 
 WebSocketTask::~WebSocketTask() { shutdown(); }
+
+#ifdef TESTING
+bool WebSocketTask::IsValidWebSocketUrlForTest(const std::string &url) {
+  ParsedWebSocketUrl parsed_url;
+  return ParseWebSocketUrl(util::decodeURIComponent(url), &parsed_url);
+}
+
+std::string WebSocketTask::GetRequestTargetForTest(const std::string &url) {
+  ParsedWebSocketUrl parsed_url;
+  if (!ParseWebSocketUrl(util::decodeURIComponent(url), &parsed_url)) {
+    return std::string();
+  }
+  return parsed_url.request_target;
+}
+#endif
 
 void WebSocketTask::BeginTransportShutdown() {
   stopping_.store(true, std::memory_order_relaxed);
@@ -183,26 +321,9 @@ void WebSocketTask::Stop() {
 
 bool WebSocketTask::do_connect() {
   url_ = util::decodeURIComponent(url_);
-  const char *purl = url_.c_str();
-  if (memcmp(purl, "wss://", 6) == 0) {
-    purl += 6;
-  } else if (memcmp(purl, "ws://", 5) == 0) {
-    purl += 5;
-  } else {
-    LOGE("Parse url error, url: " << purl);
-    onFailure("Websocket Task: Parse url error.", kParseUrlErrorCode);
-    return false;
-  }
-
-  char host[128] = {0};
-  char path[256] = {0};
-  int port = 80;
-  if (sscanf(purl, "%[^:/]:%d/%s", host, &port, path) == 3) {
-  } else if (sscanf(purl, "%[^:/]/%s", host, path) == 2) {
-  } else if (sscanf(purl, "%[^:/]:%d", host, &port) == 2) {
-  } else if (sscanf(purl, "%[^:/]", host) == 1) {
-  } else {
-    LOGE("Parse url error, url: " << purl);
+  ParsedWebSocketUrl parsed_url;
+  if (!ParseWebSocketUrl(url_, &parsed_url)) {
+    LOGE("Parse url error, decoded url length: " << url_.size());
     onFailure("Websocket Task: Parse url error.", kParseUrlErrorCode);
     return false;
   }
@@ -212,7 +333,7 @@ bool WebSocketTask::do_connect() {
   ai.ai_family = AF_INET;  // IPV4
   ai.ai_socktype = SOCK_STREAM;
   char str_port[16];
-  snprintf(str_port, sizeof(str_port), "%d", port);
+  snprintf(str_port, sizeof(str_port), "%d", parsed_url.port);
   /*
   Reason why getaddrinfo fails:
   - DNS resolution issues:
@@ -230,7 +351,7 @@ bool WebSocketTask::do_connect() {
     The network environment is isolated, which limits DNS query requests and can
   also cause getaddrinfo to fail to work properly.
   */
-  int ret = getaddrinfo(host, str_port, &ai, &servinfo);
+  int ret = getaddrinfo(parsed_url.host.c_str(), str_port, &ai, &servinfo);
   if (ret != 0) {
 #ifdef _WIN32
     LOGE("getaddrinfo Error: " << WideToNarrow(gai_strerror(ret)));
@@ -296,20 +417,22 @@ bool WebSocketTask::do_connect() {
 
   if (socket_guard_ == nullptr) {
     LOGE("Connect " << url_.c_str() << "Error: socket_guard_ is nullptr.");
+    freeaddrinfo(servinfo);
     return false;
   }
   freeaddrinfo(servinfo);
 
   char buf[512];
-  snprintf(buf, sizeof(buf),
-           "GET /%s HTTP/1.1\r\n"
-           "Host: %s:%d\r\n"
-           "Upgrade: websocket\r\n"
-           "Connection: Upgrade\r\n"
-           "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\n"
-           "Sec-WebSocket-Version: 13\r\n\r\n",
-           path, host, port);
-  if (base::SendNoSigPipe(socket_guard_->Get(), buf, strlen(buf)) == -1) {
+  const std::string upgrade_request =
+      "GET " + parsed_url.request_target + " HTTP/1.1\r\n" +
+      "Host: " + parsed_url.host + ":" + std::to_string(parsed_url.port) +
+      "\r\n" +
+      "Upgrade: websocket\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\n"
+      "Sec-WebSocket-Version: 13\r\n\r\n";
+  if (base::SendNoSigPipe(socket_guard_->Get(), upgrade_request.c_str(),
+                          upgrade_request.size()) == -1) {
     LOGE("send http upgrade error: " << GetErrorMessage());
     onFailure("Websocket Task: socket send failed.", GetErrorMessage());
     return false;
@@ -341,10 +464,22 @@ bool WebSocketTask::do_connect() {
     return false;
   }
 
-  while (readline(socket_guard_->Get(), buf, sizeof(buf)) > 0 &&
-         buf[0] != '\r') {
+  while (true) {
+    int line_len = readline(socket_guard_->Get(), buf, sizeof(buf));
+    if (line_len <= 0) {
+      onFailure("Websocket Task: do_connect read header failed.",
+                GetErrorMessage());
+      return false;
+    }
+    if (buf[0] == '\r' || buf[0] == '\n') {
+      break;
+    }
     size_t len = strlen(buf);
-    buf[len - 2] = '\0';
+    if (len >= 2 && buf[len - 2] == '\r' && buf[len - 1] == '\n') {
+      buf[len - 2] = '\0';
+    } else if (len >= 1 && buf[len - 1] == '\n') {
+      buf[len - 1] = '\0';
+    }
     LOGI(buf);
   }
   return true;
