@@ -36,7 +36,7 @@ async function main() {
   fs.mkdirSync(process.env.HOME, { recursive: true });
   const createConnector = (enableNetworkDevice = true) => {
     const connector = new DebugRouterConnector({
-      manualConnect: true,
+      manualConnect: false,
       enableAndroid: false,
       enableIOS: false,
       enableHarmony: false,

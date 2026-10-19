@@ -2,6 +2,8 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
+import { defaultLogger } from "../../utils/logger";
+
 export const DEFAULT_PENDING_ROUTE_TIMEOUT_MS = 5000;
 
 export type PendingRouteInput = {
@@ -71,6 +73,16 @@ export class PendingRouteTable {
       if (!route) {
         return;
       }
+
+      defaultLogger.warn(
+        `Pending route timed out: ${JSON.stringify({
+          globalMessageId,
+          kind: route.kind,
+          requesterId: route.requesterId,
+          originalId: route.originalId,
+          clientId: route.clientId,
+        })}`,
+      );
 
       if (route.kind === "control") {
         route.reject?.(

@@ -13,8 +13,19 @@ import { WatchStatus } from "../WatchStatus";
 import { getAdbInstance } from "../../utils/adb.validator";
 
 export class AndroidDeviceManager extends DeviceManager {
+  get host(): string {
+    // Match the default host in getAdbInstance (src/utils/adb.validator.ts).
+    return this.adbOptions?.host ?? "127.0.0.1";
+  }
+
+  get port(): number {
+    // Match the default port in getAdbInstance (src/utils/adb.validator.ts).
+    return this.adbOptions?.port ?? 5037;
+  }
+
   private currentWatchStatus: WatchStatus = WatchStatus.StopWatching;
   private retryCount: number = 0;
+  private tracker: any = null;
   private readonly adbOptions: any;
   private adbClient: ADBClient | null = null;
   constructor(driver: PhysicalConnector, options: any) {
@@ -30,6 +41,10 @@ export class AndroidDeviceManager extends DeviceManager {
       try {
         const deviceClient = adbClient.getDevice(device.id);
         const props = await deviceClient.getProperties();
+        if (this.closed) {
+          resolve(undefined);
+          return;
+        }
         const name = props["ro.product.model"];
         defaultLogger.debug("createDevice: device name is " + name);
         const androidLikeDevice = new AndroidDevice(
@@ -37,6 +52,7 @@ export class AndroidDeviceManager extends DeviceManager {
           device.id,
           name,
           adbClient,
+          this.adbOptions?.host ?? "127.0.0.1",
         );
         await androidLikeDevice.forwards();
         resolve(androidLikeDevice);
@@ -59,21 +75,23 @@ export class AndroidDeviceManager extends DeviceManager {
 
   private reWatchAndroidDevices() {
     this.retryCount++;
-    setTimeout(() => {
-      this.watchDevices(true);
-    }, 300);
-  }
-
-  private unregisterAllAndroidDevice() {
-    const androidDevices = Array.from(this.driver.devices.values()).filter(
-      (d) => d instanceof AndroidDevice,
-    );
-    androidDevices.forEach((d) => {
-      this.driver.unregisterDevice(d.serial);
+    this.scheduleWatchRetry(() => {
+      void this.watchDevices(true);
     });
   }
 
+  private unregisterAllAndroidDevice() {
+    this.unregisterManagedDevices();
+  }
+
+  protected stopWatching(): void {
+    this.currentWatchStatus = WatchStatus.StopWatching;
+    this.tracker?.end();
+    this.tracker = null;
+  }
+
   async watchDevices(killAdb: boolean = false) {
+    if (this.closed) return;
     if (!this.adbClient) {
       this.adbClient = await getAdbInstance(this.adbOptions);
       if (!this.adbClient) {
@@ -86,6 +104,7 @@ export class AndroidDeviceManager extends DeviceManager {
         return;
       }
     }
+    if (this.closed) return;
     if (this.currentWatchStatus !== WatchStatus.StopWatching) {
       return;
     }
@@ -103,13 +122,23 @@ export class AndroidDeviceManager extends DeviceManager {
       this.retryCount = 0;
     }
 
+    if (this.closed) return;
+    this.tracker?.end();
+    this.tracker = null;
     try {
       this.adbClient
         .trackDevices()
 
         // @ts-ignore
         .then((tracker) => {
+          if (this.closed) {
+            tracker.on("error", () => {});
+            tracker.end();
+            return;
+          }
+          this.tracker = tracker;
           tracker.on("error", async (err: Error) => {
+            if (this.closed) return;
             this.currentWatchStatus = WatchStatus.StopWatching;
             const msg = "tracker error:" + err?.message;
             getDriverReportService()?.report("android_connect_error", null, {
@@ -123,6 +152,7 @@ export class AndroidDeviceManager extends DeviceManager {
           });
 
           tracker.on("add", async (device: Device) => {
+            if (this.closed) return;
             this.currentWatchStatus = WatchStatus.Watching;
             this.retryCount = 0;
             defaultLogger.debug("tracker add:" + JSON.stringify(device));
@@ -143,6 +173,7 @@ export class AndroidDeviceManager extends DeviceManager {
           });
 
           tracker.on("change", async (device: Device) => {
+            if (this.closed) return;
             this.currentWatchStatus = WatchStatus.Watching;
             this.retryCount = 0;
             defaultLogger.debug("tracker change:" + JSON.stringify(device));
@@ -166,12 +197,13 @@ export class AndroidDeviceManager extends DeviceManager {
                   event: "change",
                   deviceType: device.type,
                 });
-                this.driver.unregisterDevice(device.id);
+                this.unregisterManagedDevice(device.id);
               }
             }
           });
 
           tracker.on("remove", (device: Device) => {
+            if (this.closed) return;
             this.currentWatchStatus = WatchStatus.Watching;
             this.retryCount = 0;
             defaultLogger.debug("tracker remove:" + JSON.stringify(device));
@@ -185,11 +217,12 @@ export class AndroidDeviceManager extends DeviceManager {
                 event: "remove",
                 deviceType: device.type,
               });
-              this.driver.unregisterDevice(device.id);
+              this.unregisterManagedDevice(device.id);
             }
           });
         })
         .catch(async (err: any) => {
+          if (this.closed) return;
           this.currentWatchStatus = WatchStatus.StopWatching;
           const msg = "trackDevices catch:" + err?.message;
           getDriverReportService()?.report("android_connect_error", null, {
@@ -228,6 +261,6 @@ export class AndroidDeviceManager extends DeviceManager {
       });
       return;
     }
-    this.driver.registerDevice(androidDevice);
+    this.registerManagedDevice(androidDevice);
   }
 }

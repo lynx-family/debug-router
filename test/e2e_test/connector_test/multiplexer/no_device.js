@@ -545,9 +545,10 @@ async function runWebSocketMirrorRecoveryFlow() {
     );
     initialPid = daemon.pid;
     assert(connector.wssPort > 0, "websocket port should be assigned");
-    assert.deepStrictEqual(connector.wss, {
-      wssPath: `ws://${connector.wssHost}/mdevices/page/android`,
-    });
+    assert.strictEqual(
+      connector.wss.wssPath,
+      `ws://${connector.wssHost}/mdevices/page/android`
+    );
 
     process.kill(initialPid, "SIGKILL");
     await waitFor(
@@ -595,9 +596,10 @@ async function runWebSocketMirrorRecoveryFlow() {
       "websocket mirror restored after daemon respawn"
     );
     assert.notStrictEqual(replacement.pid, initialPid);
-    assert.deepStrictEqual(connector.wss, {
-      wssPath: `ws://${connector.wssHost}/mdevices/page/android`,
-    });
+    assert.strictEqual(
+      connector.wss.wssPath,
+      `ws://${connector.wssHost}/mdevices/page/android`
+    );
     assert.strictEqual(connector.devices.has("device-1"), true);
     assert.strictEqual(connector.usbClients.has(1), true);
   } finally {

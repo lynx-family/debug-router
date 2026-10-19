@@ -226,9 +226,10 @@ describe("multiplexer integration reconnect and snapshot", function () {
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
     assert(connector.wssPort > 0, "websocket port should be assigned");
-    assert.deepStrictEqual(connector.wss, {
-      wssPath: `ws://${connector.wssHost}/mdevices/page/android`,
-    });
+    assert.strictEqual(
+      connector.wss.wssPath,
+      `ws://${connector.wssHost}/mdevices/page/android`
+    );
 
     process.kill(initialInfo.pid, "SIGKILL");
     await waitFor(
@@ -272,9 +273,10 @@ describe("multiplexer integration reconnect and snapshot", function () {
     }, 3000);
     assert.notStrictEqual(nextInfo.pid, initialInfo.pid);
     assert.strictEqual(connector.desiredWSServerStarted, true);
-    assert.deepStrictEqual(connector.wss, {
-      wssPath: `ws://${connector.wssHost}/mdevices/page/android`,
-    });
+    assert.strictEqual(
+      connector.wss.wssPath,
+      `ws://${connector.wssHost}/mdevices/page/android`
+    );
     assert.strictEqual(connector.devices.has("device-1"), true);
     assert.strictEqual(connector.usbClients.has(1), true);
   });

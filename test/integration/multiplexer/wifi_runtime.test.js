@@ -35,6 +35,18 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
     }
   });
 
+  it("enables WebSocket when a later facade reuses a daemon started without it", async function () {
+    context = createIntegrationContext("wifi-late-enable", {
+      enableWebSocket: false,
+    });
+    const first = context.createConnector({ enableWebSocket: false });
+    await first.connectDevices();
+    const second = context.createConnector({ enableWebSocket: true });
+    await second.startWSServer();
+    assert(second.wssPort > 0);
+    assert(second.wss.wssPath);
+  });
+
   it("lists a registered WiFi runtime in Driver ClientList", async function () {
     const { connector, url } = await startWebSocketConnector("wifi-list");
     const webConnected = collectConnectorEvents(

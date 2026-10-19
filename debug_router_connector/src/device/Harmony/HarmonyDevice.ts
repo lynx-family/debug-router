@@ -18,6 +18,7 @@ export default class HarmonyDevice extends BaseDevice {
     serial: string,
     title: string,
     hdc: Client,
+    private readonly host: string = "127.0.0.1",
   ) {
     super(driver, {
       serial: serial,
@@ -28,7 +29,7 @@ export default class HarmonyDevice extends BaseDevice {
   }
 
   getHost(): string {
-    return this.driver.hdcOption?.host ?? "127.0.0.1";
+    return this.host;
   }
 
   async forwards() {

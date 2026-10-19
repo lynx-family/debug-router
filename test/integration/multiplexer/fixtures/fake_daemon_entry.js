@@ -153,7 +153,20 @@ function createClient(snapshot, connector) {
 }
 
 class FakePhysicalConnector {
+  async addAndroidDeviceManager() {}
+  async addHarmonyDeviceManager() {}
+  async addIOSDeviceManager() {}
+  async addDesktopDeviceManager() {}
+  async addNetworkDeviceManager() {}
+  closeAndroidDeviceManager() {}
+  closeHarmonyDeviceManager() {}
+  closeIOSDeviceManager() {}
+  closeDesktopDeviceManager() {}
+  closeNetworkDeviceManager() {}
+  updateUsbConnectOption() {}
+
   constructor(option = {}) {
+    this.manualConnect = true;
     this.events = new EventEmitter();
     this.devices = new Map();
     this.usbClients = new Map();
@@ -522,8 +535,16 @@ async function main() {
   getDriverReportService()?.report("fixture-startup-report", null, {});
   const handleControlConnected = host.handleControlConnected.bind(host);
   const handleControlDisconnected = host.handleControlDisconnected.bind(host);
-  host.handleControlConnected = (controlId, reportServiceEnabled) => {
-    handleControlConnected(controlId, reportServiceEnabled);
+  host.handleControlConnected = (
+    controlId,
+    reportServiceEnabled,
+    connectorFacadeOption
+  ) => {
+    handleControlConnected(
+      controlId,
+      reportServiceEnabled,
+      connectorFacadeOption
+    );
     appendJsonLine(daemonLogPath, {
       event: "control-connected-callback",
       pid: process.pid,

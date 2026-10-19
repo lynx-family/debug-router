@@ -2,11 +2,18 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
+import type { PhysicalConnectorOption } from "../../physical/PhysicalConnector";
+
 import type { ClientSnapshot, DeviceSnapshot } from "./snapshot";
 import type { RequireMessageType, ResponseMessageType } from "../../utils/type";
 import type { MultiplexerDebugInfo } from "./debuginfo";
 
-export const MULTIPLEXER_PROTOCOL_VERSION = 1;
+export type ConnectorFacadeOption = Omit<
+  PhysicalConnectorOption,
+  "traceRecorder"
+> & { enableWebSocket?: boolean };
+
+export const MULTIPLEXER_PROTOCOL_VERSION = 2;
 
 export type MultiplexerHealthRequest = {
   kind: "health";
@@ -60,6 +67,8 @@ export type MultiplexerHandshakeErrorResponse = {
 export type MultiplexerRegisterRequest = {
   kind: "register";
   reportServiceEnabled: boolean;
+  // Protocol v1 clients omit this field; v2 clients always send it.
+  connectorFacadeOption?: ConnectorFacadeOption;
   debugInfo?: MultiplexerDebugInfo;
 };
 

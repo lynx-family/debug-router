@@ -156,6 +156,7 @@ export class MultiplexerControlServer {
         void this.host.handleControlConnected?.(
           connection.controlId,
           message.reportServiceEnabled,
+          message.connectorFacadeOption,
         );
         return;
       }

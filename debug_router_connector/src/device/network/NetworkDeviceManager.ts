@@ -16,10 +16,15 @@ export default class NetworkDeviceManager extends DeviceManager {
     options: { ip: string; port?: number[] },
   ) {
     super(driver);
-    this.networkDeviceOpt = options;
+    this.networkDeviceOpt = { ...options, port: options.port?.slice() };
+  }
+
+  get ip(): string {
+    return this.networkDeviceOpt.ip;
   }
 
   async watchDevices() {
+    if (this.closed) return;
     const device = new NetworkDevice(
       this.driver,
       this.networkDeviceOpt.ip,
@@ -31,6 +36,6 @@ export default class NetworkDeviceManager extends DeviceManager {
         event: "register",
       });
     }
-    this.driver.registerDevice(device);
+    this.registerManagedDevice(device);
   }
 }
