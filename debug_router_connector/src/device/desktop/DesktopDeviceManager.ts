@@ -13,6 +13,7 @@ export default class DesktopDeviceManager extends DeviceManager {
     super(driver);
   }
   async watchDevices() {
+    if (this.closed) return;
     let device;
     if (process.platform === "darwin") {
       device = new MacDevice(this.driver);
@@ -29,7 +30,7 @@ export default class DesktopDeviceManager extends DeviceManager {
         event: "register",
         synthetic: true,
       });
-      this.driver.registerDevice(device);
+      this.registerManagedDevice(device);
     }
   }
 }

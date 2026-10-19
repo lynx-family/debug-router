@@ -138,7 +138,7 @@ export class ClientController implements ClientEventsListener {
     }
     this.timer = setInterval(() => {
       this.watchClient();
-    }, this.driver.usbConnectOpt.retryTime);
+    }, this.driver.usbConnectRetryTime);
   }
 
   stopWatchClient(): void {

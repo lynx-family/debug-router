@@ -15,6 +15,7 @@ import {
   MULTIPLEXER_PROTOCOL_VERSION,
   MultiplexerDebugInfo,
   MultiplexerRegisterRequest,
+  ConnectorFacadeOption,
   isControlEvent,
   isControlRpcParams,
   isControlRpcResponse,
@@ -45,6 +46,7 @@ export type MultiplexerDaemonClientOption = {
   controlEndpoint: string;
   rpcTimeout?: number;
   reportServiceEnabled?: boolean;
+  connectorFacadeOption: ConnectorFacadeOption;
   debugInfo?: MultiplexerDebugInfo;
 
   // only used for tests or embedding
@@ -73,6 +75,7 @@ export class MultiplexerDaemonClient {
   private readonly controlEndpoint: string;
   private readonly rpcTimeout: number;
   private readonly reportServiceEnabled: boolean;
+  private readonly connectorFacadeOption: ConnectorFacadeOption;
   private readonly debugInfo?: MultiplexerDebugInfo;
   private readonly now: () => number;
   private eventListener?: (event: ControlEvent) => void;
@@ -92,6 +95,7 @@ export class MultiplexerDaemonClient {
     this.controlEndpoint = option.controlEndpoint;
     this.rpcTimeout = option.rpcTimeout ?? DEFAULT_MULTIPLEXER_RPC_TIMEOUT;
     this.reportServiceEnabled = option.reportServiceEnabled ?? false;
+    this.connectorFacadeOption = option.connectorFacadeOption;
     this.debugInfo = option.debugInfo
       ? {
           protocolVersion:
@@ -336,6 +340,7 @@ export class MultiplexerDaemonClient {
         const request: MultiplexerRegisterRequest = {
           kind: "register",
           reportServiceEnabled: this.reportServiceEnabled,
+          connectorFacadeOption: this.connectorFacadeOption,
           ...(debugInfo ? { debugInfo } : {}),
         };
         if (!transport.send(request) && !transport.closed) {

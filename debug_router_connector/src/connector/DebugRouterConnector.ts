@@ -47,9 +47,17 @@ const DEFAULT_DEV_SERVE_PORT = 19783;
 const DEFAULT_MULTIPLEXER_DAEMON_IDLE_TIMEOUT = 600000;
 const DESIRED_RECOVERY_RETRY_DELAY_MS = 100;
 
-type WebSocketServerCompat = {
-  wssPath: string;
-};
+/** Legacy compatibility facade; the daemon owns the actual WebSocket server. */
+class WebSocketServerCompat {
+  constructor(public wssPath: string) {}
+
+  /** Compatibility no-op: callers cannot close the shared daemon's server. */
+  close(): void {
+    defaultLogger.warn(
+      "wss.close is a compatibility no-op; the WebSocket server is managed by the multiplexer daemon.",
+    );
+  }
+}
 
 /**
  * Configuration for the public Connector facade, including inherited
@@ -115,9 +123,9 @@ type WebSocketServerCompat = {
  * On every daemon access that needs a new control connection, stop the daemon
  * currently using the same multiplexerDataDir and spawn a new daemon from this
  * Connector's daemon entry and daemon-global options. The replacement
- * disconnects every Connector sharing that daemon. Unlike normal shared daemon
- * startup, the replacement uses this Connector's manualConnect and capability
- * options exactly, so disabled-capability scenarios can be tested. Closing this
+ * disconnects every Connector sharing that daemon. Both normal startup and
+ * replacement preserve this Connector's manualConnect and capability options;
+ * replacement also clears capabilities accumulated from earlier facades. Closing this
  * Connector force-stops the daemon and removes its endpoint/lock artifacts
  * instead of waiting for the daemon idle timeout. Close never starts or
  * reconnects a daemon, but it still cleans up a daemon and artifacts already
@@ -188,18 +196,14 @@ export class DebugRouterConnector {
 
   constructor(
     /**
-     * Connector capability options are normally instance-local. The shared
-     * daemon keeps the generally available capabilities enabled, while
-     * each Connector filters the devices, clients, snapshots, and events it
-     * exposes. enableDebugMode is the debug/test exception: its replacement
-     * daemon receives this Connector's capability and manualConnect option
-     * values exactly.
+     * Each facade advertises its platform flags and transport options whenever
+     * it registers. The shared daemon adds enabled capabilities and new endpoints;
+     * false flags and facade disconnection do not remove existing listeners.
+     * Each facade still filters the devices and clients it exposes.
      *
-     * Options without merge semantics (for example websocketOption,
-     * adbHostPort, hdcHostPort, networkDeviceOpt, retry/trace output, daemon
-     * idle/stale timeouts, and legacyDriverDir) remain daemon-global. A healthy
-     * daemon keeps its existing values; use enableDebugMode only when a
-     * debug/test scenario intentionally needs this Connector's values to win.
+     * WebSocket room settings, tracing, idle timeout and legacyDriverDir remain
+     * daemon-global startup settings. enableDebugMode remains an explicit
+     * debug/test option that replaces the daemon on ensure.
      */
     option: DebugRouterConnectorOption = {
       manualConnect: false,
@@ -259,20 +263,10 @@ export class DebugRouterConnector {
         option.multiplexerDaemonIdleTimeout ??
         DEFAULT_MULTIPLEXER_DAEMON_IDLE_TIMEOUT,
       enableDebugMode: this.enableDebugMode,
-      enableWebSocket: this.enableDebugMode ? this.enableWebSocket : true,
+      enableWebSocket: this.enableWebSocket,
       websocketOption: option.websocketOption,
       connectionTrace: createDaemonConnectionTraceOption(option),
-      physicalConnectorOption: createDaemonPhysicalConnectorOption(
-        {
-          ...option,
-          enableAndroid: this.enableAndroid,
-          enableIOS: this.enableIOS,
-          enableHarmony: this.enableHarmony,
-          enableDesktop: this.enableDesktop,
-          enableNetworkDevice: this.enableNetworkDevice,
-        },
-        this.enableDebugMode,
-      ),
+      physicalConnectorOption: createDaemonPhysicalConnectorOption(option),
     });
 
     this.daemonClient = new MultiplexerDaemonClient({
@@ -280,6 +274,10 @@ export class DebugRouterConnector {
       controlEndpoint: paths.controlEndpoint,
       rpcTimeout: option.multiplexerRpcTimeout,
       reportServiceEnabled: this.reportService !== null,
+      connectorFacadeOption: {
+        ...createDaemonPhysicalConnectorOption(option),
+        enableWebSocket: this.enableWebSocket,
+      },
     });
     // Apply daemon snapshots/messages to local mirrors; retain cleanup for close().
     this.unsubscribeDaemonEvents = this.daemonClient.subscribe((event) =>
@@ -760,9 +758,9 @@ export class DebugRouterConnector {
     this.wssPort = info.port;
     this.wssHost = info.host;
     this.roomId = info.roomId;
-    this.wss = {
-      wssPath: `ws://${info.host}/mdevices/page/android`,
-    };
+    this.wss = new WebSocketServerCompat(
+      `ws://${info.host}/mdevices/page/android`,
+    );
   }
 
   private shouldExposeWebSocketState(): boolean {
@@ -1119,26 +1117,14 @@ function resolveDaemonEntryPath(): string {
 
 function createDaemonPhysicalConnectorOption(
   option: DebugRouterConnectorOption,
-  useConnectorOptionFlags: boolean,
 ): PhysicalConnectorOption {
-  // Normal startup keeps shared capabilities available; debug mode uses this facade's exact flags.
   return {
-    manualConnect: useConnectorOptionFlags
-      ? option.manualConnect ?? false
-      : false,
-    enableAndroid: useConnectorOptionFlags
-      ? option.enableAndroid ?? true
-      : true,
-    enableIOS: useConnectorOptionFlags ? option.enableIOS ?? true : true,
-    enableHarmony: useConnectorOptionFlags
-      ? option.enableHarmony ?? true
-      : true,
-    enableDesktop: useConnectorOptionFlags
-      ? option.enableDesktop ?? false
-      : true,
-    enableNetworkDevice: useConnectorOptionFlags
-      ? option.enableNetworkDevice ?? false
-      : option.networkDeviceOpt !== undefined,
+    manualConnect: option.manualConnect ?? false,
+    enableAndroid: option.enableAndroid ?? true,
+    enableIOS: option.enableIOS ?? true,
+    enableHarmony: option.enableHarmony ?? true,
+    enableDesktop: option.enableDesktop ?? false,
+    enableNetworkDevice: option.enableNetworkDevice ?? false,
     adbHostPort: option.adbHostPort,
     hdcHostPort: option.hdcHostPort,
     usbConnectOpt: option.usbConnectOpt,

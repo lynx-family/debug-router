@@ -11,6 +11,7 @@ import type {
   MultiplexerHealthRequest,
   MultiplexerHealthResponse,
   MultiplexerRegisterRequest,
+  ConnectorFacadeOption,
   MultiplexerRegisterResponse,
 } from "./control";
 import type { MultiplexerDebugInfo } from "./debuginfo";
@@ -208,6 +209,7 @@ export function isMultiplexerRegisterRequest(
     isRecord(value) &&
     value.kind === "register" &&
     isBoolean(value.reportServiceEnabled) &&
+    isOptional(value.connectorFacadeOption, isConnectorFacadeOption) &&
     isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
 }
@@ -482,4 +484,52 @@ function isOptionalStringOrNull(value: unknown): boolean {
 
 function hasOwn(value: JsonRecord, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+// Only serializable facade settings cross the control boundary.
+export function isConnectorFacadeOption(
+  value: unknown,
+): value is ConnectorFacadeOption {
+  if (!isRecord(value)) return false;
+  const keys = [
+    "manualConnect",
+    "enableWebSocket",
+    "enableAndroid",
+    "enableIOS",
+    "enableHarmony",
+    "enableDesktop",
+    "enableNetworkDevice",
+  ];
+  const hostPort = (v: unknown): v is { host?: string; port?: number } =>
+    isRecord(v) && isOptional(v.host, isString) && isOptional(v.port, isNumber);
+  return (
+    Object.keys(value).every((key) =>
+      [
+        ...keys,
+        "adbHostPort",
+        "hdcHostPort",
+        "usbConnectOpt",
+        "networkDeviceOpt",
+      ].includes(key),
+    ) &&
+    keys.every((key) => isOptional(value[key], isBoolean)) &&
+    isOptional(value.adbHostPort, hostPort) &&
+    isOptional(value.hdcHostPort, hostPort) &&
+    isOptional(
+      value.usbConnectOpt,
+      (v): v is { retryTime: number } =>
+        isRecord(v) &&
+        isNumber(v.retryTime) &&
+        Number.isFinite(v.retryTime) &&
+        v.retryTime >= 0,
+    ) &&
+    isOptional(
+      value.networkDeviceOpt,
+      (v): v is { ip: string; port?: number[] } =>
+        isRecord(v) &&
+        isString(v.ip) &&
+        v.ip.length > 0 &&
+        isOptional(v.port, isNumberArray),
+    )
+  );
 }

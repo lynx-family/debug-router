@@ -25,6 +25,7 @@ import {
 } from "../../utils/type";
 import {
   ClientSnapshot,
+  ConnectorFacadeOption,
   ControlEvent,
   ControlRpcMethod,
   ControlRpcParams,
@@ -136,13 +137,26 @@ export type MultiplexerDaemonHostOption = {
   now?: () => number;
 };
 
+type ManagerKey = {
+  platform: "android" | "harmony" | "ios" | "desktop" | "network";
+  host?: string;
+  port?: number;
+  ip?: string;
+};
+
+type EnabledManager = {
+  controlIds: Set<number>;
+  close: () => void;
+};
+
 export class MultiplexerDaemonHost {
   /**
    * Owns shared runtime connections, coordinates legacy ownership, and publishes client snapshots.
    * Routes Connector and WebSocket frontend requests to runtimes and returns their responses.
    */
   private physicalConnector: PhysicalConnector;
-  private readonly manualConnect: boolean;
+  private enableWebSocket: boolean;
+  private readonly enabledManagers = new Map<ManagerKey, EnabledManager>();
   private readonly connectionTraceRecorder: ConnectionTraceRecorder | null;
   private readonly option: MultiplexerDaemonHostOption;
   private readonly protocolVersion: number;
@@ -167,6 +181,7 @@ export class MultiplexerDaemonHost {
    * - activeWebSocketDriverIds: WebSocket frontends that also keep the daemon alive.
    */
   private readonly activeControlIds = new Set<number>();
+  private readonly autoConnectControlIds = new Set<number>();
   // Connected controls with reporting enabled, in registration order.
   // The first entry receives reports; disconnecting it selects the next entry.
   private readonly reportControlIds = new Set<number>();
@@ -193,7 +208,7 @@ export class MultiplexerDaemonHost {
 
   constructor(option: MultiplexerDaemonHostOption) {
     this.option = option;
-    this.manualConnect = option.physicalConnectorOption?.manualConnect ?? false;
+    this.enableWebSocket = option.enableWebSocket ?? false;
     this.protocolVersion = option.protocolVersion;
     this.now = option.now ?? Date.now;
     this.pendingRoutes = new PendingRouteTable();
@@ -209,10 +224,7 @@ export class MultiplexerDaemonHost {
     setDriverReportService(this.reportBridge);
     this.physicalConnector =
       option.physicalConnector ??
-      new PhysicalConnector({
-        ...option.physicalConnectorOption,
-        traceRecorder: this.connectionTraceRecorder,
-      });
+      new PhysicalConnector(this.connectionTraceRecorder);
     this.legacyOwnershipGuard = new LegacyOwnershipGuard({
       legacyDriverDir: option.legacyDriverDir,
       onStatusChanged: this.handleLegacyOwnershipChanged,
@@ -314,6 +326,8 @@ export class MultiplexerDaemonHost {
     this.clearIdleTimeout();
     this.legacyOwnershipGuard.stop();
     this.activeControlIds.clear();
+    this.autoConnectControlIds.clear();
+    this.enabledManagers.clear();
     this.webSocketRequesterControlIds.clear();
     this.activeWebSocketDriverIds.clear();
     this.unbindPhysicalConnectorEvents();
@@ -386,7 +400,7 @@ export class MultiplexerDaemonHost {
 
   private readonly handleDeviceConnected = (device: BaseDevice): void => {
     if (!this.legacyOwnershipAttached) return;
-    if (!this.manualConnect) {
+    if (!this.physicalConnector.manualConnect) {
       void this.ensureClientWatcher(device.serial);
     }
     this.sendSnapshot();
@@ -466,8 +480,24 @@ export class MultiplexerDaemonHost {
   handleControlConnected(
     controlId: number,
     reportServiceEnabled = false,
+    connectorFacadeOption: ConnectorFacadeOption = {
+      manualConnect: false,
+      enableAndroid: true,
+      enableIOS: true,
+      enableHarmony: true,
+      enableDesktop: false,
+      enableNetworkDevice: false,
+    },
   ): void {
     this.activeControlIds.add(controlId);
+    defaultLogger.info(
+      `Multiplexer control connected: controlId=${controlId}, activeControlCount=${this.activeControlIds.size}`,
+    );
+    if (!connectorFacadeOption.manualConnect) {
+      this.autoConnectControlIds.add(controlId);
+    }
+    this.physicalConnector.manualConnect =
+      this.autoConnectControlIds.size === 0;
     if (reportServiceEnabled) {
       this.reportControlIds.add(controlId);
     }
@@ -492,6 +522,178 @@ export class MultiplexerDaemonHost {
       });
     }
     this.updateReportStatus();
+    const msg =
+      "PhysicalConnectorOption:" + JSON.stringify(connectorFacadeOption);
+    defaultLogger.debug(msg);
+    if (!connectorFacadeOption.manualConnect) {
+      getDriverReportService()?.report(
+        "PhysicalConnectorInitOfNoManualConnect",
+        {},
+        { option: msg },
+      );
+    }
+    if (connectorFacadeOption.enableWebSocket) {
+      this.enableWebSocket = true;
+    }
+    void this.addPhysicalDeviceManagers(controlId, connectorFacadeOption).catch(
+      (error) => {
+        defaultLogger.error(
+          "Failed to add registered device managers: " + error,
+        );
+      },
+    );
+    if (!connectorFacadeOption.manualConnect) {
+      void this.physicalConnector.connectDevices().catch((error) => {
+        defaultLogger.error(
+          "Failed to start registered device managers: " + error,
+        );
+      });
+    }
+  }
+
+  // Host owns deduplication and control lifetimes; PhysicalConnector owns resources.
+  private async addPhysicalDeviceManagers(
+    controlId: number,
+    option: PhysicalConnectorOption,
+  ): Promise<void> {
+    if (option.usbConnectOpt) {
+      this.physicalConnector.updateUsbConnectOption(option.usbConnectOpt);
+    }
+    const additions: Promise<void>[] = [];
+    if (option.enableAndroid) {
+      additions.push(this.addAndroidManager(controlId, option.adbHostPort));
+    }
+    if (option.enableHarmony) {
+      additions.push(this.addHarmonyManager(controlId, option.hdcHostPort));
+    }
+    if (option.enableIOS) {
+      additions.push(this.addIOSManager(controlId));
+    }
+    if (option.enableDesktop) {
+      additions.push(this.addDesktopManager(controlId));
+    }
+    if (option.enableNetworkDevice && option.networkDeviceOpt) {
+      additions.push(
+        this.addNetworkManager(controlId, option.networkDeviceOpt),
+      );
+    }
+    await Promise.all(additions);
+  }
+
+  private async addAndroidManager(
+    controlId: number,
+    option?: PhysicalConnectorOption["adbHostPort"],
+  ): Promise<void> {
+    // Match getAdbInstance in src/utils/adb.validator.ts.
+    const endpoint = {
+      host: option?.host ?? "127.0.0.1",
+      port: option?.port ?? 5037,
+    };
+    const key: ManagerKey = { platform: "android", ...endpoint };
+    if (
+      this.addManagerControl(key, controlId, () =>
+        this.physicalConnector.closeAndroidDeviceManager(endpoint),
+      )
+    ) {
+      await this.physicalConnector.addAndroidDeviceManager(option);
+    }
+  }
+
+  private async addHarmonyManager(
+    controlId: number,
+    option?: PhysicalConnectorOption["hdcHostPort"],
+  ): Promise<void> {
+    // Match getHdcInstance in src/utils/hdc.validator.ts.
+    const endpoint = {
+      host: option?.host ?? "127.0.0.1",
+      port: option?.port ?? 8710,
+    };
+    const key: ManagerKey = { platform: "harmony", ...endpoint };
+    if (
+      this.addManagerControl(key, controlId, () =>
+        this.physicalConnector.closeHarmonyDeviceManager(endpoint),
+      )
+    ) {
+      await this.physicalConnector.addHarmonyDeviceManager(option);
+    }
+  }
+
+  private async addIOSManager(controlId: number): Promise<void> {
+    if (
+      this.addManagerControl({ platform: "ios" }, controlId, () =>
+        this.physicalConnector.closeIOSDeviceManager(),
+      )
+    ) {
+      await this.physicalConnector.addIOSDeviceManager();
+    }
+  }
+
+  private async addDesktopManager(controlId: number): Promise<void> {
+    if (
+      this.addManagerControl({ platform: "desktop" }, controlId, () =>
+        this.physicalConnector.closeDesktopDeviceManager(),
+      )
+    ) {
+      await this.physicalConnector.addDesktopDeviceManager();
+    }
+  }
+
+  private async addNetworkManager(
+    controlId: number,
+    option: NonNullable<PhysicalConnectorOption["networkDeviceOpt"]>,
+    autoListen = !this.physicalConnector.manualConnect,
+  ): Promise<void> {
+    const key: ManagerKey = { platform: "network", ip: option.ip };
+    if (
+      this.addManagerControl(key, controlId, () =>
+        this.physicalConnector.closeNetworkDeviceManager(option.ip),
+      )
+    ) {
+      // Ports are fixed by the first request while this IP has controls.
+      await this.physicalConnector.addNetworkDeviceManager(option, autoListen);
+    }
+  }
+
+  // Returns true only for a new manager. Record the control before starting
+  // discovery so a disconnect can close a manager while watchDevices is pending.
+  private addManagerControl(
+    key: ManagerKey,
+    controlId: number,
+    close: () => void,
+  ): boolean {
+    // Map object keys use reference equality; compare the platform and endpoint.
+    for (const [existingKey, manager] of this.enabledManagers) {
+      if (
+        existingKey.platform === key.platform &&
+        existingKey.host === key.host &&
+        existingKey.port === key.port &&
+        existingKey.ip === key.ip
+      ) {
+        manager.controlIds.add(controlId);
+        defaultLogger.info(
+          `Physical device manager already enabled: ${JSON.stringify(
+            key,
+          )}, controlId=${controlId}`,
+        );
+        return false;
+      }
+    }
+    this.enabledManagers.set(key, { controlIds: new Set([controlId]), close });
+    defaultLogger.info(
+      `Enabling physical device manager: ${JSON.stringify(
+        key,
+      )}, controlId=${controlId}`,
+    );
+    return true;
+  }
+
+  private releasePhysicalDeviceManagers(controlId: number): void {
+    for (const [key, manager] of this.enabledManagers) {
+      if (!manager.controlIds.delete(controlId) || manager.controlIds.size > 0)
+        continue;
+      this.enabledManagers.delete(key);
+      manager.close();
+    }
   }
 
   private updateReportStatus(): void {
@@ -506,13 +708,17 @@ export class MultiplexerDaemonHost {
 
   handleControlDisconnected(controlId: number): void {
     this.activeControlIds.delete(controlId);
+    this.autoConnectControlIds.delete(controlId);
+    this.physicalConnector.manualConnect =
+      this.autoConnectControlIds.size === 0;
     this.reportControlIds.delete(controlId);
     this.updateReportStatus();
     this.connectionTraceRecorder?.recordControlSocketDisconnected(controlId, {
       activeControlCount: this.activeControlIds.size,
     });
     this.webSocketRequesterControlIds.delete(controlId);
-    // Routes belong to their requester; shared runtime caches survive a control disconnect.
+    this.releasePhysicalDeviceManagers(controlId);
+    // Remaining shared runtimes stay alive; routes belong to their requester.
     this.rejectRoutes(
       this.pendingRoutes.clearByControlId(controlId),
       new Error(`Multiplexer control ${controlId} disconnected`),
@@ -614,12 +820,11 @@ export class MultiplexerDaemonHost {
           message.params as ControlRpcParams["connectUsbClients"],
         );
       case "watchNetworkDeviceAtIp":
-        await this.physicalConnector.watchNetworkDeviceAtIp(
+        return this.addNetworkManager(
+          controlId,
           message.params as ControlRpcParams["watchNetworkDeviceAtIp"],
+          true,
         );
-        // A repeated watch may not emit a device event; replay for this caller.
-        this.sendSnapshot([controlId]);
-        return undefined;
       case "startDeviceClientWatcher":
         return this.startWatchClient(
           (message.params as ControlRpcParams["startDeviceClientWatcher"])
@@ -856,7 +1061,7 @@ export class MultiplexerDaemonHost {
           "The multiplexer daemon WebSocket server is unavailable because the daemon host is closed",
       };
     }
-    if (!this.option.enableWebSocket) {
+    if (!this.enableWebSocket) {
       throw {
         code: "websocket-disabled",
         message:
@@ -1258,6 +1463,15 @@ export class MultiplexerDaemonHost {
     // Register the route before sending so an immediate runtime response can be correlated.
     const route = this.rewriteOutboundMessageData(data, target);
     try {
+      defaultLogger.info(
+        `Sending multiplexer runtime message: ${JSON.stringify({
+          globalMessageId: route?.globalMessageId ?? null,
+          originalId: route?.originalId ?? null,
+          kind: target.kind,
+          requesterId: target.requesterId,
+          clientId,
+        })}`,
+      );
       if (websocketClient) {
         websocketClient.sendMessage(JSON.stringify(data));
       } else {
@@ -1418,7 +1632,7 @@ export class MultiplexerDaemonHost {
       broadcastMessage,
       parsedValue,
     );
-    if (this.option.enableWebSocket) {
+    if (this.enableWebSocket) {
       this.sendMessageToWeb(broadcastMessage);
     }
     this.broadcast({
@@ -1471,7 +1685,7 @@ export class MultiplexerDaemonHost {
   }
 
   sendMessageToWeb(message: string): void {
-    if (!this.option.enableWebSocket) {
+    if (!this.enableWebSocket) {
       defaultLogger.warn("enableWebSocket isn't opened!");
       return;
     }
@@ -1483,7 +1697,7 @@ export class MultiplexerDaemonHost {
   }
 
   sendMessageToWebClient(webClientId: number, message: string): void {
-    if (!this.option.enableWebSocket) {
+    if (!this.enableWebSocket) {
       defaultLogger.warn("enableWebSocket isn't opened!");
       return;
     }

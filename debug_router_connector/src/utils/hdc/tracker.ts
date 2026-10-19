@@ -6,27 +6,40 @@ import { getDriverReportService } from "../../report/interface/DriverReportServi
 export default class Tracker extends EventEmitter {
   private targets: Target[] = [];
   private targetMap: Record<string, Target> = {};
+  private closed = false;
+  private timer: ReturnType<typeof setTimeout> | undefined;
   constructor(private readonly client: Client) {
     super();
     this.read();
   }
 
   public read() {
+    if (this.closed) return;
     this.client
       .listTargets()
       .then((targets) => {
+        if (this.closed) return;
         this.update(targets);
-        setTimeout(() => {
+        if (this.closed) return;
+        this.timer = setTimeout(() => {
+          this.timer = undefined;
           this.read();
         }, 1000);
       })
       .catch((err) => {
+        if (this.closed) return;
         this.emit("error", err);
         getDriverReportService()?.report("hdc_read_targets_error", null, {
           msg: "hdc tracker listTargets or updateTargets failed",
           error: err?.message,
         });
       });
+  }
+
+  public end(): void {
+    this.closed = true;
+    clearTimeout(this.timer);
+    this.timer = undefined;
   }
 
   private update(newTragets: Target[]) {

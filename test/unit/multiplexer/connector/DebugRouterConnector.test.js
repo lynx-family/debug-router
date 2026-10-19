@@ -438,7 +438,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
     }
   });
 
-  it("uses all daemon capabilities by default without enableDebugMode", function () {
+  it("preserves requested daemon capabilities without enableDebugMode", function () {
     const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
     try {
       new DebugRouterConnector({
@@ -456,7 +456,7 @@ describe("DebugRouterConnector multiplexer facade", function () {
       });
 
       assert.strictEqual(state.managers[0].option.enableDebugMode, false);
-      assert.strictEqual(state.managers[0].option.enableWebSocket, true);
+      assert.strictEqual(state.managers[0].option.enableWebSocket, false);
       assert.strictEqual(
         state.managers[0].option.daemonEntry,
         require.resolve(
@@ -479,12 +479,12 @@ describe("DebugRouterConnector multiplexer facade", function () {
               .enableNetworkDevice,
         },
         {
-          manualConnect: false,
-          enableAndroid: true,
-          enableIOS: true,
-          enableHarmony: true,
-          enableDesktop: true,
-          enableNetworkDevice: true,
+          manualConnect: true,
+          enableAndroid: false,
+          enableIOS: false,
+          enableHarmony: false,
+          enableDesktop: false,
+          enableNetworkDevice: false,
         }
       );
     } finally {
@@ -1376,9 +1376,10 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.strictEqual(enabled.wssPort, 8888);
       assert.strictEqual(enabled.wssHost, "127.0.0.1:8888");
       assert.strictEqual(enabled.roomId, "room-2");
-      assert.deepStrictEqual(enabled.wss, {
-        wssPath: "ws://127.0.0.1:8888/mdevices/page/android",
-      });
+      assert.strictEqual(
+        enabled.wss.wssPath,
+        "ws://127.0.0.1:8888/mdevices/page/android"
+      );
       assert.deepStrictEqual(state.clients[1].calls, [
         {
           method: "startWSServer",
@@ -1521,9 +1522,10 @@ describe("DebugRouterConnector multiplexer facade", function () {
 
       await connector.startWSServer();
       assert.strictEqual(connector.desiredWSServerStarted, true);
-      assert.deepStrictEqual(connector.wss, {
-        wssPath: "ws://127.0.0.1:8801/mdevices/page/android",
-      });
+      assert.strictEqual(
+        connector.wss.wssPath,
+        "ws://127.0.0.1:8801/mdevices/page/android"
+      );
 
       state.clients[0].emitConnectionEvent({
         state: "disconnected",
@@ -1532,9 +1534,10 @@ describe("DebugRouterConnector multiplexer facade", function () {
       assert.strictEqual(connector.wss, null);
 
       await delay(120);
-      assert.deepStrictEqual(connector.wss, {
-        wssPath: "ws://127.0.0.1:8802/mdevices/page/android",
-      });
+      assert.strictEqual(
+        connector.wss.wssPath,
+        "ws://127.0.0.1:8802/mdevices/page/android"
+      );
       assert.deepStrictEqual(
         state.clients[0].calls
           .filter((call) => call.method === "startWSServer")

@@ -54,109 +54,128 @@ export class PhysicalConnector {
   readonly devices = new Map<string, BaseDevice>();
   readonly usbClients = new Map<number, UsbClient>();
   private nextClientId: number = 0;
-  private enableAndroid: boolean;
-  private enableIOS: boolean;
-  private enableHarmony: boolean;
-  private enableDesktop: boolean;
-  private readonly enableNetworkDevice: boolean;
-  public readonly traceRecorder: ConnectionTraceRecorder | null = null;
-  private readonly networkDeviceOpt:
-    | {
-        ip: string;
-        port?: number[];
-      }
-    | undefined;
-  readonly adbOption: any;
-  readonly hdcOption: any;
-  readonly usbConnectOpt: {
-    retryTime: number;
-  };
+  public traceRecorder: ConnectionTraceRecorder | null;
+  public manualConnect = true;
+  private usbRetryTime: number | undefined;
   private closed: boolean = false;
-  private devicesManager: Set<DeviceManager>;
-  private readonly networkDeviceManagers = new Map<
-    string,
-    NetworkDeviceManager
-  >();
+  private readonly devicesManager = new Set<DeviceManager>();
 
-  constructor(
-    option: PhysicalConnectorOption = {
-      manualConnect: false,
-      enableAndroid: true,
-      enableIOS: true,
-      enableHarmony: true,
-      enableDesktop: false,
-      enableNetworkDevice: false,
-      traceRecorder: null,
-    },
-  ) {
-    const msg = "PhysicalConnectorOption:" + JSON.stringify(option);
-    defaultLogger.debug(msg);
-    getDriverReportService()?.report(
-      "PhysicalConnectorInit",
-      {},
-      { option: msg },
+  constructor(traceRecorder: ConnectionTraceRecorder | null = null) {
+    this.traceRecorder = traceRecorder;
+    getDriverReportService()?.report("PhysicalConnectorInit", {}, {});
+  }
+
+  get usbConnectRetryTime(): number {
+    return this.usbRetryTime ?? 3000;
+  }
+
+  async addAndroidDeviceManager(
+    options?: PhysicalConnectorOption["adbHostPort"],
+  ): Promise<void> {
+    return this.addDeviceManager(new AndroidDeviceManager(this, options));
+  }
+
+  async addHarmonyDeviceManager(
+    options?: PhysicalConnectorOption["hdcHostPort"],
+  ): Promise<void> {
+    return this.addDeviceManager(new HarmonyDeviceManager(this, options));
+  }
+
+  async addIOSDeviceManager(): Promise<void> {
+    if (process.platform === "darwin" || process.platform === "win32") {
+      return this.addDeviceManager(new iOSDeviceManager(this));
+    }
+  }
+
+  async addDesktopDeviceManager(): Promise<void> {
+    return this.addDeviceManager(new DesktopDeviceManager(this));
+  }
+
+  async addNetworkDeviceManager(
+    options: NonNullable<PhysicalConnectorOption["networkDeviceOpt"]>,
+    autoListen = !this.manualConnect,
+  ): Promise<void> {
+    return this.addDeviceManager(
+      new NetworkDeviceManager(this, options),
+      autoListen,
     );
-    if (!option.manualConnect) {
-      getDriverReportService()?.report(
-        "PhysicalConnectorInitOfNoManualConnect",
-        {},
-        { option: msg },
-      );
-    }
-    this.enableAndroid = option.enableAndroid ?? true;
-    this.adbOption = option.adbHostPort;
-    // add win32 support
-    this.enableIOS =
-      process.platform === "darwin" || process.platform === "win32"
-        ? option.enableIOS ?? true
-        : false;
-    this.enableHarmony = option.enableHarmony ?? true;
-    this.hdcOption = option.hdcHostPort;
-    this.enableDesktop = option.enableDesktop ?? false;
-    this.enableNetworkDevice = option.enableNetworkDevice ?? false;
-    if (this.enableNetworkDevice) {
-      this.networkDeviceOpt = option.networkDeviceOpt;
-    }
-    this.usbConnectOpt = option.usbConnectOpt ?? {
-      retryTime: 3000,
-    };
-    if (this.usbConnectOpt.retryTime < 3000) {
-      this.usbConnectOpt.retryTime = 3000;
-    }
-    this.traceRecorder = option.traceRecorder ?? null;
-    this.devicesManager = new Set<DeviceManager>();
-    if (this.enableAndroid) {
-      this.devicesManager.add(new AndroidDeviceManager(this, this.adbOption));
-    }
-    if (this.enableIOS) {
-      this.devicesManager.add(new iOSDeviceManager(this));
-    }
-    if (this.enableHarmony) {
-      this.devicesManager.add(new HarmonyDeviceManager(this, this.hdcOption));
-    }
-    if (this.enableDesktop) {
-      this.devicesManager.add(new DesktopDeviceManager(this));
-    }
-    if (this.enableNetworkDevice) {
-      if (this.networkDeviceOpt) {
-        // NetWorkDevices use ip as their serial.
-        const networkDeviceManager = new NetworkDeviceManager(
-          this,
-          this.networkDeviceOpt,
-        );
-        this.networkDeviceManagers.set(
-          this.networkDeviceOpt.ip,
-          networkDeviceManager,
-        );
-        this.devicesManager.add(networkDeviceManager);
-      } else {
-        getDriverReportService()?.report("network_connect_error", null, {
-          msg: "networkDeviceOpt == undefined",
+  }
+
+  private async addDeviceManager(
+    manager: DeviceManager,
+    autoListen = !this.manualConnect,
+  ): Promise<void> {
+    this.devicesManager.add(manager);
+    if (autoListen) {
+      await manager.watchDevices().catch((e) => {
+        getDriverReportService()?.report("device_connect_error", null, {
+          msg: "watchDevices error:" + e?.message,
           stage: "device",
         });
-        defaultLogger.error("networkDeviceOpt == undefined");
+        throw e;
+      });
+    }
+  }
+
+  closeAndroidDeviceManager(options: { host: string; port: number }): void {
+    this.closeMatchingDeviceManager(
+      (manager) =>
+        manager instanceof AndroidDeviceManager &&
+        manager.host === options.host &&
+        manager.port === options.port,
+    );
+  }
+
+  closeHarmonyDeviceManager(options: { host: string; port: number }): void {
+    this.closeMatchingDeviceManager(
+      (manager) =>
+        manager instanceof HarmonyDeviceManager &&
+        manager.host === options.host &&
+        manager.port === options.port,
+    );
+  }
+
+  closeIOSDeviceManager(): void {
+    this.closeMatchingDeviceManager(
+      (manager) => manager instanceof iOSDeviceManager,
+    );
+  }
+
+  closeDesktopDeviceManager(): void {
+    this.closeMatchingDeviceManager(
+      (manager) => manager instanceof DesktopDeviceManager,
+    );
+  }
+
+  closeNetworkDeviceManager(ip: string): void {
+    this.closeMatchingDeviceManager(
+      (manager) => manager instanceof NetworkDeviceManager && manager.ip === ip,
+    );
+  }
+
+  private closeMatchingDeviceManager(
+    matches: (manager: DeviceManager) => boolean,
+  ): void {
+    for (const manager of this.devicesManager) {
+      if (matches(manager)) {
+        this.closeDeviceManager(manager);
+        return;
       }
     }
+  }
+
+  closeDeviceManager(manager: DeviceManager): void {
+    if (!this.devicesManager.delete(manager)) return;
+    manager.close();
+  }
+
+  updateUsbConnectOption(
+    options: NonNullable<PhysicalConnectorOption["usbConnectOpt"]>,
+  ): void {
+    this.usbRetryTime = Math.max(
+      3000,
+      Math.min(this.usbRetryTime ?? options.retryTime, options.retryTime),
+    );
   }
 
   // functions Migrated from DebugRouterConnector， not modified
@@ -178,25 +197,6 @@ export class PhysicalConnector {
   ): Promise<BaseDevice[]> {
     await this.startDeviceListeners();
     return this.getDevices(timeout, serial);
-  }
-
-  async watchNetworkDeviceAtIp(options: {
-    ip: string;
-    port?: number[];
-  }): Promise<void> {
-    if (this.networkDeviceManagers.has(options.ip)) {
-      return;
-    }
-    const networkDeviceManager = new NetworkDeviceManager(this, options);
-    this.networkDeviceManagers.set(options.ip, networkDeviceManager);
-    this.devicesManager.add(networkDeviceManager);
-    await networkDeviceManager.watchDevices().catch((e) => {
-      getDriverReportService()?.report("device_connect_error", null, {
-        msg: "watchDevices error:" + e?.message,
-        stage: "device",
-      });
-      throw e;
-    });
   }
 
   private async startDeviceListeners() {
@@ -245,7 +245,7 @@ export class PhysicalConnector {
     this.devices.delete(serial);
     device.disconnect(); // we'll only destroy upon replacement
     this.emit("device-disconnected", device);
-    monitorUnregisterDevice(device, this.usbConnectOpt.retryTime);
+    monitorUnregisterDevice(device, this.usbConnectRetryTime);
   }
 
   getDevices(
@@ -397,6 +397,9 @@ export class PhysicalConnector {
     this.closed = true;
     // remove multiOpenMonitor part & wss part
     this.disableAllClients();
+    for (const manager of this.devicesManager) {
+      this.closeDeviceManager(manager);
+    }
   }
 
   regiserUsbClient(client: UsbClient) {
@@ -429,7 +432,7 @@ export class PhysicalConnector {
     this.emit("client-disconnected", id);
     this.emit("app-client-disconnected", id);
     // remove wss.sendClientList
-    monitorUnregisterClient(existing, this.usbConnectOpt.retryTime);
+    monitorUnregisterClient(existing, this.usbConnectRetryTime);
   }
 
   emit<Event extends keyof PhysicalConnectorEvent>(

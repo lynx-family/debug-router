@@ -295,9 +295,22 @@ function createWebSocketControllerState(appClients = [], webClients = []) {
 }
 
 class FakePhysicalConnector extends EventEmitter {
+  addAndroidDeviceManager() {}
+  addHarmonyDeviceManager() {}
+  addIOSDeviceManager() {}
+  addDesktopDeviceManager() {}
+  addNetworkDeviceManager() {}
+  closeAndroidDeviceManager() {}
+  closeHarmonyDeviceManager() {}
+  closeIOSDeviceManager() {}
+  closeDesktopDeviceManager() {}
+  closeNetworkDeviceManager() {}
+  updateUsbConnectOption() {}
+
   constructor(option = {}) {
     super();
     this.option = option;
+    this.manualConnect = true;
     this.devices = new Map();
     this.usbClients = new Map();
     this.connectDevicesCalls = [];
@@ -548,6 +561,8 @@ class FakeLegacyOwnershipGuard {
 
 function createHost(options = {}) {
   const physical = options.physical ?? new FakePhysicalConnector(options);
+  // These unit tests set the physical mode directly without registering controls.
+  physical.manualConnect = options.manualConnect ?? false;
   const host = new MultiplexerDaemonHost({
     physicalConnector: physical,
     protocolVersion: options.protocolVersion ?? MULTIPLEXER_PROTOCOL_VERSION,
@@ -2232,6 +2247,58 @@ describe("MultiplexerDaemonHost", function () {
     assert.strictEqual(client.state.closeCalls, 1);
   });
 
+  for (const transport of ["usb", "websocket"]) {
+    it(`keeps ${transport} runtime logs bounded while forwarding an 8 MiB payload`, async function () {
+      const { host, physical } = createHost();
+      const client =
+        transport === "usb" ? createClient(12) : createWebSocketClient(12);
+      if (transport === "usb") {
+        physical.usbClients.set(client.clientId(), client);
+      } else {
+        host.webSocketController = createWebSocketControllerState([
+          client,
+        ]).controller;
+      }
+      const payload = "a".repeat(8 * 1024 * 1024);
+      const message = createCustomizedEnvelope({
+        id: 66,
+        clientId: 12,
+        type: "App",
+        method: "App.GetCloseCoverageUploadSwitch",
+        params: { message: payload },
+      });
+      const logs = [];
+      defaultLogger.setOutput((level, ...parts) => {
+        logs.push(parts.join(" "));
+      });
+
+      try {
+        if (transport === "usb") {
+          await sendAppMessageWithoutReply(host, 1, 12, message);
+        } else {
+          host.handleWebSocketDriverMessage(1, 12, JSON.stringify(message));
+        }
+
+        assert.strictEqual(client.state.sendMessageCalls.length, 1);
+        const forwarded = readCustomizedInner(client.state.sendMessageCalls[0]);
+        assert.strictEqual(forwarded.params.message, payload);
+        const prefix = "Sending multiplexer runtime message: ";
+        const runtimeLogs = logs.filter((log) => log.includes(prefix));
+        assert.strictEqual(runtimeLogs.length, 1);
+        const log = runtimeLogs[0];
+        assert.ok(
+          Buffer.byteLength(log) < 1024,
+          `Runtime log must stay below 1 KiB; got ${Buffer.byteLength(
+            log
+          )} bytes`
+        );
+        assert.ok(!log.includes("a".repeat(128)));
+      } finally {
+        await host.stop();
+      }
+    });
+  }
+
   it("sendMessageWithReply forwards Initialize before rejecting it as not routable", async function () {
     const { host, physical } = createHost();
     const client = createClient(12);
@@ -2807,7 +2874,7 @@ describe("MultiplexerDaemonHost", function () {
       WebSocketControllerCtor: FakeWebSocketController,
     });
     const { host, physical } = createHost({
-      enableWebSocket: true,
+      enableWebSocket: false,
       websocketOption: {
         port: 19000,
         roomId: "room-a",
@@ -2816,6 +2883,15 @@ describe("MultiplexerDaemonHost", function () {
     const controlServer = attachControlServer(host);
 
     try {
+      host.handleControlConnected(1, false, {
+        manualConnect: true,
+        enableWebSocket: true,
+      });
+      host.handleControlConnected(2, false, {
+        manualConnect: true,
+        enableWebSocket: false,
+      });
+      controlServer.targeted.length = 0;
       const first = await host.handleControlRpc(
         1,
         createRpcRequest("startWSServer", {})
@@ -4467,10 +4543,15 @@ describe("MultiplexerDaemonHost", function () {
     host.handleControlConnected(5, true);
     assert.deepStrictEqual(delivered(), [
       [2, "startup"],
+      [2, "PhysicalConnectorInitOfNoManualConnect"],
+      [2, "PhysicalConnectorInitOfNoManualConnect"],
+      [2, "PhysicalConnectorInitOfNoManualConnect"],
+      [2, "PhysicalConnectorInitOfNoManualConnect"],
       [2, "first"],
       [3, "second"],
       [5, "disabled"],
       [5, "queued"],
+      [5, "PhysicalConnectorInitOfNoManualConnect"],
     ]);
     assert.strictEqual(
       server.broadcasts.some((event) => event.event === "report"),
@@ -4479,7 +4560,7 @@ describe("MultiplexerDaemonHost", function () {
     await host.stop();
     assert.strictEqual(getDriverReportService(), null);
     report("after-stop");
-    assert.strictEqual(delivered().length, 5);
+    assert.strictEqual(delivered().length, 10);
   });
 
   it("captures physical constructor reports before the first control registers", async function () {
@@ -4497,7 +4578,7 @@ describe("MultiplexerDaemonHost", function () {
       },
     });
     const server = attachControlServer(host);
-    host.handleControlConnected(1, true);
+    host.handleControlConnected(1, true, host.option.physicalConnectorOption);
     const reports = server.targeted.filter(
       (item) => item.event.event === "report"
     );
@@ -4506,11 +4587,418 @@ describe("MultiplexerDaemonHost", function () {
       ["PhysicalConnectorInit"]
     );
     assert(reports.every((item) => isControlEvent(item.event)));
-    host.handleControlConnected(2, true);
+    host.handleControlConnected(2, true, host.option.physicalConnectorOption);
     assert.strictEqual(
       server.targeted.filter((item) => item.event.event === "report").length,
       1
     );
     await host.stop();
+  });
+});
+
+describe("MultiplexerDaemonHost dynamic physical managers", function () {
+  const disabled = {
+    manualConnect: true,
+    enableAndroid: false,
+    enableIOS: false,
+    enableHarmony: false,
+    enableDesktop: false,
+    enableNetworkDevice: false,
+  };
+
+  function setup(initial = disabled) {
+    const physical = new FakePhysicalConnector({});
+    const additions = [];
+    const manualModes = [];
+    const closures = [];
+    for (const method of [
+      "addAndroidDeviceManager",
+      "addHarmonyDeviceManager",
+      "addIOSDeviceManager",
+      "addDesktopDeviceManager",
+      "addNetworkDeviceManager",
+      "updateUsbConnectOption",
+    ]) {
+      physical[method] = (option) => {
+        additions.push([method, option]);
+        manualModes.push(physical.manualConnect);
+        return Promise.resolve();
+      };
+    }
+    for (const method of [
+      "closeAndroidDeviceManager",
+      "closeHarmonyDeviceManager",
+      "closeIOSDeviceManager",
+      "closeDesktopDeviceManager",
+      "closeNetworkDeviceManager",
+    ]) {
+      physical[method] = (endpoint) => closures.push([method, endpoint]);
+    }
+    const host = new MultiplexerDaemonHost({
+      physicalConnector: physical,
+      physicalConnectorOption: initial,
+      protocolVersion: MULTIPLEXER_PROTOCOL_VERSION,
+      controlEndpoint: "/tmp/dynamic-managers.sock",
+      multiplexerDaemonIdleTimeout: -1,
+    });
+    return { host, physical, additions, manualModes, closures };
+  }
+
+  it("uses default platform capabilities when registration options are omitted", async function () {
+    const { host, physical, additions } = setup();
+    host.handleControlConnected(1);
+    await nextTick();
+    assert.deepStrictEqual(additions, [
+      ["addAndroidDeviceManager", undefined],
+      ["addHarmonyDeviceManager", undefined],
+      ["addIOSDeviceManager", undefined],
+    ]);
+    assert.strictEqual(physical.connectDevicesCalls.length, 1);
+    assert.strictEqual(physical.manualConnect, false);
+  });
+
+  it("adds only requested platforms and deduplicates normalized addresses", function () {
+    const { host, physical, additions } = setup();
+    const option = {
+      ...disabled,
+      enableAndroid: true,
+      enableHarmony: true,
+      enableIOS: true,
+      enableDesktop: true,
+    };
+    host.handleControlConnected(1, false, option);
+    host.handleControlConnected(2, false, {
+      ...option,
+      adbHostPort: { host: "127.0.0.1", port: 5037 },
+      hdcHostPort: { port: 8710 },
+    });
+    assert.strictEqual(additions.length, 4);
+    host.handleControlConnected(3, false, {
+      ...option,
+      adbHostPort: { host: "remote", port: 5038 },
+      hdcHostPort: { host: "remote", port: 8711 },
+    });
+    assert.deepStrictEqual(additions.slice(4), [
+      ["addAndroidDeviceManager", { host: "remote", port: 5038 }],
+      ["addHarmonyDeviceManager", { host: "remote", port: 8711 }],
+    ]);
+    assert.strictEqual(physical.connectDevicesCalls.length, 0);
+  });
+
+  it("adds managers on registration and starts all watchers for each automatic control", async function () {
+    const initial = { ...disabled, enableAndroid: true };
+    const { host, physical, additions } = setup(initial);
+    host.handleControlConnected(1, false, initial);
+    assert.deepStrictEqual(additions, [["addAndroidDeviceManager", undefined]]);
+    host.handleControlConnected(2, false, {
+      ...initial,
+      manualConnect: false,
+      enableDesktop: true,
+    });
+    await nextTick();
+    assert.deepStrictEqual(additions, [
+      ["addAndroidDeviceManager", undefined],
+      ["addDesktopDeviceManager", undefined],
+    ]);
+    assert.strictEqual(physical.connectDevicesCalls.length, 1);
+    assert.strictEqual(physical.manualConnect, false);
+    host.handleControlConnected(3, false, initial);
+    assert.strictEqual(physical.manualConnect, false);
+    assert.strictEqual(physical.connectDevicesCalls.length, 1);
+    host.handleControlConnected(4, false, { ...initial, manualConnect: false });
+    assert.strictEqual(physical.connectDevicesCalls.length, 2);
+  });
+
+  it("updates physical manual mode as automatic controls connect and disconnect", async function () {
+    const { host, physical } = setup();
+    const automatic = { ...disabled, manualConnect: false };
+    host.handleControlConnected(1, false, disabled);
+    assert.strictEqual(physical.manualConnect, true);
+    host.handleControlConnected(2, false, automatic);
+    host.handleControlConnected(3, false, automatic);
+    host.handleControlConnected(4, false, disabled);
+    assert.deepStrictEqual([...host.autoConnectControlIds], [2, 3]);
+    assert.strictEqual(physical.manualConnect, false);
+    host.handleControlDisconnected(1);
+    host.handleControlDisconnected(2);
+    assert.strictEqual(physical.manualConnect, false);
+    host.handleControlDisconnected(3);
+    assert.strictEqual(physical.manualConnect, true);
+    assert.strictEqual(host.autoConnectControlIds.size, 0);
+    host.handleControlDisconnected(3);
+    host.handleControlDisconnected(4);
+    assert.strictEqual(physical.manualConnect, true);
+    host.handleControlConnected(5, false, automatic);
+    assert.strictEqual(physical.manualConnect, false);
+    assert.strictEqual(physical.connectDevicesCalls.length, 3);
+    await host.stop();
+    assert.strictEqual(host.autoConnectControlIds.size, 0);
+  });
+
+  it("passes current automatic mode to newly added managers without restarting all watchers", function () {
+    const { host, physical, manualModes } = setup();
+    host.handleControlConnected(1, false, {
+      ...disabled,
+      manualConnect: false,
+      enableAndroid: true,
+    });
+    host.handleControlConnected(2, false, {
+      ...disabled,
+      enableAndroid: true,
+      adbHostPort: { host: "remote" },
+    });
+    assert.deepStrictEqual(manualModes, [false, false]);
+    assert.strictEqual(physical.connectDevicesCalls.length, 1);
+  });
+
+  it("deduplicates network managers by IP and applies explicit USB retry options", function () {
+    const { host, additions } = setup();
+    const option = {
+      ...disabled,
+      enableNetworkDevice: true,
+      networkDeviceOpt: { ip: "remote", port: [9002, 9001] },
+    };
+    host.handleControlConnected(1, false, option);
+    host.handleControlConnected(2, false, {
+      ...option,
+      networkDeviceOpt: { ip: "remote", port: [9001, 9002, 9001] },
+    });
+    host.handleControlConnected(3, false, {
+      ...option,
+      networkDeviceOpt: { ip: "remote", port: [9003] },
+      usbConnectOpt: { retryTime: 5000 },
+    });
+    host.handleControlConnected(4, false, {
+      ...option,
+      networkDeviceOpt: { ip: "remote" },
+    });
+    host.handleControlConnected(5, false, {
+      ...option,
+      networkDeviceOpt: { ip: "other", port: [9003] },
+    });
+    assert.deepStrictEqual(additions, [
+      ["addNetworkDeviceManager", option.networkDeviceOpt],
+      ["updateUsbConnectOption", { retryTime: 5000 }],
+      ["addNetworkDeviceManager", { ip: "other", port: [9003] }],
+    ]);
+  });
+
+  it("retains shared endpoints and closes only the last owner's platforms", async function () {
+    const { host, additions, closures } = setup();
+    const all = {
+      ...disabled,
+      enableAndroid: true,
+      enableHarmony: true,
+      enableIOS: true,
+      enableDesktop: true,
+      enableNetworkDevice: true,
+      networkDeviceOpt: { ip: "one", port: [9001] },
+    };
+    host.handleControlConnected(1, false, all);
+    host.handleControlConnected(2, false, {
+      ...all,
+      adbHostPort: { host: "127.0.0.1", port: 5037 },
+      hdcHostPort: { host: "127.0.0.1", port: 8710 },
+    });
+    host.handleControlConnected(3, false, {
+      ...disabled,
+      enableAndroid: true,
+      adbHostPort: { host: "remote", port: 5038 },
+      enableHarmony: true,
+      hdcHostPort: { host: "remote", port: 8711 },
+      enableNetworkDevice: true,
+      networkDeviceOpt: { ip: "two" },
+    });
+    await nextTick();
+    assert.strictEqual(additions.length, 8);
+    host.handleControlDisconnected(1);
+    host.handleControlDisconnected(999);
+    assert.deepStrictEqual(closures, []);
+    host.handleControlDisconnected(2);
+    assert.deepStrictEqual(closures, [
+      ["closeAndroidDeviceManager", { host: "127.0.0.1", port: 5037 }],
+      ["closeHarmonyDeviceManager", { host: "127.0.0.1", port: 8710 }],
+      ["closeIOSDeviceManager", undefined],
+      ["closeDesktopDeviceManager", undefined],
+      ["closeNetworkDeviceManager", "one"],
+    ]);
+    host.handleControlDisconnected(2);
+    assert.strictEqual(closures.length, 5);
+    host.handleControlDisconnected(3);
+    assert.strictEqual(closures.length, 8);
+    assert.strictEqual(host.enabledManagers.size, 0);
+    host.handleControlConnected(4, false, all);
+    assert.strictEqual(additions.length, 13);
+  });
+
+  it("shares registration and runtime network ownership and keeps the first ports", async function () {
+    const { host, physical, additions, closures } = setup();
+    host.handleControlConnected(1, false, {
+      ...disabled,
+      enableNetworkDevice: true,
+      networkDeviceOpt: { ip: "shared", port: [9001] },
+    });
+    host.handleControlConnected(2, false, {
+      ...disabled,
+      manualConnect: false,
+    });
+    assert.strictEqual(physical.connectDevicesCalls.length, 1);
+    const server = attachControlServer(host);
+    const watch = (id, ip, port) =>
+      host.handleControlRpc(
+        id,
+        createRpcRequest("watchNetworkDeviceAtIp", { ip, port })
+      );
+    await Promise.all([watch(2, "shared", [9002]), watch(2, "shared", [9003])]);
+    assert.deepStrictEqual(additions, [
+      ["addNetworkDeviceManager", { ip: "shared", port: [9001] }],
+    ]);
+    assert.strictEqual(physical.connectDevicesCalls.length, 1);
+    await watch(2, "other", []);
+    assert.deepStrictEqual(server.targeted, []);
+    assert.deepStrictEqual(server.broadcasts, []);
+    host.handleControlDisconnected(1);
+    assert.deepStrictEqual(closures, []);
+    host.handleControlDisconnected(2);
+    assert.deepStrictEqual(closures, [
+      ["closeNetworkDeviceManager", "shared"],
+      ["closeNetworkDeviceManager", "other"],
+    ]);
+    host.handleControlConnected(3, false, disabled);
+    await watch(3, "shared", [9004]);
+    assert.deepStrictEqual(additions[2], [
+      "addNetworkDeviceManager",
+      { ip: "shared", port: [9004] },
+    ]);
+    assert.strictEqual(additions.length, 3);
+  });
+
+  it("closes a pending manager immediately and ignores its stale startup failure", async function () {
+    const { host, physical, closures } = setup();
+    const first = createDeferred();
+    let starts = 0;
+    physical.addAndroidDeviceManager = () =>
+      ++starts === 1 ? first.promise : Promise.resolve({});
+    const option = { ...disabled, enableAndroid: true };
+    host.handleControlConnected(1, false, option);
+    host.handleControlDisconnected(1);
+    assert.strictEqual(closures.length, 1);
+    host.handleControlConnected(2, false, option);
+    first.reject(new Error("old startup failed"));
+    await nextTick();
+    assert.strictEqual(closures.length, 1);
+    assert.strictEqual(starts, 2);
+    host.handleControlDisconnected(2);
+    assert.strictEqual(closures.length, 2);
+  });
+
+  it("retains all owners on startup failure without recreating the manager", async function () {
+    const { host, physical, closures } = setup({
+      ...disabled,
+      manualConnect: false,
+    });
+    const failure = createDeferred();
+    let starts = 0;
+    physical.addAndroidDeviceManager = () =>
+      ++starts === 1 ? failure.promise : Promise.resolve({});
+    const option = { ...disabled, enableAndroid: true };
+    host.handleControlConnected(1, false, option);
+    host.handleControlConnected(2, false, option);
+    failure.reject(new Error("watch failed"));
+    await nextTick();
+    assert.strictEqual(closures.length, 0);
+    host.handleControlConnected(3, false, option);
+    await nextTick();
+    assert.strictEqual(starts, 1);
+    host.handleControlDisconnected(3);
+    host.handleControlDisconnected(1);
+    assert.strictEqual(closures.length, 0);
+    host.handleControlDisconnected(2);
+    assert.strictEqual(closures.length, 1);
+  });
+
+  it("releases a pending runtime network manager when its owner disconnects", async function () {
+    const { host, physical, closures } = setup();
+    const ready = createDeferred();
+    physical.addNetworkDeviceManager = () => ready.promise;
+    host.handleControlConnected(1, false, disabled);
+    const request = host.handleControlRpc(
+      1,
+      createRpcRequest("watchNetworkDeviceAtIp", { ip: "pending" })
+    );
+    host.handleControlDisconnected(1);
+    assert.deepStrictEqual(closures, [
+      ["closeNetworkDeviceManager", "pending"],
+    ]);
+    assert.strictEqual(host.enabledManagers.size, 0);
+    ready.resolve();
+    await request;
+    assert.strictEqual(closures.length, 1);
+    assert.strictEqual(host.enabledManagers.size, 0);
+  });
+
+  it("removes real network devices and publishes snapshots only after their last owner leaves", async function () {
+    const {
+      PhysicalConnector,
+    } = require("../../../../debug_router_connector/dist/cjs/src/physical/PhysicalConnector");
+    const physical = new PhysicalConnector();
+    const host = new MultiplexerDaemonHost({
+      physicalConnector: physical,
+      physicalConnectorOption: disabled,
+      protocolVersion: MULTIPLEXER_PROTOCOL_VERSION,
+      controlEndpoint: "/tmp/network-owner-test.sock",
+      multiplexerDaemonIdleTimeout: -1,
+    });
+    const server = attachControlServer(host);
+    host.legacyOwnershipGuard.currentStatus = "attached";
+    host.bindPhysicalConnectorEvents();
+    try {
+      host.handleControlConnected(1, false, {
+        ...disabled,
+        enableNetworkDevice: true,
+        networkDeviceOpt: { ip: "shared", port: [9001] },
+      });
+      host.handleControlConnected(2, false, disabled);
+      host.handleControlConnected(3, false, disabled);
+      // Manual mode starts discovery explicitly before sharing the manager.
+      await physical.connectDevices();
+      await host.handleControlRpc(
+        2,
+        createRpcRequest("watchNetworkDeviceAtIp", {
+          ip: "shared",
+          port: [9002],
+        })
+      );
+      await host.handleControlRpc(
+        1,
+        createRpcRequest("watchNetworkDeviceAtIp", {
+          ip: "exclusive",
+          port: [],
+        })
+      );
+      assert.strictEqual(physical.devicesManager.size, 2);
+      assert.deepStrictEqual(physical.devices.get("shared").ports, [9001]);
+      host.handleControlDisconnected(1);
+      assert.deepStrictEqual([...physical.devices.keys()], ["shared"]);
+      host.handleControlDisconnected(2);
+      assert.strictEqual(physical.devices.size, 0);
+      assert.strictEqual(physical.devicesManager.size, 0);
+      assert(
+        server.broadcasts.some(
+          (event) =>
+            event.event === "snapshot" && event.data.devices.length === 0
+        )
+      );
+      await host.handleControlRpc(
+        3,
+        createRpcRequest("watchNetworkDeviceAtIp", {
+          ip: "shared",
+          port: [9003],
+        })
+      );
+      assert.deepStrictEqual(physical.devices.get("shared").ports, [9003]);
+    } finally {
+      await host.stop();
+    }
   });
 });

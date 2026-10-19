@@ -10,17 +10,8 @@ const {
 
 const ASYNC_TEST_TIMEOUT = 250;
 
-function createConnector(option = {}) {
-  return new PhysicalConnector({
-    manualConnect: false,
-    enableAndroid: false,
-    enableIOS: false,
-    enableHarmony: false,
-    enableDesktop: false,
-    enableNetworkDevice: false,
-    traceRecorder: null,
-    ...option,
-  });
+function createConnector() {
+  return new PhysicalConnector();
 }
 
 function collect(connector, event) {
@@ -154,11 +145,10 @@ function assertClientContract(client, expected) {
 
 describe("PhysicalConnector", function () {
   it("keeps physical options bounded and allocates unique numeric client IDs", async function () {
-    const connector = createConnector({
-      usbConnectOpt: { retryTime: 1 },
-    });
+    const connector = createConnector();
+    connector.updateUsbConnectOption({ retryTime: 1 });
 
-    assert.strictEqual(connector.usbConnectOpt.retryTime, 3000);
+    assert.strictEqual(connector.usbConnectRetryTime, 3000);
     assert.deepStrictEqual(await connector.connectDevices(-1), []);
 
     const clientIds = [
@@ -197,7 +187,7 @@ describe("PhysicalConnector", function () {
         this.unregistered.push({ serial, info });
       },
     };
-    const connector = createConnector({ traceRecorder: trace });
+    const connector = new PhysicalConnector(trace);
     const connected = collect(connector, "device-connected");
     const disconnected = collect(connector, "device-disconnected");
     const device = createDevice("device-1", {
@@ -417,14 +407,14 @@ describe("PhysicalConnector", function () {
     assert.strictEqual(client.state.closeCalls, 1);
   });
 
-  it("adds network devices at runtime once per IP and retains the first ports", async function () {
+  it("creates managers independently while device registration retains the first serial", async function () {
     const connector = createConnector();
     const events = collect(connector, "device-connected");
     try {
       await Promise.all([
-        connector.watchNetworkDeviceAtIp({ ip: "127.0.0.1", port: [8901] }),
-        connector.watchNetworkDeviceAtIp({ ip: "127.0.0.1", port: [8902] }),
-        connector.watchNetworkDeviceAtIp({ ip: "127.0.0.2", port: [] }),
+        connector.addNetworkDeviceManager({ ip: "127.0.0.1", port: [8901] }),
+        connector.addNetworkDeviceManager({ ip: "127.0.0.1", port: [8902] }),
+        connector.addNetworkDeviceManager({ ip: "127.0.0.2", port: [] }),
       ]);
       await connector.connectDevices();
       assert.deepStrictEqual(
@@ -432,7 +422,7 @@ describe("PhysicalConnector", function () {
         ["127.0.0.1", "127.0.0.2"]
       );
       assert.deepStrictEqual(connector.devices.get("127.0.0.1").ports, [8901]);
-      assert.strictEqual(connector.devicesManager.size, 2);
+      assert.strictEqual(connector.devicesManager.size, 3);
       assert.strictEqual(
         connector.devices.get("127.0.0.2").getHost(),
         "127.0.0.2"
@@ -449,7 +439,7 @@ describe("PhysicalConnector", function () {
       else process.env.DriverPortCount = count;
       const connector = createConnector();
       try {
-        await connector.watchNetworkDeviceAtIp({ ip: "127.0.0.1" });
+        await connector.addNetworkDeviceManager({ ip: "127.0.0.1" }, true);
         const expected = Array.from(
           { length: count ? Number(count) : 19 },
           (_, i) => 8901 + i
@@ -458,15 +448,18 @@ describe("PhysicalConnector", function () {
           connector.devices.get("127.0.0.1").ports,
           expected
         );
-        await connector.watchNetworkDeviceAtIp({
-          ip: "127.0.0.1",
-          port: [9000],
-        });
+        await connector.addNetworkDeviceManager(
+          { ip: "127.0.0.1", port: [9000] },
+          true
+        );
         assert.deepStrictEqual(
           connector.devices.get("127.0.0.1").ports,
           expected
         );
-        await connector.watchNetworkDeviceAtIp({ ip: "127.0.0.2", port: [] });
+        await connector.addNetworkDeviceManager(
+          { ip: "127.0.0.2", port: [] },
+          true
+        );
         assert.deepStrictEqual(connector.devices.get("127.0.0.2").ports, []);
       } finally {
         if (previous === undefined) delete process.env.DriverPortCount;
@@ -476,13 +469,11 @@ describe("PhysicalConnector", function () {
     });
   }
 
-  it("uses default ports for an IP-only constructor network option", async function () {
+  it("uses default ports for an IP-only network manager", async function () {
     const previous = process.env.DriverPortCount;
     delete process.env.DriverPortCount;
-    const connector = createConnector({
-      enableNetworkDevice: true,
-      networkDeviceOpt: { ip: "127.0.0.1" },
-    });
+    const connector = createConnector();
+    await connector.addNetworkDeviceManager({ ip: "127.0.0.1" }, false);
     try {
       await connector.connectDevices();
       assert.deepStrictEqual(
@@ -496,18 +487,22 @@ describe("PhysicalConnector", function () {
     }
   });
 
-  it("deduplicates runtime watches against the constructor network option", async function () {
-    const connector = createConnector({
-      enableNetworkDevice: true,
-      networkDeviceOpt: { ip: "127.0.0.1", port: [8901] },
-    });
+  it("leaves network manager deduplication to the Host", async function () {
+    const connector = createConnector();
+    await connector.addNetworkDeviceManager(
+      { ip: "127.0.0.1", port: [8901] },
+      false
+    );
     try {
       await connector.connectDevices();
       const device = connector.devices.get("127.0.0.1");
-      await connector.watchNetworkDeviceAtIp({ ip: "127.0.0.1", port: [8902] });
+      await connector.addNetworkDeviceManager({
+        ip: "127.0.0.1",
+        port: [8902],
+      });
       assert.strictEqual(connector.devices.get("127.0.0.1"), device);
       assert.deepStrictEqual(device.ports, [8901]);
-      assert.strictEqual(connector.devicesManager.size, 1);
+      assert.strictEqual(connector.devicesManager.size, 2);
     } finally {
       await connector.close();
     }
@@ -531,5 +526,189 @@ describe("PhysicalConnector", function () {
     assert.strictEqual(deviceB.state.stopWatchCalls, 1);
     assert.strictEqual(clientA.state.closeCalls, 1);
     assert.strictEqual(clientB.state.closeCalls, 1);
+  });
+});
+
+describe("PhysicalConnector dynamic managers", function () {
+  it("propagates watcher failures so the Host can close and retry the manager", async function () {
+    const NetworkDeviceManager = require("../../../debug_router_connector/dist/cjs/src/device/network/NetworkDeviceManager")
+      .default;
+    const originalWatch = NetworkDeviceManager.prototype.watchDevices;
+    const failure = new Error("watch failed");
+    const connector = createConnector();
+    NetworkDeviceManager.prototype.watchDevices = async () => {
+      throw failure;
+    };
+    try {
+      await assert.rejects(
+        connector.addNetworkDeviceManager({ ip: "remote", port: [9001] }, true),
+        (error) => error === failure
+      );
+      connector.closeNetworkDeviceManager("remote");
+      NetworkDeviceManager.prototype.watchDevices = originalWatch;
+      await connector.addNetworkDeviceManager(
+        { ip: "remote", port: [9001] },
+        true
+      );
+      assert.strictEqual(connector.devicesManager.size, 1);
+      assert.deepStrictEqual(connector.devices.get("remote").ports, [9001]);
+    } finally {
+      NetworkDeviceManager.prototype.watchDevices = originalWatch;
+      await connector.close();
+    }
+  });
+
+  it("automatically watches an added Android manager only when manualConnect is false", async function () {
+    const {
+      AndroidDeviceManager,
+    } = require("../../../debug_router_connector/dist/cjs/src/device/android/AndroidDeviceManager");
+    const originalWatch = AndroidDeviceManager.prototype.watchDevices;
+    const watched = [];
+    AndroidDeviceManager.prototype.watchDevices = async function () {
+      watched.push(this);
+    };
+    const connector = createConnector();
+    try {
+      await connector.addAndroidDeviceManager({ host: "manual" });
+      connector.manualConnect = false;
+      await connector.addAndroidDeviceManager({ host: "automatic" });
+      assert.deepStrictEqual(
+        watched.map((manager) => manager.adbOptions.host),
+        ["automatic"]
+      );
+    } finally {
+      AndroidDeviceManager.prototype.watchDevices = originalWatch;
+      await connector.close();
+    }
+  });
+
+  it("adds managers without starting them and watches them on connectDevices", async function () {
+    const connector = createConnector();
+    await connector.addAndroidDeviceManager({ host: "adb-remote", port: 5038 });
+    await connector.addHarmonyDeviceManager({ host: "hdc-remote", port: 8711 });
+    await connector.addDesktopDeviceManager();
+    await connector.addIOSDeviceManager();
+    const managers = Array.from(connector.devicesManager);
+    assert.strictEqual(
+      managers.length,
+      ["darwin", "win32"].includes(process.platform) ? 4 : 3
+    );
+    assert.deepStrictEqual(managers[0].adbOptions, {
+      host: "adb-remote",
+      port: 5038,
+    });
+    assert.deepStrictEqual(managers[1].hdcOptions, {
+      host: "hdc-remote",
+      port: 8711,
+    });
+    let watched = 0;
+    managers.forEach((manager) => {
+      manager.watchDevices = async () => {
+        watched++;
+      };
+    });
+    await connector.connectDevices();
+    assert.strictEqual(watched, managers.length);
+    await connector.close();
+  });
+
+  it("keeps duplicate network device ownership with the first manager", async function () {
+    const connector = createConnector();
+    await connector.addNetworkDeviceManager(
+      { ip: "remote", port: [9001] },
+      false
+    );
+    await connector.addNetworkDeviceManager(
+      { ip: "remote", port: [9002] },
+      false
+    );
+    assert.strictEqual(connector.devices.size, 0);
+    await connector.connectDevices();
+    const device = connector.devices.get("remote");
+    connector.addNetworkDeviceManager({ ip: "remote", port: [9003, 9001] });
+    await connector.connectDevices();
+    assert.strictEqual(connector.devices.get("remote"), device);
+    assert.deepStrictEqual(device.ports, [9001]);
+    assert.strictEqual(connector.devicesManager.size, 3);
+    await connector.close();
+  });
+
+  it("updates the shared USB retry option with the existing minimum", async function () {
+    const connector = createConnector();
+    connector.updateUsbConnectOption({ retryTime: 8000 });
+    connector.updateUsbConnectOption({ retryTime: 10000 });
+    assert.strictEqual(connector.usbConnectRetryTime, 8000);
+    connector.updateUsbConnectOption({ retryTime: 5000 });
+    assert.strictEqual(connector.usbConnectRetryTime, 5000);
+    connector.updateUsbConnectOption({ retryTime: 1 });
+    assert.strictEqual(connector.usbConnectRetryTime, 3000);
+    await connector.close();
+  });
+});
+
+describe("Dynamic manager runtime addresses", function () {
+  for (const platform of ["Android", "Harmony"]) {
+    it(`isolates ${platform} manager cleanup across endpoints`, async function () {
+      const directory = platform === "Android" ? "android" : "Harmony";
+      const managerModule = require(`../../../debug_router_connector/dist/cjs/src/device/${directory}/${platform}DeviceManager`);
+      const Manager =
+        managerModule.AndroidDeviceManager ?? managerModule.default;
+      const Device = require(`../../../debug_router_connector/dist/cjs/src/device/${directory}/${platform}Device`)
+        .default;
+      const connector = createConnector();
+      const first = new Manager(connector, { host: "first" });
+      const second = new Manager(connector, { host: "second" });
+      const firstDevice = new Device(
+        connector,
+        "first-device",
+        platform,
+        {},
+        "first"
+      );
+      const secondDevice = new Device(
+        connector,
+        "second-device",
+        platform,
+        {},
+        "second"
+      );
+      first.createDevice = async () => firstDevice;
+      second.createDevice = async () => secondDevice;
+      try {
+        await first.registerDevice({}, {});
+        await second.registerDevice({}, {});
+        if (platform === "Android") first.unregisterAllAndroidDevice();
+        else first.unregisterAllHarmonyTarget();
+        assert.strictEqual(connector.devices.has(firstDevice.serial), false);
+        assert.strictEqual(
+          connector.devices.get(secondDevice.serial),
+          secondDevice
+        );
+        first.unregisterManagedDevice(secondDevice.serial);
+        assert.strictEqual(
+          connector.devices.get(secondDevice.serial),
+          secondDevice
+        );
+      } finally {
+        await connector.close();
+      }
+    });
+  }
+
+  it("uses the Android and Harmony runtime hosts supplied by their managers", async function () {
+    const AndroidDevice = require("../../../debug_router_connector/dist/cjs/src/device/android/AndroidDevice")
+      .default;
+    const HarmonyDevice = require("../../../debug_router_connector/dist/cjs/src/device/Harmony/HarmonyDevice")
+      .default;
+    const connector = createConnector();
+    assert.strictEqual(
+      new AndroidDevice(connector, "a", "Android", {}, "second-adb").getHost(),
+      "second-adb"
+    );
+    assert.strictEqual(
+      new HarmonyDevice(connector, "h", "Harmony", {}, "second-hdc").getHost(),
+      "second-hdc"
+    );
+    await connector.close();
   });
 });

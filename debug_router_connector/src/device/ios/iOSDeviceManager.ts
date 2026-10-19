@@ -21,6 +21,7 @@ export default class IOSDeviceManager extends DeviceManager {
   // lockdown port
   private readonly LOCKDOWN_PORT: number = 62078;
   private listener: DeviceWatchStatusSocket | null = null;
+  private readonly tunnels = new Set<Socket>();
   constructor(driver: PhysicalConnector) {
     super(driver);
   }
@@ -46,9 +47,9 @@ export default class IOSDeviceManager extends DeviceManager {
   }
 
   private async reWatchIOSDevices() {
-    setTimeout(() => {
-      this.watchDevices();
-    }, 300);
+    this.scheduleWatchRetry(() => {
+      void this.watchDevices();
+    });
   }
 
   private createUsbmuxListener() {
@@ -67,7 +68,15 @@ export default class IOSDeviceManager extends DeviceManager {
     return client;
   }
 
+  protected stopWatching(): void {
+    this.listener?.getRawSocket().destroy();
+    this.listener = null;
+    for (const tunnel of this.tunnels) tunnel.destroy();
+    this.tunnels.clear();
+  }
+
   public async watchDevices() {
+    if (this.closed) return;
     if (
       this.listener !== null &&
       this.listener?.currentWatchStatus !== WatchStatus.StopWatching
@@ -86,6 +95,7 @@ export default class IOSDeviceManager extends DeviceManager {
       statusSocket.currentWatchStatus = WatchStatus.PrepareToWatch;
       // TODO on usbmux_error before create createUsbmuxListener
       usbmuxListener.on("usbmux_error", (err: Error) => {
+        if (this.closed) return;
         statusSocket.currentWatchStatus = WatchStatus.StopWatching;
         const msg = "watchIOSDevices listener_error:" + err?.message;
         defaultLogger.debug(msg);
@@ -98,12 +108,14 @@ export default class IOSDeviceManager extends DeviceManager {
       });
 
       usbmuxListener.on("close", (hadError: boolean) => {
+        if (this.closed) return;
         statusSocket.currentWatchStatus = WatchStatus.StopWatching;
         defaultLogger.debug("watchIOSDevices listener_close");
         this.reWatchIOSDevices();
       });
 
       usbmuxListener.on("attached", (udid: string) => {
+        if (this.closed) return;
         statusSocket.currentWatchStatus = WatchStatus.Watching;
         defaultLogger.debug("watchIOSDevices attached:" + JSON.stringify(udid));
         if (!this.driver.devices.has(udid)) {
@@ -116,13 +128,14 @@ export default class IOSDeviceManager extends DeviceManager {
       });
 
       usbmuxListener.on("detached", (udid: string) => {
+        if (this.closed) return;
         statusSocket.currentWatchStatus = WatchStatus.Watching;
         defaultLogger.debug("watchIOSDevices detached:" + JSON.stringify(udid));
         this.driver.traceRecorder?.recordDeviceUnplug(udid, {
           os: "iOS",
           event: "detached",
         });
-        this.driver.unregisterDevice(udid);
+        this.unregisterManagedDevice(udid);
       });
       this.listener = statusSocket;
     } catch (e: any) {
@@ -142,9 +155,16 @@ export default class IOSDeviceManager extends DeviceManager {
     udid: string,
     statusSocket: DeviceWatchStatusSocket,
   ) {
+    if (this.closed) return;
     getTunnel(this.LOCKDOWN_PORT, { udid: udid })
-      .then((tunnel: any) => {
+      .then((tunnel: Socket) => {
+        if (this.closed) {
+          tunnel.destroy();
+          return;
+        }
+        this.tunnels.add(tunnel);
         const parse = this.makeParse((result: any) => {
+          if (this.closed) return;
           const deviceName: string | undefined = result?.Value?.DeviceName;
           if (deviceName) {
             if (!this.driver.devices.has(udid)) {
@@ -162,6 +182,8 @@ export default class IOSDeviceManager extends DeviceManager {
         tunnel.on("data", parse);
 
         tunnel.on("close", (hadError: boolean) => {
+          this.tunnels.delete(tunnel);
+          if (this.closed) return;
           const msg = "handleDeviceConnect: tunnel close:" + udid;
           defaultLogger.debug(msg);
           getDriverReportService()?.report("ios_connect_close", null, {
@@ -175,6 +197,7 @@ export default class IOSDeviceManager extends DeviceManager {
         });
 
         tunnel.on("usbmux_error", (err: Error) => {
+          if (this.closed) return;
           const msg =
             "handleDeviceConnect: tunnel error:" + udid + " " + err?.message;
           defaultLogger.debug(msg);
@@ -202,6 +225,7 @@ export default class IOSDeviceManager extends DeviceManager {
         tunnel.write(Buffer.concat([header_buf, payload_buf]));
       })
       .catch((err: Error) => {
+        if (this.closed) return;
         const msg =
           "handleDeviceConnect: getTunnel and then error:" + err?.message;
         defaultLogger.debug(msg);
@@ -242,6 +266,6 @@ export default class IOSDeviceManager extends DeviceManager {
       return;
     }
 
-    this.driver.registerDevice(device);
+    this.registerManagedDevice(device);
   }
 }
