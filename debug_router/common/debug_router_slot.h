@@ -9,6 +9,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "debug_router/common/debug_router_export.h"
 #include "debug_router/common/debug_router_slot_delegate.h"
 
 namespace debugrouter {
@@ -16,7 +17,8 @@ namespace common {
 
 class DebugRouterSlotDelegate;
 
-class DebugRouterSlot : public std::enable_shared_from_this<DebugRouterSlot> {
+class DEBUG_ROUTER_EXPORT DebugRouterSlot
+    : public std::enable_shared_from_this<DebugRouterSlot> {
  public:
   DebugRouterSlot();
 
