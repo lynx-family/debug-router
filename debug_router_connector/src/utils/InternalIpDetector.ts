@@ -7,7 +7,9 @@ import { isIP } from "net";
 import { networkInterfaces, NetworkInterfaceInfo } from "os";
 import { defaultLogger } from "./logger";
 
-const DEFAULT_PROBE_ADDRESS = "223.5.5.5";
+// RFC 5737 TEST-NET-1 address used only for local route selection.
+// The UDP probe must not send datagrams to this reserved destination.
+const DEFAULT_PROBE_ADDRESS = "192.0.2.1";
 const PROBE_PORT = 1;
 const PROBE_TIMEOUT_MS = 2000;
 

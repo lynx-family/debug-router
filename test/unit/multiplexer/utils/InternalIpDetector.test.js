@@ -23,7 +23,7 @@ describe("InternalIpDetector", function () {
     socket.address = () => ({ address: "10.0.0.2" });
     socket.connect = (port, target, callback) => {
       assert.strictEqual(port, 1);
-      assert.strictEqual(target, "223.5.5.5");
+      assert.strictEqual(target, "192.0.2.1");
       queueMicrotask(callback);
     };
     restores = [
