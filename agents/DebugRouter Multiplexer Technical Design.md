@@ -262,8 +262,10 @@ There is no separate `MultiplexerDaemon` lifecycle wrapper. Host options are pro
 - Starting the fixed local control server and handling health/register first-message handshakes.
 - Starting the WebSocket server that continues to use `/mdevices/page/android`.
 - Selecting its advertised IPv4 with `InternalIpDetector`: use the OS UDP route
-  to `223.5.5.5` (without sending a packet), then fall back to the first
-  non-loopback, non-link-local IPv4 interface if the probe fails or times out.
+  to `192.0.2.1`, a documentation address in RFC 5737 TEST-NET-1, solely for
+  local route selection. The probe must not send datagrams to this reserved
+  destination. If the probe fails or times out, fall back to the first
+  non-loopback, non-link-local IPv4 interface.
   Startup rejects when no address is available; the existing shared-start
   promise allows callers to retry after the failure.
 - Managing device watchers, runtime client watchers, and WebSocket clients.
