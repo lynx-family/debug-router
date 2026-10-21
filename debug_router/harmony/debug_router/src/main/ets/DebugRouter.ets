@@ -6,10 +6,11 @@ import util from '@ohos.util';
 import type { DebugRouterGlobalHandlerHarmony, DebugRouterSessionHandlerHarmony, DebugRouterMessageHandlerHarmony, DebugRouterStateListenerHarmony } from 'libdebugrouter.so';
 import { DebugRouterHarmony } from 'libdebugrouter.so';
 import { DebugRouterSlot } from './DebugRouterSlot';
-import { LynxView } from '@lynx/lynx/src/main/ets/tasm/LynxView';
 
 export class DebugRouter {
-  private static viewMap: Map<LynxView, number> = new Map<LynxView, number>();
+  // Keep DebugRouter independent of the concrete UI framework while retaining
+  // object identity for view-to-session mapping.
+  private static viewMap: Map<Object, number> = new Map<Object, number>();
 
   public static createInstance(): void {
     let uuid: string = util.generateRandomUUID(true);
@@ -18,13 +19,13 @@ export class DebugRouter {
     DebugRouter.setAppInfo("debugRouterId", uuid);
   }
 
-  public static getSessionIdByView(view: LynxView): number {
+  public static getSessionIdByView(view: Object): number {
     let sessionId = DebugRouter.viewMap.get(view);
     return sessionId === undefined ? 0 : sessionId;
   }
 
-  public static getViewBySessionId(sessionId: number): LynxView | null {
-    let result: LynxView | null = null;
+  public static getViewBySessionId(sessionId: number): Object | null {
+    let result: Object | null = null;
     DebugRouter.viewMap.forEach((id, view) => {
       if (id == sessionId) {
         result = view;
@@ -33,11 +34,11 @@ export class DebugRouter {
     return result;
   }
 
-  public static setSessionIdOfView(view: LynxView, sessionId: number): void {
+  public static setSessionIdOfView(view: Object, sessionId: number): void {
     DebugRouter.viewMap.set(view, sessionId);
   }
 
-  public static removeView(view: LynxView): void {
+  public static removeView(view: Object): void {
     DebugRouter.viewMap.delete(view);
   }
 

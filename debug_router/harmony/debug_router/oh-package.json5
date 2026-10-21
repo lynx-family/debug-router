@@ -7,8 +7,5 @@
   "license": "Apache-2.0",
   "dependencies": {
     "libdebugrouter.so": "file:./src/main/ets/types/libdebugrouter"
-  },
-  "devDependencies": {
-    "@lynx/lynx": "0.0.1-alpha.1"
   }
 }

@@ -16,9 +16,14 @@
 #include "debug_router/common/debug_router_global_handler.h"
 #include "debug_router/common/debug_router_session_handler.h"
 #include "debug_router/common/debug_router_slot.h"
-#include "debug_router/native/base/no_destructor.h"
 
 namespace debugrouter {
+
+namespace base {
+template <typename T>
+class NoDestructor;
+}
+
 namespace common {
 
 typedef enum { Unknown = -1, WebSocket = 0, USB } ConnectionType;
