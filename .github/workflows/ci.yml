@@ -12,6 +12,21 @@ on:
 # with matching job definitions. Add the greater of 50% of the maximum
 # duration or two minutes, then round up to whole minutes.
 jobs:
+  step-timeout-test:
+    runs-on: lynx-ubuntu-22.04-medium
+    steps:
+      # This step should fail after 2 minutes, before the 5-minute loop finishes.
+      - name: Test 2-minute step timeout with 5 minutes of logs
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          echo "Starting a 5-minute loop; the step timeout should stop it after 2 minutes."
+          for ((elapsed = 5; elapsed <= 300; elapsed += 5)); do
+            sleep 5
+            printf '[%s] Timeout test is still running: %ss / 300s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$elapsed"
+          done
+          echo "::warning::The full 5-minute loop completed; the 2-minute step timeout was not enforced."
+
   static-check:
     runs-on: lynx-ubuntu-22.04-medium
     steps:
