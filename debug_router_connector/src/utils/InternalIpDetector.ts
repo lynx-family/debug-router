@@ -31,7 +31,7 @@ export type InternalIpDetectionResult = {
   selected: {
     address: string;
     interface?: string;
-    source: "udp-route" | "interface-fallback";
+    source: "udp-route" | "interface-fallback" | "loopback-fallback";
     probeError?: string;
   };
   interfaces: IPv4Interface[];
@@ -67,13 +67,22 @@ export class InternalIpDetector {
         throw new Error(`${probeError}; no fallback IPv4 address is available`);
       }
 
+      const isLoopbackFallback = this.isLoopbackIPv4(address);
+      if (isLoopbackFallback) {
+        defaultLogger.warn(
+          `[internal-ip] No routable IPv4 address was found; using loopback ${address}. WebSocket clients must run on the same host.`,
+        );
+      }
+
       return {
         target,
         selected: {
           address,
           interface: interfaces.find((item) => item.address === address)
             ?.interface,
-          source: "interface-fallback",
+          source: isLoopbackFallback
+            ? "loopback-fallback"
+            : "interface-fallback",
           probeError,
         },
         interfaces,
@@ -182,6 +191,13 @@ export class InternalIpDetector {
       );
     }
 
-    return candidates[0]?.address;
+    return (
+      candidates[0]?.address ??
+      interfaces.find((item) => this.isLoopbackIPv4(item.address))?.address
+    );
+  }
+
+  private static isLoopbackIPv4(address: string): boolean {
+    return address.startsWith("127.");
   }
 }
