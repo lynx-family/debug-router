@@ -6,7 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { EventEmitter } = require("events");
-const { waitFor, platformTimeout } = require("./helpers/integration_harness");
+const { waitFor } = require("./helpers/integration_harness");
 const load = (name) =>
   require(`../../../debug_router_connector/dist/cjs/src/${name}`);
 const { PhysicalConnector } = load("physical/PhysicalConnector");
@@ -44,7 +44,7 @@ function deferred() {
 }
 
 describe("multiplexer integration physical manager lifecycle", function () {
-  this.timeout(platformTimeout(10000));
+  this.timeout(30000);
 
   let rootDir, host, physical, clients, resources, restores, forwards;
   let nextTracker, properties, pendingOperations;

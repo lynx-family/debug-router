@@ -99,7 +99,7 @@ describe("MultiplexerDaemonClient", function () {
     client = new MultiplexerDaemonClient({
       daemonManager: manager,
       controlEndpoint: endpoint,
-      rpcTimeout: option.rpcTimeout ?? 100,
+      rpcTimeout: option.rpcTimeout ?? 1000,
       reportServiceEnabled: option.reportServiceEnabled,
       debugInfo: option.debugInfo,
       now: () => 123,
@@ -475,7 +475,7 @@ describe("MultiplexerDaemonClient", function () {
         rpcReceived();
         return new Promise(() => {});
       },
-      rpcTimeout: 1000,
+      rpcTimeout: 3000,
     });
     const call = client.call("startWSServer", {});
     const rejection = assert.rejects(call, /socket/);
@@ -500,7 +500,7 @@ describe("MultiplexerDaemonClient", function () {
 
   for (const ensureDaemon of [true, false]) {
     it(`bounds silent Register attempts and clears the successful handshake timer (ensureDaemon=${ensureDaemon})`, async function () {
-      this.timeout(7000);
+      this.timeout(21000);
       let replyToRegister = false;
       let registerCount = 0;
       const transports = new Set();

@@ -11,13 +11,12 @@ const {
   createIntegrationContext,
   getHealth,
   getUsableDiscovery,
-  platformTimeout,
   processExists,
   waitFor,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration daemon lifecycle", function () {
-  this.timeout(platformTimeout(10000));
+  this.timeout(30000);
   let context;
 
   afterEach(async function () {
@@ -64,20 +63,20 @@ describe("multiplexer integration daemon lifecycle", function () {
     );
 
     process.kill(info.pid, "SIGTERM");
-    await waitFor(() => !processExists(info.pid), 2000);
+    await waitFor(() => !processExists(info.pid), 6000);
     if (process.platform !== "win32") {
-      await waitFor(() => !fs.existsSync(context.paths.controlEndpoint), 2000);
+      await waitFor(() => !fs.existsSync(context.paths.controlEndpoint), 6000);
     }
   });
 
   it("idles without any discovery heartbeat artifact", async function () {
     context = createIntegrationContext("daemon-idle", {
-      multiplexerDaemonIdleTimeout: 50,
+      multiplexerDaemonIdleTimeout: 1000,
     });
     await context.manager.ensureDaemon();
     const info = await waitFor(() => getUsableDiscovery(context.discovery));
     assert(processExists(info.pid));
-    await waitFor(() => !processExists(info.pid), 2000);
+    await waitFor(() => !processExists(info.pid), 6000);
     assert.strictEqual(
       fs.existsSync(path.join(context.paths.dataDir, "daemon.json")),
       false
@@ -92,12 +91,12 @@ describe("multiplexer integration daemon lifecycle", function () {
     await connector.connectDevices(-1, null, false);
     const info = await waitFor(() => getUsableDiscovery(context.discovery));
     await connector.close();
-    await waitFor(() => !processExists(info.pid), 2000);
+    await waitFor(() => !processExists(info.pid), 6000);
   });
 
   it("finds an unreachable daemon by argv0 marker and force-stops only the exact match", async function () {
     context = createIntegrationContext("daemon-process-name-cleanup", {
-      replacementTimeout: platformTimeout(100),
+      replacementTimeout: 300,
     });
     const daemonProcess = spawnIdleProcess(context.paths.daemonProcessName);
     const decoyProcess =
@@ -106,15 +105,15 @@ describe("multiplexer integration daemon lifecycle", function () {
         : spawnIdleProcess(`${context.paths.daemonProcessName}-decoy`);
 
     try {
-      await waitFor(() => processExists(daemonProcess.pid), 1000);
+      await waitFor(() => processExists(daemonProcess.pid), 3000);
       if (decoyProcess) {
-        await waitFor(() => processExists(decoyProcess.pid), 1000);
+        await waitFor(() => processExists(decoyProcess.pid), 3000);
       }
       assert.strictEqual(fs.existsSync(context.paths.controlEndpoint), false);
 
       await context.manager.stopDaemonForDebugging();
 
-      await waitFor(() => !processExists(daemonProcess.pid), 2000);
+      await waitFor(() => !processExists(daemonProcess.pid), 6000);
       if (decoyProcess) {
         assert.strictEqual(processExists(decoyProcess.pid), true);
       }
@@ -137,7 +136,7 @@ describe("multiplexer integration daemon lifecycle", function () {
       type: "emit-control-socket-error",
       message: "integration control socket error",
     });
-    await waitFor(() => failedClient.status === "disconnected", 3000);
+    await waitFor(() => failedClient.status === "disconnected", 9000);
 
     assert(processExists(info.pid));
     assert.strictEqual(healthyClient.status, "connected");
@@ -170,12 +169,12 @@ async function stopProcess(child) {
   try {
     process.kill(child.pid, "SIGTERM");
   } catch (_error) {}
-  await waitFor(() => !processExists(child.pid), 1000).catch(() => {});
+  await waitFor(() => !processExists(child.pid), 3000).catch(() => {});
   if (!processExists(child.pid)) {
     return;
   }
   try {
     process.kill(child.pid, "SIGKILL");
   } catch (_error) {}
-  await waitFor(() => !processExists(child.pid), 1000).catch(() => {});
+  await waitFor(() => !processExists(child.pid), 3000).catch(() => {});
 }

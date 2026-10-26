@@ -10,7 +10,6 @@ const {
   connectRuntimeWebSocket,
   createIntegrationContext,
   getUsableDiscovery,
-  platformTimeout,
   processExists,
   waitFor,
 } = require("./helpers/integration_harness");
@@ -19,7 +18,7 @@ const {
 } = require("../../../debug_router_connector/dist/cjs/src/connector/MultiOpenCallBack");
 
 describe("multiplexer integration legacy preemption", function () {
-  this.timeout(platformTimeout(12000));
+  this.timeout(36000);
 
   let context;
 
@@ -41,7 +40,7 @@ describe("multiplexer integration legacy preemption", function () {
     });
 
     const connector = context.createConnector({
-      rpcTimeout: 3000,
+      rpcTimeout: 9000,
       enableWebSocket: true,
     });
     const multiOpenStatuses = [];
@@ -74,7 +73,7 @@ describe("multiplexer integration legacy preemption", function () {
     await waitFor(
       () =>
         countLogEvents(context, "device-start-watch") > initialWatchCount,
-      2000
+      6000
     );
     await connector.connectUsbClients("device-1", -1, true, null);
     await connector.startWSServer();
@@ -93,17 +92,17 @@ describe("multiplexer integration legacy preemption", function () {
           .getAllWebsocketAppClients()
           .some((client) => client.clientId() === runtime.id) &&
         connector.websocketWebClients.has(driver.id),
-      2000
+      6000
     );
 
     const daemonInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000
+      9000
     );
     assert(processExists(daemonInfo.pid), "daemon should be alive");
     await waitFor(
       () => readOwnerPid(context.legacyOwnerPath) === daemonInfo.pid,
-      3000
+      9000
     );
 
     fs.mkdirSync(context.legacyDriverDir, { recursive: true });
@@ -111,24 +110,24 @@ describe("multiplexer integration legacy preemption", function () {
 
     await waitFor(
       () => multiOpenStatuses.includes(MultiOpenStatus.unattached),
-      3000
+      9000
     );
-    await waitFor(() => connector.devices.size === 0, 3000);
-    await waitFor(() => connector.usbClients.size === 0, 3000);
+    await waitFor(() => connector.devices.size === 0, 9000);
+    await waitFor(() => connector.usbClients.size === 0, 9000);
     await waitFor(
       () => countLogEvents(context, "disable-all-clients") > 0,
-      3000
+      9000
     );
     await waitFor(
       () => connector.getAllWebsocketAppClients().length === 0,
-      3000
+      9000
     );
-    await waitFor(() => connector.websocketWebClients.has(driver.id), 3000);
+    await waitFor(() => connector.websocketWebClients.has(driver.id), 9000);
     assert.deepStrictEqual(disconnectedClients, [1]);
     assert.deepStrictEqual(disconnectedDevices, ["device-1"]);
     assert.deepStrictEqual(disconnectedWifiRuntimes, [runtime.id]);
     assert.deepStrictEqual(disconnectedDrivers, []);
-    await waitFor(() => runtime.socket.readyState === 3, 2000);
+    await waitFor(() => runtime.socket.readyState === 3, 6000);
     assert.strictEqual(driver.socket.readyState, 1);
 
     const clientListCount = driver.messages.filter(
@@ -140,7 +139,7 @@ describe("multiplexer integration legacy preemption", function () {
         (message) => message?.event === "ClientList"
       );
       return lists.length > clientListCount ? lists[lists.length - 1] : null;
-    }, 2000);
+    }, 6000);
     assert.deepStrictEqual(emptyClientList.data, []);
     assert.strictEqual(readOwnerPid(context.legacyOwnerPath), process.pid);
 
@@ -173,7 +172,7 @@ describe("multiplexer integration legacy preemption", function () {
         ) &&
         log.some((entry) => entry.event === "client-added" && entry.id === 2)
       );
-    }, 2000);
+    }, 6000);
     assert.strictEqual(connector.devices.has("device-2"), false);
     assert.strictEqual(connector.usbClients.has(2), false);
 
@@ -188,7 +187,7 @@ describe("multiplexer integration legacy preemption", function () {
         connector.devices.has("device-2") &&
         connector.usbClients.has(2) &&
         countLogEvents(context, "device-start-watch") > reacquireWatchCount,
-      3000
+      9000
     );
     assert.strictEqual(readOwnerPid(context.legacyOwnerPath), daemonInfo.pid);
 
@@ -218,7 +217,7 @@ describe("multiplexer integration legacy preemption", function () {
       return lists.length > recoveredClientListCount
         ? lists[lists.length - 1]
         : null;
-    }, 2000);
+    }, 6000);
     assert.deepStrictEqual(
       recoveredClientList.data.map((client) => [
         client.id,

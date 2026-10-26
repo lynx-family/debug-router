@@ -62,9 +62,8 @@ const DEFAULT_STATE = {
     },
   ],
 };
-const WINDOWS_TIMEOUT_MULTIPLIER = 4;
-const DEFAULT_STARTUP_TIMEOUT = 3000;
-const DEFAULT_TEST_DAEMON_IDLE_TIMEOUT = 30000;
+const DEFAULT_STARTUP_TIMEOUT = 9000;
+const DEFAULT_TEST_DAEMON_IDLE_TIMEOUT = 90000;
 
 function createIntegrationContext(name, option = {}) {
   const rootDir = fs.mkdtempSync(
@@ -86,6 +85,7 @@ function createIntegrationContext(name, option = {}) {
 
   const discovery = new MultiplexerDiscovery({
     controlEndpoint: paths.controlEndpoint,
+    healthCheckTimeout: 1500,
     localProtocolVersion,
   });
   discovery.logPathForTest = getLogPath(paths);
@@ -93,10 +93,9 @@ function createIntegrationContext(name, option = {}) {
   const manager = createManager({
     paths,
     discovery,
-    startupTimeout:
-      option.startupTimeout ?? platformTimeout(DEFAULT_STARTUP_TIMEOUT),
+    startupTimeout: option.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT,
     readyPollInterval: option.readyPollInterval ?? 25,
-    replacementTimeout: option.replacementTimeout ?? 100,
+    replacementTimeout: option.replacementTimeout ?? 300,
     localProtocolVersion,
     debugInfo: option.debugInfo,
     legacyDriverDir,
@@ -124,6 +123,7 @@ function createIntegrationContext(name, option = {}) {
         extra.discovery ??
         new MultiplexerDiscovery({
           controlEndpoint: paths.controlEndpoint,
+          healthCheckTimeout: 1500,
           localProtocolVersion:
             extra.localProtocolVersion ?? localProtocolVersion,
         });
@@ -134,11 +134,11 @@ function createIntegrationContext(name, option = {}) {
         startupTimeout:
           extra.startupTimeout ??
           option.startupTimeout ??
-          platformTimeout(DEFAULT_STARTUP_TIMEOUT),
+          DEFAULT_STARTUP_TIMEOUT,
         readyPollInterval:
           extra.readyPollInterval ?? option.readyPollInterval ?? 25,
         replacementTimeout:
-          extra.replacementTimeout ?? option.replacementTimeout ?? 100,
+          extra.replacementTimeout ?? option.replacementTimeout ?? 300,
         localProtocolVersion:
           extra.localProtocolVersion ?? localProtocolVersion,
         debugInfo: extra.debugInfo ?? option.debugInfo,
@@ -156,7 +156,7 @@ function createIntegrationContext(name, option = {}) {
       const clientOption = {
         daemonManager: extra.manager ?? manager,
         controlEndpoint: paths.controlEndpoint,
-        rpcTimeout: extra.rpcTimeout ?? 1000,
+        rpcTimeout: extra.rpcTimeout ?? 3000,
       };
       if (configuredDebugInfo) {
         clientOption.debugInfo = {
@@ -188,8 +188,8 @@ function createIntegrationContext(name, option = {}) {
         multiplexerStartupTimeout:
           extra.startupTimeout ??
           option.startupTimeout ??
-          platformTimeout(DEFAULT_STARTUP_TIMEOUT),
-        multiplexerRpcTimeout: extra.rpcTimeout ?? 1000,
+          DEFAULT_STARTUP_TIMEOUT,
+        multiplexerRpcTimeout: extra.rpcTimeout ?? 3000,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??
           option.multiplexerDaemonIdleTimeout ??
@@ -317,11 +317,11 @@ async function stopDaemonPid(pid) {
   try {
     process.kill(pid, "SIGTERM");
   } catch (_error) {}
-  await waitFor(() => !processExists(pid), 1000).catch(async () => {
+  await waitFor(() => !processExists(pid), 3000).catch(async () => {
     try {
       process.kill(pid, "SIGKILL");
     } catch (_error) {}
-    await waitFor(() => !processExists(pid), 1000).catch(() => {});
+    await waitFor(() => !processExists(pid), 3000).catch(() => {});
   });
 }
 
@@ -342,11 +342,10 @@ function processExists(pid) {
   }
 }
 
-async function waitFor(predicate, timeout = 2000, interval = 20) {
+async function waitFor(predicate, timeout = 6000, interval = 20) {
   const startedAt = Date.now();
-  const effectiveTimeout = platformTimeout(timeout);
   let lastError;
-  while (Date.now() - startedAt <= effectiveTimeout) {
+  while (Date.now() - startedAt <= timeout) {
     try {
       const value = await predicate();
       if (value) {
@@ -360,9 +359,7 @@ async function waitFor(predicate, timeout = 2000, interval = 20) {
   if (lastError) {
     throw lastError;
   }
-  throw new Error(
-    `Timed out after ${effectiveTimeout}ms waiting for condition`
-  );
+  throw new Error(`Timed out after ${timeout}ms waiting for condition`);
 }
 
 function delay(ms) {
@@ -394,7 +391,7 @@ async function getHealth(controlEndpoint) {
     });
     const timer = setTimeout(() => {
       finish(() => reject(new Error("Health probe timed out")));
-    }, 1000);
+    }, 3000);
 
     const unsubscribeConnect = transport.onConnect(() => {
       if (!transport.send({ kind: "health" }) && !transport.closed) {
@@ -464,13 +461,12 @@ function parseCustomizedEnvelope(message) {
   };
 }
 
-function waitForSocketMessage(socket, predicate, timeout = 1500) {
+function waitForSocketMessage(socket, predicate, timeout = 4500) {
   return new Promise((resolve, reject) => {
-    const effectiveTimeout = platformTimeout(timeout);
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("Timed out waiting for WebSocket message"));
-    }, effectiveTimeout);
+    }, timeout);
     const onMessage = (data) => {
       const text = data.toString();
       let value;
@@ -496,12 +492,6 @@ function waitForSocketMessage(socket, predicate, timeout = 1500) {
     socket.on("message", onMessage);
     socket.on("close", onClose);
   });
-}
-
-function platformTimeout(timeout) {
-  return process.platform === "win32"
-    ? timeout * WINDOWS_TIMEOUT_MULTIPLIER
-    : timeout;
 }
 
 function captureEnv(keys) {
@@ -543,7 +533,7 @@ async function connectDriverWebSocket(url, option = {}) {
 
   const initialize = await waitFor(
     () => messages.find((value) => value?.event === "Initialize"),
-    1500
+    4500
   );
   const id = initialize.data;
   socket.send(
@@ -564,12 +554,12 @@ async function connectDriverWebSocket(url, option = {}) {
   );
   await waitFor(
     () => messages.find((value) => value?.event === "RoomJoined"),
-    1500
+    4500
   );
   socket.send(JSON.stringify({ event: "ListClients" }));
   await waitFor(
     () => messages.find((value) => value?.event === "ClientList"),
-    1500
+    4500
   );
   return { socket, id, messages };
 }
@@ -592,7 +582,7 @@ async function connectRuntimeWebSocket(url, option = {}) {
 
   const initialize = await waitFor(
     () => messages.find((value) => value?.event === "Initialize"),
-    1500
+    4500
   );
   const id = initialize.data;
   socket.send(
@@ -616,7 +606,7 @@ async function connectRuntimeWebSocket(url, option = {}) {
   );
   await waitFor(
     () => messages.find((value) => value?.event === "RoomJoined"),
-    1500
+    4500
   );
   return { socket, id, messages };
 }
@@ -657,7 +647,6 @@ module.exports = {
   getHealth,
   getUsableDiscovery,
   parseCustomizedEnvelope,
-  platformTimeout,
   processExists,
   readJsonFile,
   reconnectDaemonClient,

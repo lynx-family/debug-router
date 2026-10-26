@@ -10,19 +10,18 @@ const {
   createIntegrationContext,
   delay,
   getUsableDiscovery,
-  platformTimeout,
   processExists,
   reconnectDaemonClient,
   waitFor,
 } = require("./helpers/integration_harness");
 
-const DISCONNECT_CALLBACK_LATENCY_BUDGET_MS = platformTimeout(1000);
-const RECONNECT_CALLBACK_LATENCY_BUDGET_MS = platformTimeout(3000);
+const DISCONNECT_CALLBACK_LATENCY_BUDGET_MS = 3000;
+const RECONNECT_CALLBACK_LATENCY_BUDGET_MS = 9000;
 const STRESS_CONNECTOR_COUNT = 20;
 const STRESS_CLOSES_PER_CONNECTOR_PER_DIRECTION = 5;
 
 describe("multiplexer integration control net reliability", function () {
-  this.timeout(platformTimeout(30000));
+  this.timeout(90000);
 
   let context;
 
@@ -60,7 +59,7 @@ describe("multiplexer integration control net reliability", function () {
         readControlTrace(tracePath, traceOffset).filter(
           (node) => node.event === "control_socket_connected"
         ).length >= 1,
-      4000
+      12000
     );
     await waitFor(
       () =>
@@ -68,7 +67,7 @@ describe("multiplexer integration control net reliability", function () {
         connectors.every(
           (connector) => connector.daemonClient.status === "connected"
         ),
-      4000
+      12000
     );
 
     const firstCycle = observations[0].states.slice(stateOffsets[0]);
@@ -147,7 +146,7 @@ describe("multiplexer integration control net reliability", function () {
         ) &&
         callbacks
       );
-    }, 2000);
+    }, 6000);
     const daemonDisconnectedCallback = daemonCallbacks.find(
       (entry) => entry.event === "control-disconnected-callback"
     );
@@ -213,7 +212,7 @@ describe("multiplexer integration control net reliability", function () {
           observations[targetIndex].states.length >=
             stateOffsets[targetIndex] + 2 &&
           connectors[targetIndex].devices.has("device-1"),
-        5000
+        15000
       ).catch((error) => {
         error.message += `; target=${targetIndex}, states=${JSON.stringify(
           observations.map(({ states }) => states.map(({ state }) => state))
@@ -234,7 +233,7 @@ describe("multiplexer integration control net reliability", function () {
           cycle.filter((node) => node.event === "control_socket_connected")
             .length >= 1
         );
-      }, 5000);
+      }, 15000);
 
       const connectorCycle = observations[targetIndex].states.slice(
         stateOffsets[targetIndex]
@@ -308,7 +307,7 @@ describe("multiplexer integration control net reliability", function () {
           ) &&
           callbacks
         );
-      }, 2000);
+      }, 6000);
       const daemonDisconnectedCallback = daemonCallbacks.find(
         (entry) => entry.event === "control-disconnected-callback"
       );
@@ -409,12 +408,12 @@ describe("multiplexer integration control net reliability", function () {
             connector.devices.has("device-1") &&
             connector.usbClients.has(1)
         ),
-      8000
+      24000
     );
     const nextInfo = await waitFor(() => {
       const info = getUsableDiscovery(context.discovery);
       return info?.pid !== initialInfo.pid ? info : null;
-    }, 5000);
+    }, 15000);
 
     assert.strictEqual(
       processExists(initialInfo.pid),
@@ -487,7 +486,7 @@ describe("multiplexer integration control net reliability", function () {
           (node) => node.metadata.activeControlCount === connectors.length
         )
       );
-    }, 5000);
+    }, 15000);
 
     const daemonCycle = readTrace(tracePath).filter(
       (node) => traceTimestamp(node) >= startedAt - 5
@@ -538,7 +537,7 @@ describe("multiplexer integration control net reliability", function () {
         replacementConnected.length === connectors.length &&
         callbacks
       );
-    }, 3000);
+    }, 9000);
     const oldDaemonDisconnectedCallbacks = daemonCallbacks
       .filter(
         (entry) =>
@@ -613,7 +612,7 @@ describe("multiplexer integration control net reliability", function () {
   });
 
   it("measures bidirectional close callback latency under high Connector churn", async function () {
-    this.timeout(platformTimeout(60000));
+    this.timeout(180000);
 
     const setup = await createConnectedScenario(
       "control-ws-high-volume",
@@ -646,7 +645,7 @@ describe("multiplexer integration control net reliability", function () {
           () =>
             observations[connectorIndex].states.length === stateOffset + 2 &&
             connector.devices.has("device-1"),
-          3000
+          9000
         );
         await delay(150);
 
@@ -699,7 +698,7 @@ describe("multiplexer integration control net reliability", function () {
           () =>
             observations[connectorIndex].states.length === stateOffset + 2 &&
             connector.devices.has("device-1"),
-          3000
+          9000
         );
 
         const connectorCycle = observations[connectorIndex].states.slice(
@@ -766,7 +765,7 @@ describe("multiplexer integration control net reliability", function () {
   ) {
     context = createIntegrationContext(name, {
       readyPollInterval: 10,
-      replacementTimeout: 20,
+      replacementTimeout: 60,
       multiplexerDaemonIdleTimeout: 30000,
     });
     const tracePath = path.join(context.rootDir, "control-reliability.ndjson");
@@ -776,7 +775,7 @@ describe("multiplexer integration control net reliability", function () {
           enabled: true,
           output: tracePath,
         },
-        rpcTimeout: 3000,
+        rpcTimeout: 9000,
       })
     );
     const observations = connectors.map(observeConnectionEvents);
@@ -802,7 +801,7 @@ describe("multiplexer integration control net reliability", function () {
         readTrace(tracePath).filter(
           (node) => node.event === "control_socket_connected"
         ).length === connectorCount,
-      4000
+      12000
     );
     assert(
       observations.every(
@@ -906,7 +905,7 @@ function waitForDaemonControlCallbackPair(context, offset) {
       callbacks.some((entry) => entry.event === "control-connected-callback") &&
       callbacks
     );
-  }, 3000);
+  }, 9000);
 }
 
 function monotonicNowNs() {

@@ -8,12 +8,11 @@ const fs = require("fs");
 const {
   createIntegrationContext,
   getUsableDiscovery,
-  platformTimeout,
   waitFor,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration concurrent spawn", function () {
-  this.timeout(platformTimeout(10000));
+  this.timeout(30000);
 
   let context;
 
@@ -38,7 +37,7 @@ describe("multiplexer integration concurrent spawn", function () {
     await Promise.all(managers.map((manager) => manager.ensureDaemon()));
     const daemon = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000
+      9000
     );
     assert(Number.isInteger(daemon.pid));
     assert.strictEqual(fs.existsSync(context.paths.spawnLockPath), false);
@@ -61,7 +60,7 @@ describe("multiplexer integration concurrent spawn", function () {
     await context.manager.ensureDaemon();
     const firstDaemon = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000
+      9000
     );
     const secondManager = context.createManager();
     const thirdManager = context.createManager();

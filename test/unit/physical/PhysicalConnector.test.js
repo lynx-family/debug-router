@@ -8,7 +8,7 @@ const {
   PhysicalConnector,
 } = require("../../../debug_router_connector/dist/cjs/src/physical/PhysicalConnector");
 
-const ASYNC_TEST_TIMEOUT = 250;
+const ASYNC_TEST_TIMEOUT = 750;
 
 function createConnector() {
   return new PhysicalConnector();

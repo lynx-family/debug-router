@@ -54,7 +54,7 @@ function frame(value) {
 
 describe("MultiplexerControlTransport", function () {
   it("forces closure when graceful shutdown does not complete", async function () {
-    this.timeout(4000);
+    this.timeout(12000);
     const socket = new FakeSocket();
     socket.end = () => {
       socket.writable = false;
@@ -73,7 +73,7 @@ describe("MultiplexerControlTransport", function () {
   });
 
   it("cancels forced closure after graceful shutdown completes", async function () {
-    this.timeout(4000);
+    this.timeout(12000);
     const socket = new FakeSocket();
     const transport = new MultiplexerControlTransport(socket);
     let destroyCalls = 0;

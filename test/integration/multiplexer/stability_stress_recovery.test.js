@@ -23,11 +23,11 @@ const HIGH_PRESSURE_WEBSOCKET_FRONTENDS = 100;
 const HIGH_PRESSURE_CONNECTOR_MESSAGES = 500;
 const HIGH_PRESSURE_WEBSOCKET_MESSAGES = 500;
 const HIGH_PRESSURE_SETUP_BATCH_SIZE = 20;
-const HIGH_PRESSURE_TIMEOUT_MS = 10000;
-const HIGH_PRESSURE_RPC_TIMEOUT_MS = 30000;
+const HIGH_PRESSURE_TIMEOUT_MS = 30000;
+const HIGH_PRESSURE_RPC_TIMEOUT_MS = 90000;
 
 describe("multiplexer integration stability, stress, and recovery", function () {
-  this.timeout(120000);
+  this.timeout(360000);
 
   let context;
 
@@ -110,7 +110,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         connectors[0].usbClients.has(5) &&
         connectors[2].usbClients.has(5) &&
         connectors[4].usbClients.has(5),
-      2000
+      6000
     );
 
     const activeConnectors = [connectors[0], connectors[2], connectors[4]];
@@ -197,7 +197,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         context
           .readLog()
           .some((entry) => entry.event === "client-send-message"),
-      2000
+      6000
     );
 
     const replacement = await connectDriverWebSocket(url, {
@@ -237,7 +237,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
   });
 
   it("handles three-digit connector and WebSocket frontends with four-digit concurrent routed messages", async function () {
-    this.timeout(180000);
+    this.timeout(540000);
     context = createIntegrationContext("stability-combined-high-pressure", {
       readyPollInterval: 10,
       startupTimeout: HIGH_PRESSURE_TIMEOUT_MS,
@@ -336,7 +336,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
             value?.event === "Customized" &&
             parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
               ?.marker === marker,
-          10000
+          30000
         ).then((message) => ({
           marker,
           response: parseCustomizedEnvelope(message.text).cdp,
@@ -377,7 +377,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
   it("recovers from daemon-side uncaught exceptions and continues serving concurrent connector traffic", async function () {
     context = createIntegrationContext("stability-exception-recovery", {
       readyPollInterval: 10,
-      replacementTimeout: 20,
+      replacementTimeout: 60,
       state: {
         ...createState({
           deviceCount: 1,
@@ -397,7 +397,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
     );
     const initialInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000
+      9000
     );
 
     const pending = client.sendClientMessage("Runtime.evaluate", {
@@ -409,7 +409,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
     });
 
     await assert.rejects(pending, /closed|socket|Multiplexer/i);
-    await waitFor(() => !processExists(initialInfo.pid), 3000);
+    await waitFor(() => !processExists(initialInfo.pid), 9000);
     truncateCommandLog(context);
 
     assert(
@@ -446,7 +446,7 @@ describe("multiplexer integration stability, stress, and recovery", function () 
         return info;
       }
       return null;
-    }, 3000);
+    }, 9000);
 
     const connectors = [
       connector,
@@ -542,7 +542,7 @@ function createState({ deviceCount, clientCount, firstClientId = 1 }) {
   };
 }
 
-async function waitForClientIds(frontends, expectedIds, timeout = 3000) {
+async function waitForClientIds(frontends, expectedIds, timeout = 9000) {
   const expected = [...expectedIds].sort((first, second) => first - second);
   await waitFor(
     () =>

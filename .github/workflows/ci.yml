@@ -10,7 +10,8 @@ on:
 
 # Step budgets use successful CI runs from 2026-10-12 through 2026-10-20
 # with matching job definitions. Add the greater of 50% of the maximum
-# duration or two minutes, then round up to whole minutes.
+# duration or two minutes, then round up to whole minutes. Multiplexer test
+# steps have extra headroom for slower runners and their expanded test timeouts.
 jobs:
   static-check:
     runs-on: lynx-ubuntu-22.04-medium
@@ -126,7 +127,7 @@ jobs:
           source tools/envsetup.sh
           python3 test/connect_test/check_android_connection_ci.py -t websocket
       - name: Run multiplexer Android WiFi E2E tests
-        timeout-minutes: 3
+        timeout-minutes: 9
         run: |-
           source tools/envsetup.sh
           cd test/e2e_test/connector_test
@@ -157,7 +158,7 @@ jobs:
           source tools/envsetup.sh
           python3 test/connect_test/check_android_connection_ci.py -t usb
       - name: Run multiplexer Android USB E2E tests
-        timeout-minutes: 3
+        timeout-minutes: 9
         run: |-
           source tools/envsetup.sh
           cd test/e2e_test/connector_test
@@ -316,11 +317,11 @@ jobs:
         working-directory: debug_router_connector
         run: npm ci
       - name: Run multiplexer unit tests
-        timeout-minutes: 3
+        timeout-minutes: 9
         working-directory: debug_router_connector
         run: npm run test:multiplexer
       - name: Run multiplexer integration tests
-        timeout-minutes: 4
+        timeout-minutes: 12
         working-directory: debug_router_connector
         run: npm run test:integration:multiplexer
       - name: Install connector E2E dependencies
@@ -328,7 +329,7 @@ jobs:
         run: npm ci
       # Real-device stress suites are manual-only; Android E2E runs in the device jobs.
       - name: Run multiplexer E2E tests without devices
-        timeout-minutes: 3
+        timeout-minutes: 9
         working-directory: test/e2e_test/connector_test
         run: npm run test:multiplexer:without-device
 

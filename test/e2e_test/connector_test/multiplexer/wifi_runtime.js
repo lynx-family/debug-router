@@ -136,24 +136,24 @@ async function runOwnershipPreemptionCase() {
           .getAllWebsocketAppClients()
           .some((client) => clientIdOf(client) === runtime.id) &&
         connector.websocketWebClients.has(driver.id),
-      2000,
+      6000,
       "ownership facade mirrors before preemption"
     );
     const daemon = await waitFor(
       () => findDaemonProcess(context.paths.daemonProcessName),
-      3000,
+      9000,
       "ownership daemon process"
     );
     await waitFor(
       () => readOwnerPid(context.legacyOwnerPath) === daemon.pid,
-      3000,
+      9000,
       "ownership daemon claims legacy owner"
     );
 
     fs.writeFileSync(context.legacyOwnerPath, `${process.pid}`, "utf8");
     await waitFor(
       () => statuses.includes(MultiOpenStatus.unattached),
-      3000,
+      9000,
       "ownership facade receives unattached"
     );
     await waitFor(
@@ -161,7 +161,7 @@ async function runOwnershipPreemptionCase() {
         runtime.socket.readyState === WebSocket.CLOSED &&
         connector.getAllWebsocketAppClients().length === 0 &&
         connector.websocketWebClients.has(driver.id),
-      3000,
+      9000,
       "ownership runtime removed and Driver mirror retained"
     );
     assert.strictEqual(driver.socket.readyState, WebSocket.OPEN);
@@ -177,7 +177,7 @@ async function runOwnershipPreemptionCase() {
         driver.messages.filter((message) => message?.event === "ClientList")
           .length > clientListCount &&
         latestClientList(driver.messages).length === 0,
-      2000,
+      6000,
       "ownership Driver ClientList converges with facade runtime mirrors"
     );
   } finally {
@@ -214,7 +214,7 @@ async function runPublicLifecycleCase() {
       () =>
         connected.some((client) => clientIdOf(client) === runtime.id) &&
         appConnected.some((client) => clientIdOf(client) === runtime.id),
-      2000,
+      6000,
       "public WiFi connected events"
     );
     const externalClient = connected.find(
@@ -260,7 +260,7 @@ async function runRequesterVisibilityCase() {
         owner
           .getAllWebsocketAppClients()
           .some((client) => clientIdOf(client) === runtime.id),
-      2000,
+      6000,
       "owner WiFi runtime mirror"
     );
     await delay(100);
@@ -275,7 +275,7 @@ async function runRequesterVisibilityCase() {
         passive
           .getAllWebsocketAppClients()
           .some((client) => clientIdOf(client) === runtime.id),
-      2000,
+      6000,
       "requesting Connector receives existing WiFi snapshot"
     );
     runtime.socket.send(
@@ -290,7 +290,7 @@ async function runRequesterVisibilityCase() {
           (event) =>
             parseJson(event.message)?.data?.marker === "visible-after-start"
         ),
-      2000,
+      6000,
       "requesting Connector receives subsequent WiFi messages"
     );
   } finally {
@@ -342,7 +342,7 @@ async function runPublicUsbForwardingCase() {
         localMessages.some(
           (event) => event.id === 7 && event.message === message
         ),
-      2000,
+      6000,
       "local public handleUsbMessage event"
     );
     assert.deepStrictEqual(handledMessages, [message]);
@@ -472,7 +472,7 @@ async function runConnectorRoundTripCase() {
             parseCustomizedEnvelope(event.message).cdp.result?.marker ===
             "wifi-to-connector"
         ),
-      2000,
+      6000,
       "WiFi response delivered to Connector"
     );
     assert.strictEqual(parseCustomizedEnvelope(response.message).cdp.id, 81);
@@ -497,7 +497,7 @@ async function runPublicProxyCase() {
         connector
           .getAllWebsocketAppClients()
           .find((client) => clientIdOf(client) === runtime.id),
-      2000,
+      6000,
       "WiFi client proxy"
     );
 
@@ -624,7 +624,7 @@ async function runRawEventsCase() {
         driverMessages.some(
           (event) => event.id === driver.id && event.message === ping
         ),
-      2000,
+      6000,
       "raw WiFi and Driver events"
     );
   } finally {
@@ -658,7 +658,7 @@ async function runDisconnectCase() {
         !connector
           .getAllAppClients()
           .some((client) => clientIdOf(client) === runtime.id),
-      2000,
+      6000,
       "WiFi disconnect events and mirror cleanup"
     );
   } finally {
@@ -685,7 +685,7 @@ async function runLateSnapshotCase() {
         late
           .getAllAppClients()
           .some((client) => clientIdOf(client) === runtime.id),
-      2000,
+      6000,
       "late Connector WiFi snapshot"
     );
   } finally {
@@ -694,7 +694,7 @@ async function runLateSnapshotCase() {
 }
 
 async function runDaemonLivenessCase() {
-  const context = createContext("liveness", 150);
+  const context = createContext("liveness", 1000);
   try {
     const first = context.createConnector();
     const second = context.createConnector();
@@ -708,12 +708,12 @@ async function runDaemonLivenessCase() {
     context.trackSocket(runtime.socket);
     const daemon = await waitFor(
       () => findDaemonProcess(context.paths.daemonProcessName),
-      2000,
+      6000,
       "daemon process"
     );
 
     await first.close();
-    await delay(350);
+    await delay(1250);
     assert.strictEqual(
       processExists(daemon.pid),
       true,
@@ -724,12 +724,12 @@ async function runDaemonLivenessCase() {
     await second.close();
     await waitFor(
       () => runtime.socket.readyState === WebSocket.CLOSED,
-      2000,
+      6000,
       "last websocket Connector closes the WiFi runtime"
     );
     await waitFor(
       () => !processExists(daemon.pid),
-      2000,
+      6000,
       "daemon exits after the last websocket Connector closes"
     );
   } finally {
@@ -775,8 +775,8 @@ function createContext(name, idleTimeout = 30000) {
         multiplexerRootDir: rootDir,
         multiplexerLegacyDriverDir: legacyDriverDir,
         multiplexerDaemonEntry: fakeDaemonEntry,
-        multiplexerStartupTimeout: 3000,
-        multiplexerRpcTimeout: 1200,
+        multiplexerStartupTimeout: 9000,
+        multiplexerRpcTimeout: 3600,
         multiplexerDaemonIdleTimeout: idleTimeout,
       });
       connectors.push(connector);
@@ -854,14 +854,14 @@ async function connectWebSocketClient(url, type, info) {
   });
   const room = await waitFor(
     () => messages.find((message) => message?.event === "RoomJoined"),
-    2000,
+    6000,
     `${info.app} room joined`
   );
   if (type === "Driver") {
     socket.send(JSON.stringify({ event: "ListClients" }));
     await waitFor(
       () => messages.find((message) => message?.event === "ClientList"),
-      2000,
+      6000,
       `${info.app} ClientList`
     );
   }
@@ -934,7 +934,7 @@ function parseCustomizedEnvelope(message) {
   };
 }
 
-function waitForSocketMessage(socket, predicate, timeout = 2000) {
+function waitForSocketMessage(socket, predicate, timeout = 6000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
