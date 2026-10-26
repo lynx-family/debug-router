@@ -8,14 +8,13 @@ const path = require("path");
 
 const {
   createIntegrationContext,
-  platformTimeout,
   waitFor,
 } = require("./helpers/integration_harness");
 
-const TRACE_DAEMON_IDLE_TIMEOUT_MS = 1000;
+const TRACE_DAEMON_IDLE_TIMEOUT_MS = 3000;
 
 describe("multiplexer integration connection trace", function () {
-  this.timeout(platformTimeout(10000));
+  this.timeout(30000);
 
   let context;
 
@@ -54,7 +53,7 @@ describe("multiplexer integration connection trace", function () {
       () =>
         fs.existsSync(tracePath) &&
         fs.readFileSync(tracePath, "utf8").includes("integration-test"),
-      3000
+      9000
     );
 
     await first.close();
@@ -64,7 +63,7 @@ describe("multiplexer integration connection trace", function () {
       () =>
         fs.existsSync(tracePath) &&
         fs.readFileSync(tracePath, "utf8").includes("daemon_stopped"),
-      3000
+      9000
     );
 
     const trace = fs

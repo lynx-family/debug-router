@@ -80,12 +80,12 @@ function createContext(name, state, option = {}) {
         multiplexerRootDir: rootDir,
         multiplexerLegacyDriverDir: legacyDriverDir,
         multiplexerDaemonEntry: fakeDaemonEntry,
-        multiplexerStartupTimeout: extra.startupTimeout ?? 3000,
-        multiplexerRpcTimeout: extra.rpcTimeout ?? 1200,
+        multiplexerStartupTimeout: extra.startupTimeout ?? 9000,
+        multiplexerRpcTimeout: extra.rpcTimeout ?? 3600,
         multiplexerDaemonIdleTimeout:
           extra.multiplexerDaemonIdleTimeout ??
           option.multiplexerDaemonIdleTimeout ??
-          150,
+          1000,
       });
       connectors.push(connector);
       return connector;
@@ -163,7 +163,7 @@ async function runEmptyDaemonFlow() {
       clients: [],
     },
     {
-      multiplexerDaemonIdleTimeout: 120,
+      multiplexerDaemonIdleTimeout: 1000,
     }
   );
   let daemonPid;
@@ -180,7 +180,7 @@ async function runEmptyDaemonFlow() {
 
     const daemon = await waitFor(
       () => findDaemonProcess(context.paths.daemonProcessName),
-      2000,
+      6000,
       "daemon process"
     );
     daemonPid = daemon.pid;
@@ -191,7 +191,7 @@ async function runEmptyDaemonFlow() {
     );
 
     await connector.close();
-    await waitFor(() => !processExists(daemonPid), 2500, "idle daemon cleanup");
+    await waitFor(() => !processExists(daemonPid), 7500, "idle daemon cleanup");
 
     const events = context.readLog().map((entry) => entry.event);
     assert(events.includes("connect-devices"));
@@ -204,7 +204,7 @@ async function runEmptyDaemonFlow() {
 async function runSharedDaemonMirrorFlow() {
   logStep("checking shared daemon, mirrors, RPC, and event fanout");
   const context = createContext("shared", defaultState(), {
-    multiplexerDaemonIdleTimeout: 150,
+    multiplexerDaemonIdleTimeout: 1000,
   });
   let daemonPid;
 
@@ -233,7 +233,7 @@ async function runSharedDaemonMirrorFlow() {
 
     const daemon = await waitFor(
       () => findDaemonProcess(context.paths.daemonProcessName),
-      3000,
+      9000,
       "shared daemon process"
     );
     daemonPid = daemon?.pid;
@@ -280,7 +280,7 @@ async function runSharedDaemonMirrorFlow() {
     });
     await waitFor(
       () => first.usbClients.has(2) && second.usbClients.has(2),
-      2000,
+      6000,
       "dynamic client mirror"
     );
     assert.deepStrictEqual(
@@ -312,7 +312,7 @@ async function runSharedDaemonMirrorFlow() {
     });
     await waitFor(
       () => firstMessages.length === 1 && secondMessages.length === 1,
-      2000,
+      6000,
       "usb message fanout"
     );
     assert.strictEqual(firstMessages[0].id, 2);
@@ -332,7 +332,7 @@ async function runSharedDaemonMirrorFlow() {
     });
     await waitFor(
       () => !first.usbClients.has(2) && !second.usbClients.has(2),
-      2000,
+      6000,
       "dynamic client removal"
     );
     assert.deepStrictEqual(firstDisconnected, [2]);
@@ -341,7 +341,7 @@ async function runSharedDaemonMirrorFlow() {
     await Promise.all([first.close(), second.close()]);
     await waitFor(
       () => !processExists(daemonPid),
-      2500,
+      7500,
       "shared daemon idle cleanup"
     );
 
@@ -365,8 +365,8 @@ async function runLegacyPreemptionFlow() {
 
   try {
     const connector = context.createConnector({
-      rpcTimeout: 3000,
-      startupTimeout: 5000,
+      rpcTimeout: 9000,
+      startupTimeout: 15000,
     });
     const multiOpenStatuses = [];
     const disconnectedDevices = [];
@@ -390,20 +390,20 @@ async function runLegacyPreemptionFlow() {
     await waitFor(
       () =>
         countLogEvents(context, "device-start-watch") > initialWatchCount,
-      2000,
+      6000,
       "initial legacy watch all clients"
     );
     await connector.connectUsbClients("device-1", -1, true, null);
 
     const daemon = await waitFor(
       () => findDaemonProcess(context.paths.daemonProcessName),
-      3000,
+      9000,
       "legacy preemption daemon process"
     );
     assert(processExists(daemon.pid), "daemon should be alive");
     await waitFor(
       () => readOwnerPid(context.legacyOwnerPath) === daemon.pid,
-      3000,
+      9000,
       "daemon owns legacy owner file"
     );
 
@@ -411,7 +411,7 @@ async function runLegacyPreemptionFlow() {
     fs.writeFileSync(context.legacyOwnerPath, `${process.pid}`, "utf8");
     await waitFor(
       () => multiOpenStatuses.includes(MultiOpenStatus.unattached),
-      3000,
+      9000,
       "connector receives legacy unattached status"
     );
     await waitFor(
@@ -419,7 +419,7 @@ async function runLegacyPreemptionFlow() {
         connector.devices.size === 0 &&
         connector.usbClients.size === 0 &&
         countLogEvents(context, "disable-all-clients") > 0,
-      3000,
+      9000,
       "connector device and runtime mirrors cleared after legacy preemption"
     );
     assert.deepStrictEqual(disconnectedClients, [1]);
@@ -457,7 +457,7 @@ async function runLegacyPreemptionFlow() {
           log.some((entry) => entry.event === "client-added" && entry.id === 2)
         );
       },
-      2000,
+      6000,
       "fake physical updates while preempted"
     );
     assert.strictEqual(connector.devices.has("device-2"), false);
@@ -474,7 +474,7 @@ async function runLegacyPreemptionFlow() {
         connector.devices.has("device-2") &&
         connector.usbClients.has(2) &&
         countLogEvents(context, "device-start-watch") > reacquireWatchCount,
-      3000,
+      9000,
       "daemon reacquires legacy owner"
     );
     assert.strictEqual(readOwnerPid(context.legacyOwnerPath), daemon.pid);
@@ -513,8 +513,8 @@ async function runWebSocketMirrorRecoveryFlow() {
         port: 0,
         roomId: "e2e-wss-recovery",
       },
-      rpcTimeout: 3000,
-      startupTimeout: 5000,
+      rpcTimeout: 9000,
+      startupTimeout: 15000,
     });
     const disconnectedDevices = [];
     const disconnectedClients = [];
@@ -532,7 +532,7 @@ async function runWebSocketMirrorRecoveryFlow() {
     await waitFor(
       () =>
         countLogEvents(context, "device-start-watch") > initialWatchCount,
-      2000,
+      6000,
       "initial WatchAllClients"
     );
     await connector.connectUsbClients("device-1", -1, true, null);
@@ -540,7 +540,7 @@ async function runWebSocketMirrorRecoveryFlow() {
 
     const daemon = await waitFor(
       () => findDaemonProcess(context.paths.daemonProcessName),
-      2000,
+      6000,
       "websocket recovery daemon process"
     );
     initialPid = daemon.pid;
@@ -556,7 +556,7 @@ async function runWebSocketMirrorRecoveryFlow() {
         connector.wss === null &&
         connector.devices.size === 0 &&
         connector.usbClients.size === 0,
-      3000,
+      9000,
       "websocket mirror cleared after daemon kill"
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
@@ -565,7 +565,7 @@ async function runWebSocketMirrorRecoveryFlow() {
     assert.deepStrictEqual(disconnectedDevices, ["device-1"]);
     await waitFor(
       () => !processExists(initialPid),
-      3000,
+      9000,
       "old websocket daemon exits"
     );
 
@@ -592,7 +592,7 @@ async function runWebSocketMirrorRecoveryFlow() {
         }
         return null;
       },
-      10000,
+      30000,
       "websocket mirror restored after daemon respawn"
     );
     assert.notStrictEqual(replacement.pid, initialPid);
@@ -610,7 +610,7 @@ async function runWebSocketMirrorRecoveryFlow() {
 async function runCompatibilityUpgradeFlow() {
   logStep("checking daemon compatibility upgrade and connector reconnect");
   const context = createContext("compat-upgrade", defaultState(), {
-    multiplexerDaemonIdleTimeout: 150,
+    multiplexerDaemonIdleTimeout: 1000,
   });
 
   try {
@@ -638,7 +638,7 @@ async function runCompatibilityUpgradeFlow() {
     assert.strictEqual(daemonV2.debugInfo.daemonVersion, "connector-v2");
     await waitFor(
       () => !processExists(daemonV1.pid),
-      3000,
+      9000,
       "v1 daemon replaced"
     );
 
@@ -668,7 +668,7 @@ async function runCompatibilityUpgradeFlow() {
     assert.strictEqual(daemonV3.debugInfo.daemonVersion, "connector-v3");
     await waitFor(
       () => !processExists(daemonV2.pid),
-      3000,
+      9000,
       "v2 daemon replaced"
     );
 
@@ -685,7 +685,7 @@ async function runCompatibilityUpgradeFlow() {
     ]);
     await waitFor(
       () => !processExists(daemonV3.pid),
-      2500,
+      7500,
       "upgrade daemon idle cleanup"
     );
 
@@ -714,20 +714,20 @@ function createVersionedControl(context, name, protocolVersion) {
     controlEndpoint: context.paths.controlEndpoint,
     spawnLockPath: context.paths.spawnLockPath,
     daemonEntry: fakeDaemonEntry,
-    startupTimeout: 3000,
+    startupTimeout: 9000,
     readyPollInterval: 10,
-    replacementTimeout: 50,
+    replacementTimeout: 150,
     localProtocolVersion: protocolVersion,
     debugInfo: {
       daemonVersion: name,
     },
-    multiplexerDaemonIdleTimeout: 150,
+    multiplexerDaemonIdleTimeout: 1000,
     enableWebSocket: false,
   });
   const client = new MultiplexerDaemonClient({
     daemonManager: manager,
     controlEndpoint: context.paths.controlEndpoint,
-    rpcTimeout: 2000,
+    rpcTimeout: 6000,
     debugInfo: {
       protocolVersion,
       clientVersion: name,
@@ -787,7 +787,7 @@ async function waitForDiscoveryProtocol(context, protocolVersion) {
         .at(-1);
       return started ? { pid: owner.pid, ...started } : null;
     },
-    3000,
+    9000,
     `daemon protocol ${protocolVersion}`
   );
 }

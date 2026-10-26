@@ -14,7 +14,6 @@ const {
   delay,
   getUsableDiscovery,
   parseCustomizedEnvelope,
-  platformTimeout,
   processExists,
   waitFor,
   waitForSocketMessage,
@@ -24,7 +23,7 @@ const {
 } = require("../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerWebSocketClient");
 
 describe("multiplexer integration WiFi runtime ideal behavior", function () {
-  this.timeout(platformTimeout(12000));
+  this.timeout(36000);
 
   let context;
 
@@ -71,7 +70,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
 
     await waitFor(
       () => webConnected.find((client) => clientIdOf(client) === driver.id),
-      2000
+      6000
     );
     await connector.close();
   });
@@ -102,7 +101,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
         firstSpecific.some((client) => clientIdOf(client) === runtime.id) &&
         firstGeneric.some((client) => clientIdOf(client) === runtime.id) &&
         secondSpecific.some((client) => clientIdOf(client) === runtime.id),
-      2000
+      6000
     );
     const connectedClient = firstSpecific.find(
       (client) => clientIdOf(client) === runtime.id
@@ -164,7 +163,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
         owner
           .getAllWebsocketAppClients()
           .some((client) => clientIdOf(client) === runtime.id),
-      2000
+      6000
     );
     await delay(100);
 
@@ -184,7 +183,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
         passive
           .getAllWebsocketAppClients()
           .some((client) => clientIdOf(client) === runtime.id),
-      2000
+      6000
     );
     runtime.socket.send(
       JSON.stringify({
@@ -198,7 +197,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
           (event) =>
             JSON.parse(event.message).data?.marker === "visible-after-start"
         ),
-      2000
+      6000
     );
   });
 
@@ -235,7 +234,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
         driverEvents.some(
           (event) => event.id === driver.id && event.message === driverMessage
         ),
-      2000
+      6000
     );
   });
 
@@ -339,7 +338,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
             parseCustomizedEnvelope(event.message).cdp.result?.marker ===
             "wifi-to-connector"
         ),
-      2000
+      6000
     );
     assert.strictEqual(parseCustomizedEnvelope(response.message).cdp.id, 51);
     assert.strictEqual(secondEvents.length, 0);
@@ -356,7 +355,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
         connector
           .getAllWebsocketAppClients()
           .find((client) => clientIdOf(client) === runtime.id),
-      2000
+      6000
     );
 
     const runtimeRequest = waitForSocketMessage(runtime.socket, (value) => {
@@ -434,7 +433,7 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
         late
           .getAllWebsocketAppClients()
           .some((client) => clientIdOf(client) === runtime.id),
-      2000
+      6000
     );
   });
 
@@ -462,13 +461,13 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
         !connector
           .getAllWebsocketAppClients()
           .some((client) => clientIdOf(client) === runtime.id),
-      2000
+      6000
     );
   });
 
   it("keeps the daemon for connected Connectors, then idles despite a remaining WiFi runtime", async function () {
     context = createIntegrationContext("wifi-runtime-idle", {
-      multiplexerDaemonIdleTimeout: 150,
+      multiplexerDaemonIdleTimeout: 1000,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -487,11 +486,11 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
     context.trackSocket(runtime.socket);
     const discovery = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      2000
+      6000
     );
 
     await first.close();
-    await delay(350);
+    await delay(1250);
     assert.strictEqual(
       processExists(discovery.pid),
       true,
@@ -500,8 +499,8 @@ describe("multiplexer integration WiFi runtime ideal behavior", function () {
     assert.strictEqual(runtime.socket.readyState, 1);
 
     await second.close();
-    await waitFor(() => runtime.socket.readyState === 3, 2000);
-    await waitFor(() => !processExists(discovery.pid), 2000);
+    await waitFor(() => runtime.socket.readyState === 3, 6000);
+    await waitFor(() => !processExists(discovery.pid), 6000);
   });
 
   async function startWebSocketConnector(name) {

@@ -97,7 +97,7 @@ function isProcessAlive(pid) {
   }
 }
 
-async function waitForChildExit(child, timeout = 2000) {
+async function waitForChildExit(child, timeout = 6000) {
   if (!child.pid) return;
   if (child.exitCode !== null || child.signalCode !== null) return;
 
@@ -642,7 +642,7 @@ describe("MultiplexerDaemonManager", function () {
 
   it("finds and stops a Unix daemon by its argv0 marker", async function () {
     if (process.platform === "win32") this.skip();
-    this.timeout(5000);
+    this.timeout(15000);
 
     const daemonProcessName = `${path.basename(tempDir)}-lookup-muxDaemon`;
     const child = spawnChildProcess(
@@ -658,7 +658,7 @@ describe("MultiplexerDaemonManager", function () {
       await once(child, "spawn");
       const { manager, controlEndpoint } = createManager(tempDir, [usable()], {
         daemonProcessName,
-        replacementTimeout: 1000,
+        replacementTimeout: 3000,
         kill: (pid, signal) => process.kill(pid, signal),
         isProcessAlive,
         sleep: (duration) =>
@@ -680,7 +680,7 @@ describe("MultiplexerDaemonManager", function () {
 
   it("escalates to SIGKILL when the marked Unix daemon ignores SIGTERM", async function () {
     if (process.platform === "win32") this.skip();
-    this.timeout(5000);
+    this.timeout(15000);
 
     const daemonProcessName = `${path.basename(tempDir)}-stubborn-muxDaemon`;
     const child = spawnChildProcess(

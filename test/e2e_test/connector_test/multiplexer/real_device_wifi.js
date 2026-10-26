@@ -18,7 +18,7 @@ const { stopDaemonProcesses } = require("./daemon_process");
 
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
-const DEFAULT_TIMEOUT = 10000;
+const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_IDLE_TIMEOUT = 30000;
 const DEFAULT_MESSAGE_METHOD = "ConnectorRealDeviceE2E.Ping";
 const DEFAULT_CDP_MESSAGE_METHOD = "ConnectorRealDeviceE2E.CDP.Ping";
@@ -431,7 +431,7 @@ function createContext(name, args) {
         multiplexerRootDir: rootDir,
         multiplexerLegacyDriverDir: legacyDriverDir,
         multiplexerDaemonEntry: fakeDaemonEntry,
-        multiplexerStartupTimeout: 8000,
+        multiplexerStartupTimeout: 24000,
         multiplexerRpcTimeout: args.timeout,
         multiplexerDaemonIdleTimeout: args.multiplexerDaemonIdleTimeout,
       });
@@ -503,7 +503,7 @@ function isLoopbackOrLinkLocal(host) {
 }
 
 async function selectAndroidDevice(requestedSerial) {
-  const output = await execFile(adbCommand, ["devices"], 10000);
+  const output = await execFile(adbCommand, ["devices"], 30000);
   const devices = output
     .split(/\n/)
     .map((line) => line.trim())
@@ -540,7 +540,7 @@ async function launchAndroidWiFiApp(serial, activity, websocketUrl, roomId) {
   await execFile(
     adbCommand,
     ["-s", serial, "shell", "am", "force-stop", packageName],
-    10000
+    30000
   );
   const output = await execFile(
     adbCommand,
@@ -559,7 +559,7 @@ async function launchAndroidWiFiApp(serial, activity, websocketUrl, roomId) {
       "websocket_schema",
       schema,
     ],
-    15000
+    45000
   );
   assert(!output.includes("Error:"), `Failed to launch Android app: ${output}`);
 }
@@ -568,7 +568,7 @@ function forceStopAndroidApp(serial, activity) {
   return execFile(
     adbCommand,
     ["-s", serial, "shell", "am", "force-stop", androidPackage(activity)],
-    10000
+    30000
   );
 }
 

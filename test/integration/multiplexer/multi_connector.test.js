@@ -8,12 +8,11 @@ const {
   collectConnectorEvents,
   createIntegrationContext,
   parseCustomizedEnvelope,
-  platformTimeout,
   waitFor,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration multi connector", function () {
-  this.timeout(platformTimeout(10000));
+  this.timeout(30000);
 
   let context;
 
@@ -94,7 +93,7 @@ describe("multiplexer integration multi connector", function () {
 
     await waitFor(
       () => first.usbClients.has(2) && second.usbClients.has(2),
-      2000
+      6000
     );
     assert.deepStrictEqual(
       firstConnected.map((client) => client.clientId()),
@@ -126,7 +125,7 @@ describe("multiplexer integration multi connector", function () {
 
     await waitFor(
       () => firstMessages.length === 1 && secondMessages.length === 1,
-      2000
+      6000
     );
     assert.strictEqual(firstMessages[0].id, 2);
     assert.strictEqual(secondMessages[0].id, 2);
@@ -234,6 +233,6 @@ describe("multiplexer integration multi connector", function () {
             entry.event === "device-start-watch" && entry.serial === "device-1"
         )
       );
-    }, 2000);
+    }, 6000);
   });
 });

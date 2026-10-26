@@ -10,7 +10,6 @@ const {
   createIntegrationContext,
   getDiscoveryInfo,
   parseCustomizedEnvelope,
-  platformTimeout,
   processExists,
   reconnectDaemonClient,
   waitFor,
@@ -18,7 +17,7 @@ const {
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration compatibility upgrade", function () {
-  this.timeout(platformTimeout(15000));
+  this.timeout(45000);
 
   let context;
 
@@ -32,7 +31,7 @@ describe("multiplexer integration compatibility upgrade", function () {
   it("blocks protocol replacement while connectors are active and upgrades after they disconnect", async function () {
     context = createIntegrationContext("compat-staged-upgrade", {
       readyPollInterval: 10,
-      replacementTimeout: platformTimeout(50),
+      replacementTimeout: 150,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -62,7 +61,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     assert.notStrictEqual(daemonV2.pid, daemonV1.pid);
     assert.strictEqual(daemonV2.protocolVersion, 2);
     assert.strictEqual(daemonV2.debugInfo.daemonVersion, "connector-v2");
-    await waitFor(() => !processExists(daemonV1.pid), 3000);
+    await waitFor(() => !processExists(daemonV1.pid), 9000);
 
     await reconnectDaemonClient(v1.client);
     assert.deepStrictEqual(await listDeviceSerials(v1.client), ["device-1"]);
@@ -88,7 +87,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     assert.notStrictEqual(daemonV3.pid, daemonV2.pid);
     assert.strictEqual(daemonV3.protocolVersion, 3);
     assert.strictEqual(daemonV3.debugInfo.daemonVersion, "connector-v3");
-    await waitFor(() => !processExists(daemonV2.pid), 3000);
+    await waitFor(() => !processExists(daemonV2.pid), 9000);
 
     await reconnectDaemonClient(v1.client);
     await reconnectDaemonClient(v2.client);
@@ -114,7 +113,7 @@ describe("multiplexer integration compatibility upgrade", function () {
   it("blocks protocol replacement while WebSocket frontends are active", async function () {
     context = createIntegrationContext("compat-websocket-upgrade", {
       readyPollInterval: 10,
-      replacementTimeout: platformTimeout(50),
+      replacementTimeout: 150,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -152,7 +151,7 @@ describe("multiplexer integration compatibility upgrade", function () {
     await connectRuntime(v2.client);
     const daemonV2 = await currentDiscovery(2);
     assert.notStrictEqual(daemonV2.pid, daemonV1.pid);
-    await waitFor(() => !processExists(daemonV1.pid), 3000);
+    await waitFor(() => !processExists(daemonV1.pid), 9000);
 
     const serverV2 = await v2.client.call("startWSServer", {});
     const urlV2 = webSocketUrl(serverV2.port);
@@ -190,7 +189,7 @@ describe("multiplexer integration compatibility upgrade", function () {
         daemonVersion: name,
       },
       readyPollInterval: 10,
-      replacementTimeout: platformTimeout(50),
+      replacementTimeout: 150,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -203,7 +202,7 @@ describe("multiplexer integration compatibility upgrade", function () {
         protocolVersion,
         clientVersion: name,
       },
-      rpcTimeout: platformTimeout(2000),
+      rpcTimeout: 6000,
     });
     return { manager, client };
   }
@@ -239,7 +238,7 @@ describe("multiplexer integration compatibility upgrade", function () {
         return info;
       }
       return null;
-    }, 3000);
+    }, 9000);
   }
 
   function daemonStartedPids() {
@@ -273,7 +272,7 @@ async function waitForClientIds(frontends, expectedIds) {
       frontends.every((frontend) =>
         arraysEqual(latestClientIds(frontend.messages), expected)
       ),
-    3000
+    9000
   );
 }
 

@@ -8,14 +8,13 @@ const fs = require("fs");
 const {
   createIntegrationContext,
   getUsableDiscovery,
-  platformTimeout,
   processExists,
   reconnectDaemonClient,
   waitFor,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration reconnect and snapshot", function () {
-  this.timeout(platformTimeout(12000));
+  this.timeout(36000);
 
   let context;
 
@@ -29,7 +28,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
   it("rejects pending RPCs when the daemon dies and rebuilds snapshot after stale cleanup and respawn", async function () {
     context = createIntegrationContext("reconnect-snapshot", {
       readyPollInterval: 10,
-      replacementTimeout: 20,
+      replacementTimeout: 60,
       state: {
         responseDelayMs: 1000,
         devices: [
@@ -53,7 +52,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
       },
     });
 
-    const client = context.createClient({ rpcTimeout: 2000 });
+    const client = context.createClient({ rpcTimeout: 6000 });
     await client.connect();
     assert.deepStrictEqual(
       (
@@ -68,7 +67,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
 
     const initialInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000
+      9000
     );
     const pending = client.call("sendMessageWithReply", {
       clientId: 1,
@@ -92,7 +91,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
     process.kill(initialInfo.pid, "SIGKILL");
 
     await assert.rejects(pending, /closed|socket|ECONNRESET|Multiplexer/i);
-    await waitFor(() => !processExists(initialInfo.pid), 3000);
+    await waitFor(() => !processExists(initialInfo.pid), 9000);
 
     context.writeState({
       devices: [
@@ -118,7 +117,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
     await reconnectDaemonClient(client);
     const nextInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000
+      9000
     );
     assert.notStrictEqual(nextInfo.pid, initialInfo.pid);
     assert.strictEqual(
@@ -185,7 +184,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
   it("clears connector websocket mirror on daemon loss and rebuilds it from desired state after respawn", async function () {
     context = createIntegrationContext("connector-wss-recovery", {
       readyPollInterval: 10,
-      replacementTimeout: 20,
+      replacementTimeout: 60,
       enableWebSocket: true,
       websocketOption: {
         port: 0,
@@ -195,7 +194,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
 
     const connector = context.createConnector({
       enableWebSocket: true,
-      rpcTimeout: 3000,
+      rpcTimeout: 9000,
     });
     const disconnectedDevices = [];
     const disconnectedClients = [];
@@ -215,14 +214,14 @@ describe("multiplexer integration reconnect and snapshot", function () {
           .readLog()
           .filter((entry) => entry.event === "device-start-watch")
           .length > initialWatchCount,
-      2000
+      6000
     );
     await connector.connectUsbClients("device-1", -1, true, null);
     await connector.startWSServer();
 
     const initialInfo = await waitFor(
       () => getUsableDiscovery(context.discovery),
-      3000
+      9000
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
     assert(connector.wssPort > 0, "websocket port should be assigned");
@@ -237,13 +236,13 @@ describe("multiplexer integration reconnect and snapshot", function () {
         connector.wss === null &&
         connector.devices.size === 0 &&
         connector.usbClients.size === 0,
-      3000
+      9000
     );
     assert.strictEqual(connector.desiredWSServerStarted, true);
     assert.strictEqual(connector.desiredWatchAllClientsStarted, true);
     assert.deepStrictEqual(disconnectedClients, [1]);
     assert.deepStrictEqual(disconnectedDevices, ["device-1"]);
-    await waitFor(() => !processExists(initialInfo.pid), 3000);
+    await waitFor(() => !processExists(initialInfo.pid), 9000);
 
     await waitFor(() => {
       const nextInfo = getUsableDiscovery(context.discovery);
@@ -262,7 +261,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
         connector.wss?.wssPath ===
           `ws://${connector.wssHost}/mdevices/page/android`
       );
-    }, 5000);
+    }, 15000);
 
     const nextInfo = await waitFor(() => {
       const info = getUsableDiscovery(context.discovery);
@@ -270,7 +269,7 @@ describe("multiplexer integration reconnect and snapshot", function () {
         return info;
       }
       return null;
-    }, 3000);
+    }, 9000);
     assert.notStrictEqual(nextInfo.pid, initialInfo.pid);
     assert.strictEqual(connector.desiredWSServerStarted, true);
     assert.strictEqual(

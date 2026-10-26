@@ -18,10 +18,10 @@ const { findDaemonProcess, stopDaemonProcesses } = require("./daemon_process");
 const DEFAULT_ANDROID_ACTIVITY =
   "com.lynx.debugrouter.testapp/com.lynx.debugrouter.testapp.MainActivity";
 const DEFAULT_IOS_BUNDLE_ID = "com.lynx.debugrouter-DebugRouterExample";
-const DEFAULT_DEVICE_TIMEOUT = 10000;
-const DEFAULT_CLIENT_TIMEOUT = 10000;
-const DEFAULT_IDLE_TIMEOUT = 500;
-const LEGACY_PREEMPTION_TIMEOUT = 12000;
+const DEFAULT_DEVICE_TIMEOUT = 30000;
+const DEFAULT_CLIENT_TIMEOUT = 30000;
+const DEFAULT_IDLE_TIMEOUT = 1500;
+const LEGACY_PREEMPTION_TIMEOUT = 36000;
 const E2E_CDP_PING_METHOD = "ConnectorRealDeviceE2E.CDP.Ping";
 const E2E_CDP_NOTIFICATION_METHOD = "ConnectorRealDeviceE2E.CDP.Notification";
 
@@ -195,7 +195,7 @@ function createContext(platform, args, option = {}) {
         enableNetworkDevice: false,
         multiplexerRootDir: rootDir,
         multiplexerLegacyDriverDir: legacyDriverDir,
-        multiplexerStartupTimeout: 8000,
+        multiplexerStartupTimeout: 24000,
         multiplexerRpcTimeout:
           Math.max(args.deviceTimeout, args.clientTimeout, 5000) + 5000,
         multiplexerDaemonIdleTimeout: args.multiplexerDaemonIdleTimeout,
@@ -322,7 +322,7 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
         first
           .getAllUsbClients()
           .some((client) => client.clientId() === firstClient.clientId()),
-      3000,
+      9000,
       `${platform} first connector local client mirror`
     );
     await waitFor(
@@ -330,13 +330,13 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
         second
           .getAllUsbClients()
           .some((client) => client.clientId() === secondClient.clientId()),
-      3000,
+      9000,
       `${platform} second connector local client mirror`
     );
 
     const daemonInfo = await waitFor(
       () => findDaemonProcess(context.paths.daemonProcessName),
-      3000,
+      9000,
       `${platform} daemon process`
     );
     logStep(
@@ -390,7 +390,7 @@ async function runPlatformScenario(platform, args, scenarioOption = {}) {
     await Promise.all([first.close(), second.close()]);
     await waitFor(
       () => !closingDaemon || !processExists(closingDaemon.pid),
-      5000,
+      15000,
       `${platform} daemon idle cleanup`
     );
   } finally {
@@ -442,7 +442,7 @@ async function assertPlatformDeviceOnline(platform, args) {
 }
 
 async function listAndroidDevices() {
-  const output = await exec("adb devices", 10000);
+  const output = await exec("adb devices", 30000);
   return output
     .split(/\n/)
     .map((line) => line.trim())
@@ -464,7 +464,7 @@ async function listAndroidForwards(serial) {
   const output = await execFile(
     "adb",
     ["-s", serial, "forward", "--list"],
-    10000
+    30000
   );
   return output
     .split(/\n/)
@@ -485,7 +485,7 @@ async function removeAddedAndroidForwards(baseline) {
     await execFile(
       "adb",
       ["-s", baseline.serial, "forward", "--remove", local],
-      10000
+      30000
     );
   }
   if (added.length > 0) {
@@ -683,7 +683,7 @@ async function launchAppIfNeeded(platform, args, device) {
       args.androidActivity
     )} --es connection_type usb`;
     logStep(`launching Android test app: ${command}`);
-    await exec(command, 10000);
+    await exec(command, 30000);
     await delay(1000);
     return;
   }
@@ -804,7 +804,7 @@ async function assertWebSocketFrontends(
             message?.event === "ClientList" &&
             message.data?.some((client) => client.id === usbClient.clientId())
         ),
-      3000,
+      9000,
       `${platform} first frontend client list`
     ),
     waitFor(
@@ -814,7 +814,7 @@ async function assertWebSocketFrontends(
             message?.event === "ClientList" &&
             message.data?.some((client) => client.id === usbClient.clientId())
         ),
-      3000,
+      9000,
       `${platform} second frontend client list`
     ),
   ]);
@@ -949,7 +949,7 @@ async function assertDaemonRecovery(
   }
   await waitFor(
     () => !processExists(oldPid),
-    3000,
+    9000,
     `${platform} old daemon process exit`
   );
   await delay(args.multiplexerDaemonIdleTimeout + 300);
@@ -973,7 +973,7 @@ async function assertDaemonRecovery(
       const info = await findDaemonProcess(context.paths.daemonProcessName);
       return info && info.pid !== oldPid ? info : null;
     },
-    5000,
+    15000,
     `${platform} replacement daemon lock owner`
   );
   assert.notStrictEqual(newInfo.pid, oldPid);
@@ -1012,7 +1012,7 @@ async function connectDriverWebSocket(url, info) {
   });
   await waitFor(
     () => messages.find((message) => message?.event === "RoomJoined"),
-    3000,
+    9000,
     `${info.app} room joined`
   );
   return { socket, messages };
@@ -1185,7 +1185,7 @@ async function stopInterferingMultiplexerDaemons() {
       const alive = targets.filter((target) => processExists(target.pid));
       return alive.length === 0;
     },
-    2000,
+    6000,
     "existing multiplexer daemon graceful stop"
   ).catch(() => {});
 

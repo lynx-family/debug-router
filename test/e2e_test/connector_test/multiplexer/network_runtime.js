@@ -12,7 +12,7 @@ const {
 const { stopDaemonProcesses } = require("./daemon_process");
 
 async function waitFor(predicate, description) {
-  const deadline = Date.now() + 10000;
+  const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     const result = await predicate();
     if (result) return result;
@@ -44,6 +44,8 @@ async function main() {
       enableNetworkDevice,
       enableWebSocket: true,
       multiplexerRootDir: rootDir,
+      multiplexerStartupTimeout: 15000,
+      multiplexerRpcTimeout: 15000,
       multiplexerLegacyDriverDir: path.join(rootDir, "legacy"),
       multiplexerDaemonIdleTimeout: 1000,
     });

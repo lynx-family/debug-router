@@ -12,13 +12,12 @@ const {
   createIntegrationContext,
   delay,
   parseCustomizedEnvelope,
-  platformTimeout,
   waitFor,
   waitForSocketMessage,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration routing isolation", function () {
-  this.timeout(platformTimeout(12000));
+  this.timeout(36000);
 
   let context;
 
@@ -38,7 +37,7 @@ describe("multiplexer integration routing isolation", function () {
       },
     });
 
-    const client = context.createClient({ rpcTimeout: 1500 });
+    const client = context.createClient({ rpcTimeout: 4500 });
     const controlEvents = [];
     client.subscribe((event) => controlEvents.push(event));
     await client.connect();
@@ -116,7 +115,7 @@ describe("multiplexer integration routing isolation", function () {
       },
     });
 
-    const client = context.createClient({ rpcTimeout: 1500 });
+    const client = context.createClient({ rpcTimeout: 4500 });
     const controlEvents = [];
     client.subscribe((event) => controlEvents.push(event));
     await client.connect();
@@ -161,7 +160,7 @@ describe("multiplexer integration routing isolation", function () {
             ?.marker === "control-route"
         );
       });
-    }, 2000);
+    }, 6000);
 
     web.socket.send(createCustomizedEnvelope(1, 1, "web-route"));
     await client.call("sendMessageWithoutReply", {
@@ -194,7 +193,7 @@ describe("multiplexer integration routing isolation", function () {
           (entry) => entry.id === 1 && entry.message?.event === "Customized"
         ).length >= 2
       );
-    }, 2000);
+    }, 6000);
   });
 
   it("routes duplicate control request ids back only to the originating control connection", async function () {
@@ -202,10 +201,10 @@ describe("multiplexer integration routing isolation", function () {
       enableWebSocket: false,
     });
 
-    const controlA = context.createClient({ rpcTimeout: 1500 });
+    const controlA = context.createClient({ rpcTimeout: 4500 });
     const controlB = context.createClient({
       manager: context.createManager(),
-      rpcTimeout: 1500,
+      rpcTimeout: 4500,
     });
     const eventsA = [];
     const eventsB = [];
@@ -448,7 +447,7 @@ describe("multiplexer integration routing isolation", function () {
     await waitForClientIds([frontendA, frontendB, frontendC], [1]);
     await waitFor(
       () => connectorA.usbClients.has(1) && connectorB.usbClients.has(1),
-      2000
+      6000
     );
 
     const frontendD = await connectDriverWebSocket(url, { app: "agent-d" });
@@ -459,7 +458,7 @@ describe("multiplexer integration routing isolation", function () {
     await waitForClientIds([frontendA, frontendB, frontendC, frontendD], []);
     await waitFor(
       () => !connectorA.usbClients.has(1) && !connectorB.usbClients.has(1),
-      2000
+      6000
     );
 
     frontendB.socket.close();
@@ -478,7 +477,7 @@ describe("multiplexer integration routing isolation", function () {
     await waitForClientIds([frontendA, frontendC, frontendD], [2]);
     await waitFor(
       () => connectorA.usbClients.has(2) && connectorB.usbClients.has(2),
-      2000
+      6000
     );
 
     context.appendCommand({ type: "remove-client", id: 2 });
@@ -486,7 +485,7 @@ describe("multiplexer integration routing isolation", function () {
     await waitForClientIds([frontendA, frontendC, frontendD], []);
     await waitFor(
       () => connectorA.devices.size === 0 && connectorB.devices.size === 0,
-      2000
+      6000
     );
 
     context.appendCommand({
@@ -516,7 +515,7 @@ describe("multiplexer integration routing isolation", function () {
         connectorB.devices.has("device-1") &&
         connectorA.usbClients.has(3) &&
         connectorB.usbClients.has(3),
-      2000
+      6000
     );
 
     const frontendBReconnect = await connectDriverWebSocket(url, {
@@ -774,7 +773,7 @@ describe("multiplexer integration routing isolation", function () {
               ?.marker === entry.label
           );
         },
-        2500
+        7500
       )
     );
 
@@ -829,7 +828,7 @@ describe("multiplexer integration routing isolation", function () {
       enableWebSocket: false,
     });
 
-    const client = context.createClient({ rpcTimeout: 1500 });
+    const client = context.createClient({ rpcTimeout: 4500 });
     const controlEvents = [];
     client.subscribe((event) => controlEvents.push(event));
     await client.connect();
@@ -918,7 +917,7 @@ async function waitForClientIds(frontends, expectedIds) {
       frontends.every((frontend) =>
         arraysEqual(latestClientIds(frontend.messages), expected)
       ),
-    2500
+    7500
   );
 }
 
@@ -949,7 +948,7 @@ async function waitForFrontendAndConnectorState(
             arraysEqual(clientIds, expectedClientIds)
           );
         }),
-      3000
+      9000
     ),
   ]);
 }

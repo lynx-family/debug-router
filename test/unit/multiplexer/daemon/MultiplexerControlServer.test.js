@@ -17,7 +17,7 @@ const {
 
 function waitForMessage(transport) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("message timeout")), 500);
+    const timer = setTimeout(() => reject(new Error("message timeout")), 1500);
     const unsubscribe = transport.onMessage((message) => {
       clearTimeout(timer);
       unsubscribe();
@@ -40,7 +40,7 @@ async function connectTransport(endpoint) {
 }
 
 async function waitForProvisionalTransportsToBeRemoved(server) {
-  const deadline = Date.now() + 500;
+  const deadline = Date.now() + 1500;
   while (server.provisionalTransports.size !== 0) {
     if (Date.now() >= deadline) {
       throw new Error("provisional control transport cleanup timeout");

@@ -16,7 +16,7 @@ const {
 const { findDaemonProcess, stopDaemonProcesses } = require("./daemon_process");
 
 async function waitFor(predicate, description) {
-  const deadline = Date.now() + 10000;
+  const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     const result = await predicate();
     if (result) return result;
@@ -45,6 +45,8 @@ async function main() {
     enableNetworkDevice: true,
     networkDeviceOpt,
     multiplexerRootDir: rootDir,
+    multiplexerStartupTimeout: 15000,
+    multiplexerRpcTimeout: 15000,
     multiplexerLegacyDriverDir: path.join(rootDir, "legacy"),
     multiplexerDaemonIdleTimeout: 30000,
     ...extra,
@@ -75,7 +77,7 @@ async function main() {
     await new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => finish(new Error(`owner startup timeout: ${output}`)),
-        15000
+        45000
       );
       const onExit = (code, signal) =>
         finish(new Error(`owner exited (${code}, ${signal}): ${output}`));

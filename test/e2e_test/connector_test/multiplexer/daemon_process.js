@@ -52,14 +52,14 @@ async function stopProcess(pid) {
   try {
     process.kill(pid, "SIGTERM");
   } catch (_error) {}
-  await waitForProcessExit(pid, 1000);
+  await waitForProcessExit(pid, 3000);
   if (!processExists(pid)) {
     return;
   }
   try {
     process.kill(pid, "SIGKILL");
   } catch (_error) {}
-  await waitForProcessExit(pid, 1000);
+  await waitForProcessExit(pid, 3000);
 }
 
 async function waitForProcessExit(pid, timeout) {

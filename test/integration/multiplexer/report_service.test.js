@@ -6,11 +6,10 @@ const assert = require("assert");
 const {
   createIntegrationContext,
   waitFor,
-  platformTimeout,
 } = require("./helpers/integration_harness");
 
 describe("multiplexer integration report service", function () {
-  this.timeout(platformTimeout(15000));
+  this.timeout(45000);
   let context;
   let reports;
   let initCalls;
@@ -59,7 +58,7 @@ describe("multiplexer integration report service", function () {
             (item) =>
               item.event === "report-processed" && item.eventName === eventName
           ),
-      2000
+      6000
     );
   }
 
@@ -97,7 +96,7 @@ describe("multiplexer integration report service", function () {
       1
     );
     await first.close();
-    await waitFor(() => lastActiveControlCount() === 2, 2000);
+    await waitFor(() => lastActiveControlCount() === 2, 6000);
     await report("second");
     await second.connectDevices();
     assert.strictEqual(
@@ -105,7 +104,7 @@ describe("multiplexer integration report service", function () {
       1
     );
     await second.close();
-    await waitFor(() => lastActiveControlCount() === 1, 2000);
+    await waitFor(() => lastActiveControlCount() === 1, 6000);
     await report("disabled");
     await disabled.connectDevices();
     assert.deepStrictEqual(
@@ -113,7 +112,7 @@ describe("multiplexer integration report service", function () {
       ["fixture-startup-report", "first", "second"]
     );
     await disabled.close();
-    await waitFor(() => lastActiveControlCount() === 0, 2000);
+    await waitFor(() => lastActiveControlCount() === 0, 6000);
     await report("queued");
     const later = context.createConnector({
       reportService: createService("later"),

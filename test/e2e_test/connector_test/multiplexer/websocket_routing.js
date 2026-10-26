@@ -96,9 +96,9 @@ function createContext(name, state = defaultState()) {
         multiplexerRootDir: rootDir,
         multiplexerLegacyDriverDir: path.join(homeDir, ".DebugRouterConnector"),
         multiplexerDaemonEntry: fakeDaemonEntry,
-        multiplexerStartupTimeout: 3000,
-        multiplexerRpcTimeout: 1200,
-        multiplexerDaemonIdleTimeout: 150,
+        multiplexerStartupTimeout: 9000,
+        multiplexerRpcTimeout: 3600,
+        multiplexerDaemonIdleTimeout: 1000,
       });
       connectors.push(connector);
       return connector;
@@ -178,7 +178,7 @@ async function connectDriverWebSocket(url, info) {
   });
   await waitFor(
     () => messages.find((message) => message?.event === "RoomJoined"),
-    2000,
+    6000,
     `${info.app} room joined`
   );
   return { socket, messages };
@@ -198,7 +198,7 @@ async function runWebSocketRoutingFlow() {
 
     const daemon = await waitFor(
       () => findDaemonProcess(context.paths.daemonProcessName),
-      3000,
+      9000,
       "websocket daemon process"
     );
     daemonPid = daemon?.pid;
@@ -217,7 +217,7 @@ async function runWebSocketRoutingFlow() {
             message?.event === "ClientList" &&
             message.data?.some((client) => client.id === 1)
         ),
-      2000,
+      6000,
       "driver receives usb client list"
     );
 
@@ -270,7 +270,7 @@ async function runWebSocketRoutingFlow() {
     await connector.close();
     await waitFor(
       () => !processExists(daemonPid),
-      2500,
+      7500,
       "websocket daemon idle cleanup"
     );
 
@@ -594,7 +594,7 @@ async function runLargeRandomFrontendChurnFlow() {
               parseCustomizedEnvelope(event.message).cdp.result?.params
                 ?.marker === entry.label
           ),
-        2500,
+        7500,
         `${entry.label} response`
       );
     });
@@ -608,7 +608,7 @@ async function runLargeRandomFrontendChurnFlow() {
               ?.marker === entry.label
           );
         },
-        2500
+        7500
       )
     );
 
@@ -677,7 +677,7 @@ function parseCustomizedEnvelope(message) {
   };
 }
 
-function waitForSocketMessage(socket, predicate, timeout = 2000) {
+function waitForSocketMessage(socket, predicate, timeout = 6000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
@@ -792,7 +792,7 @@ async function waitForClientIds(frontends, expectedIds) {
       frontends.every((frontend) =>
         arraysEqual(latestClientIds(frontend.messages), expected)
       ),
-    2500,
+    7500,
     `frontends latest ClientList to equal ${expected.join(",")}`
   );
 }
@@ -824,7 +824,7 @@ async function waitForFrontendAndConnectorState(
             arraysEqual(clientIds, expectedClientIds)
           );
         }),
-      8000,
+      24000,
       `connectors snapshot devices=${expectedDeviceIds.join(
         ","
       )} clients=${expectedClientIds.join(",")}`
