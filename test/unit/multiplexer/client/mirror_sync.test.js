@@ -278,6 +278,7 @@ describe("multiplexer client mirror sync", function () {
     });
     assert.strictEqual(calls[1].method, "sendMessageWithReply");
     assert.strictEqual(calls[1].params.clientId, 1);
+    assert.strictEqual(calls[1].params.timeout, 100000);
     assert.deepStrictEqual(
       {
         ...calls[1].params.message,
@@ -318,6 +319,7 @@ describe("multiplexer client mirror sync", function () {
         params: {
           clientId: 1,
           message: rawMessage,
+          timeout: 100000,
         },
       },
       {
@@ -333,6 +335,7 @@ describe("multiplexer client mirror sync", function () {
     ]);
     assert.strictEqual(calls[4].method, "sendMessageWithReply");
     assert.strictEqual(calls[4].params.clientId, 1);
+    assert.strictEqual(calls[4].params.timeout, 100000);
     assert.deepStrictEqual(
       {
         ...calls[4].params.message,
@@ -486,6 +489,7 @@ describe("multiplexer client mirror sync", function () {
     const rawCall = daemonClient.state.calls[2];
     assert.strictEqual(rawCall.method, "sendMessageWithReply");
     assert.strictEqual(rawCall.params.clientId, 100);
+    assert.strictEqual(rawCall.params.timeout, 100000);
     assert.deepStrictEqual(
       {
         ...rawCall.params.message,

@@ -362,7 +362,7 @@ The current method contracts are:
 | `startWSServer`                | `{}`                                                | `WebSocketServerInfo` | Start or reuse the WebSocket server and return `{ port, host, roomId? }`.    |
 | `startAllDeviceClientWatchers` | `{}`                                                | `{}`                  | Watch all current devices and automatically watch later devices.             |
 | `stopAllDeviceClientWatchers`  | `{}`                                                | `{}`                  | Stop all watchers and disable automatic watching for later devices.          |
-| `sendMessageWithReply`         | `{ clientId, message: RequireMessageType }`         | `ResponseMessageType` | Send a request-response message to one USB or WiFi runtime.                  |
+| `sendMessageWithReply`         | `{ clientId, message: RequireMessageType, timeout? }` | `ResponseMessageType` | Send a request-response message to one USB or WiFi runtime.                  |
 | `sendMessageWithoutReply`      | `{ target: "app" \| "web", clientId, message }`     | `{}`                  | Send a fire-and-forget message to an App runtime or WebSocket Driver.        |
 | `closeClient`                  | `{ clientId }`                                      | `{}`                  | Close one USB, WiFi runtime, or WebSocket Driver client.                    |
 
@@ -378,7 +378,7 @@ Single-device watching uses separate `startDeviceClientWatcher({ deviceId })` an
 
 `MultiplexerDaemonClient` validates the complete request before connecting and sending, and `MultiplexerControlConnection` validates it again on receipt. The client first accepts the common response envelope, then validates a successful `result` against the pending RPC's method. Recognized optional fields and most DTOs allow unknown additional fields for additive protocol evolution; exact no-parameter RPCs and the two single-device watcher parameter objects intentionally reject extra fields.
 
-The default RPC timeout is 5000 ms. RPCs with a positive operation `timeout` use `max(rpcTimeout, timeout + 1000ms)`; RPCs without an operation timeout continue to use the default timeout, with no method-specific exception.
+The default RPC timeout is 5000 ms. RPCs with a non-negative operation `timeout` use `max(rpcTimeout, timeout + 1000ms)`. RPCs without an operation timeout use the configured RPC timeout, with no method-specific exception. The optional `sendMessageWithReply.timeout` field preserves compatibility with legacy callers that omit it. `sendMessageWithoutReply` acknowledges forwarding without waiting for the runtime response.
 
 `watchNetworkDeviceAtIp` requires a non-empty `ip` and accepts an optional numeric `port` array; it does not restrict the numbers to integers or a port range. Omitting `port` uses BaseDevice defaults (8901–8919, with the count overridable by `DriverPortCount`). An explicit empty array registers only the device. Host shares the same IP usage entry between registration options and runtime watches. Each runtime caller owns that IP until its control disconnects; a repeated call is idempotent for ownership. The first ports for that IP win while it has users. The last user's disconnect removes the manager and its devices; a later request may choose new ports. A runtime watch creates and starts a new network manager. For an existing IP, it only records the caller as a user; discovery starts through `connectDevices()` in manual mode or when registration switches the Host to automatic mode. Device lifecycle events publish snapshots; the RPC does not send an additional snapshot. Control disconnection releases the manager through the normal `handleControlDisconnected()` flow, including while discovery is pending. Existing Host `manualConnect` behavior controls automatic runtime client watching. The facade only forwards the RPC and filters network devices using `enableNetworkDevice`. It does not retain watch parameters or replay dynamic watches after a daemon restart; callers must request them again. This RPC is retained in protocol version 2.
 
@@ -599,6 +599,7 @@ type PendingRoute = {
   requesterId: number;
   originalId: number;
   clientId: number;
+  timeoutMs?: number;
   createdAt: number;
   timer: ReturnType<typeof setTimeout>;
   resolve?: (value: unknown) => void;
@@ -606,7 +607,7 @@ type PendingRoute = {
 };
 ```
 
-The route timeout defaults to 5000 ms. Control route timeout rejects the corresponding Promise; WebSocket route timeout only removes the mapping.
+The route timeout defaults to 100000 ms for all ID-bearing runtime requests, including WebSocket frontend forwarding, `sendMessageWithoutReply`, and `sendMessageWithReply`, over both USB and WiFi. `sendMessageWithReply` accepts an optional per-request `timeout` in milliseconds, passed to `PendingRouteTable` as `timeoutMs`. The value must be a non-negative number. `0` expires on the next timer turn, not an unlimited wait. USB and WebSocket client mirrors returned by the Connector facade explicitly pass `timeout: 100000`, giving their RPC calls at least 101000 ms through `max(configuredRpcTimeout, timeout + 1000)`. Legacy callers that omit `timeout` retain the configured RPC wait independently of the daemon's route timeout. Control route timeout rejects the corresponding Promise when present; other route timeouts only remove the mapping. Disconnect cleanup still cancels routes immediately. ID-less notifications do not create pending routes; memoized query retry and cache validity intervals remain separate from reply timeouts.
 
 Outbound handling:
 

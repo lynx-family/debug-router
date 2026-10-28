@@ -19,6 +19,15 @@ export type ReportEventData = {
 };
 
 export type ControlEvent =
+  | ControlEventEnvelope<
+      "connector-error",
+      {
+        code: string;
+        message: string;
+        deviceSerial?: string;
+        clientId?: number;
+      }
+    >
   // Shared daemon telemetry is sent to exactly one enabled control client.
   | ControlEventEnvelope<"report", ReportEventData>
   /**

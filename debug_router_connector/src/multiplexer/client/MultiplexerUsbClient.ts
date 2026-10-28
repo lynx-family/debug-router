@@ -107,6 +107,7 @@ export class MultiplexerUsbClient extends Client {
     return this.daemonClient.call("sendMessageWithReply", {
       clientId: this.clientId(),
       message,
+      timeout: 100000,
     });
   }
 

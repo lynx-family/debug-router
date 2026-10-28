@@ -101,10 +101,7 @@ describe("PendingRouteTable", function () {
     assert.strictEqual(route.globalMessageId, 1);
     assert.strictEqual(table.get(1), route);
     assert.strictEqual(timers.timers.length, 1);
-    assert.strictEqual(
-      timers.timers[0].timeoutMs,
-      DEFAULT_PENDING_ROUTE_TIMEOUT_MS
-    );
+    assert.strictEqual(timers.timers[0].timeoutMs, 100000);
 
     now = 200;
     assert.strictEqual(table.take(1), route);
@@ -112,6 +109,37 @@ describe("PendingRouteTable", function () {
     assert.strictEqual(timers.timers[0].cleared, true);
     timers.run(timers.timers[0]);
     assert.deepStrictEqual(rejectCalls, []);
+  });
+
+  it("isolates per-route timeouts and cancels an extended timer when a reply arrives", function () {
+    const table = new PendingRouteTable();
+    const rejected = [];
+    const add = (originalId, timeoutMs) =>
+      table.add({
+        kind: "control",
+        requesterId: 1,
+        originalId,
+        clientId: 1,
+        timeoutMs,
+        reject: () => rejected.push(originalId),
+      });
+    const extended = add(1, 120000);
+    const immediate = add(2, 0);
+    const normal = add(3, undefined);
+
+    assert.deepStrictEqual(
+      timers.timers.map((timer) => timer.timeoutMs),
+      [120000, 0, DEFAULT_PENDING_ROUTE_TIMEOUT_MS]
+    );
+    timers.run(immediate.timer);
+    timers.run(normal.timer);
+    assert.deepStrictEqual(rejected, [2, 3]);
+    assert.strictEqual(table.get(extended.globalMessageId), extended);
+    assert.strictEqual(table.take(extended.globalMessageId), extended);
+    assert.strictEqual(extended.timer.cleared, true);
+    timers.run(extended.timer);
+    assert.deepStrictEqual(rejected, [2, 3]);
+    assert.deepStrictEqual(table.clear(), []);
   });
 
   it("supports websocket routes and clears their timers", function () {
@@ -125,6 +153,7 @@ describe("PendingRouteTable", function () {
       clientId: 8,
     });
 
+    assert.strictEqual(route.timer.timeoutMs, 100000);
     assert.deepStrictEqual(route, {
       kind: "websocket",
       requesterId: 6,
