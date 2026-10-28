@@ -92,6 +92,7 @@ export class MultiplexerWebSocketClient extends Client {
       .call("sendMessageWithReply", {
         clientId: this.clientId(),
         message,
+        timeout: 100000,
       })
       .then((response) => {
         const responseMessage = (response as any)?.data?.data?.message;

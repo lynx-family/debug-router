@@ -513,6 +513,24 @@ describe("multiplexer protocol validation", function () {
     }
   });
 
+  it("validates the optional sendMessageWithReply timeout", function () {
+    const valid = [undefined, 0, 0.5, 60000, Number.MAX_SAFE_INTEGER];
+    const invalid = [null, "60000", -1, NaN, Infinity];
+    for (const timeout of [...valid, ...invalid]) {
+      assert.strictEqual(
+        isControlRpcRequest(
+          createRpcRequest("sendMessageWithReply", {
+            clientId: 1,
+            message: createCustomizedRequestMessage(),
+            timeout,
+          })
+        ),
+        valid.includes(timeout),
+        `timeout=${String(timeout)}`
+      );
+    }
+  });
+
   it("rejects invalid control RPC request base fields and params branches", function () {
     const invalidCases = [
       { kind: "event", id: 1, method: "connectDevices", params: {} },

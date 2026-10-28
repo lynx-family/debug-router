@@ -4,7 +4,7 @@
 
 import { defaultLogger } from "../../utils/logger";
 
-export const DEFAULT_PENDING_ROUTE_TIMEOUT_MS = 5000;
+export const DEFAULT_PENDING_ROUTE_TIMEOUT_MS = 100000;
 
 export type PendingRouteInput = {
   /**
@@ -19,6 +19,8 @@ export type PendingRouteInput = {
   requesterId: number;
   originalId: number;
   clientId: number;
+  /** Overrides the table's default for this route only. */
+  timeoutMs?: number;
   resolve?: (value: unknown) => void;
   reject?: (error: Error) => void;
 };
@@ -59,14 +61,20 @@ export class PendingRouteTable {
       ...input,
       globalMessageId,
       createdAt: Date.now(),
-      timer: this.createTimer(globalMessageId),
+      timer: this.createTimer(
+        globalMessageId,
+        input.timeoutMs ?? this.timeoutMs,
+      ),
     };
 
     this.routes.set(globalMessageId, route);
     return route;
   }
 
-  private createTimer(globalMessageId: number): NodeJS.Timeout {
+  private createTimer(
+    globalMessageId: number,
+    timeoutMs: number,
+  ): NodeJS.Timeout {
     // Creates a timer that removes the route on timeout and rejects control requests.
     return setTimeout(() => {
       const route = this.remove(globalMessageId, false);
@@ -91,7 +99,7 @@ export class PendingRouteTable {
           ),
         );
       }
-    }, this.timeoutMs);
+    }, timeoutMs);
   }
 
   get(globalMessageId: number): PendingRoute | null {

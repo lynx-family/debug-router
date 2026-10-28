@@ -49,6 +49,10 @@ export abstract class BaseDevice {
 
   abstract getHost(): string;
 
+  async checkClientPort(_port: number): Promise<"ready" | "skip" | "pause"> {
+    return this.connected ? "ready" : "pause";
+  }
+
   startWatchClient() {
     defaultLogger.debug("connectUsbClients: startWatchClient");
     this.driver.traceRecorder?.recordWatchClientStart(this.info.serial, {

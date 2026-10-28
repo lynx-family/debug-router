@@ -28,6 +28,57 @@ describe("multiplexer integration routing isolation", function () {
     }
   });
 
+  it("uses explicit reply timeouts and preserves the default RPC timeout for legacy requests", async function () {
+    context = createIntegrationContext("routing-reply-timeout", {
+      state: {
+        responseDelayMs: 5500,
+        devices: [{
+          serial: "device-1",
+          os: "Android",
+          ports: [9001],
+          host: "127.0.0.1",
+        }],
+        clients: [{ id: 1, deviceId: "device-1", port: 9001 }],
+      },
+    });
+    const client = context.createClient({ rpcTimeout: 5000 });
+    await client.call("connectDevices", {});
+    await client.call("connectUsbClients", { deviceId: "device-1" });
+    const connector = context.createConnector({ rpcTimeout: 5000 });
+    await connector.connectDevices();
+    const [mirror] = await connector.connectUsbClients("device-1");
+
+    // Direct RPC requests share an original ID but keep separate timeouts and routes.
+    const send = (marker, timeout) =>
+      client.call("sendMessageWithReply", {
+        clientId: 1,
+        message: JSON.parse(createCustomizedEnvelope(1, 77, marker)),
+        ...(timeout === undefined ? {} : { timeout }),
+      });
+    const startedAt = Date.now();
+    const [response, mirrorResponse] = await Promise.all([
+      send("extended", 60000),
+      mirror.sendCustomizedMessage("Runtime.enable", { marker: "facade" }, 1),
+      assert.rejects(
+        send("default"),
+        /Timed out waiting for multiplexer RPC sendMessageWithReply response/
+      ),
+      assert.rejects(
+        send("short", 100),
+        /Timed out waiting for response to global message id/
+      ),
+    ]);
+
+    assert(Date.now() - startedAt >= 5000);
+    const parsed = parseCustomizedEnvelope(JSON.stringify(response));
+    assert.strictEqual(parsed.cdp.id, 77);
+    assert.deepStrictEqual(parsed.cdp.result.params, { marker: "extended" });
+    assert.deepStrictEqual(JSON.parse(mirrorResponse).result.params, {
+      marker: "facade",
+    });
+    assert.strictEqual(client.pendingRpc.size, 0);
+  });
+
   it("routes duplicate WebSocket request ids back only to the originating frontend", async function () {
     context = createIntegrationContext("routing-websocket", {
       enableWebSocket: true,
@@ -106,9 +157,19 @@ describe("multiplexer integration routing isolation", function () {
     assert.deepStrictEqual(unexpectedB, []);
   });
 
-  it("keeps control and WebSocket routes separate when they use the same original request id", async function () {
+  it("routes delayed sendMessageWithoutReply and WebSocket replies separately with the same original id", async function () {
     context = createIntegrationContext("routing-control-websocket", {
       enableWebSocket: true,
+      state: {
+        responseDelayMs: 5500,
+        devices: [{
+          serial: "device-1",
+          os: "Android",
+          ports: [9001],
+          host: "127.0.0.1",
+        }],
+        clients: [{ id: 1, deviceId: "device-1", port: 9001 }],
+      },
       websocketOption: {
         port: 0,
         roomId: "integration-room",
@@ -145,7 +206,7 @@ describe("multiplexer integration routing isolation", function () {
         parseCustomizedEnvelope(JSON.stringify(value)).cdp.result?.params
           ?.marker === "web-route"
       );
-    });
+    }, 10000);
 
     const controlResponse = waitFor(() => {
       return controlEvents.find((event) => {
@@ -160,7 +221,7 @@ describe("multiplexer integration routing isolation", function () {
             ?.marker === "control-route"
         );
       });
-    }, 6000);
+    }, 10000);
 
     web.socket.send(createCustomizedEnvelope(1, 1, "web-route"));
     await client.call("sendMessageWithoutReply", {

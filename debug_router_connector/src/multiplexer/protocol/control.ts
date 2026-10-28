@@ -146,6 +146,8 @@ export type ControlRpcParams = {
   sendMessageWithReply: {
     clientId: number;
     message: RequireMessageType;
+    /** Per-request reply timeout in milliseconds; defaults to 100000. */
+    timeout?: number;
   };
   /**
    * Sends a fire-and-forget message to an App Runtime or WebSocket Driver.

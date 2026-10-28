@@ -7,6 +7,13 @@ import { UsbClient } from "../usb/Client";
 import { WebSocketClient } from "../websocket/WebSocketConnection";
 import { Client } from "../connector/Client";
 
+export type ConnectorError = {
+  code: string;
+  message: string;
+  deviceSerial?: string;
+  clientId?: number;
+};
+
 export type ClientInfo = {
   app: string;
   sdkVersion: string;
@@ -77,6 +84,7 @@ export type CDPEventMessage = {
 };
 
 export type DebugerRouterDriverEvents = {
+  "connector-error": ConnectorError;
   "device-connected": BaseDevice;
   "device-disconnected": BaseDevice;
   "client-connected": UsbClient;
@@ -105,6 +113,7 @@ export type DebugerRouterDriverEvents = {
 };
 
 export type PhysicalConnectorEvent = {
+  "connector-error": ConnectorError;
   "device-connected": BaseDevice;
   "device-disconnected": BaseDevice;
   "client-connected": UsbClient;

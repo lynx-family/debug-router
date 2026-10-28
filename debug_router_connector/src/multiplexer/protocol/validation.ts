@@ -270,6 +270,14 @@ export function isControlEvent(value: unknown): value is ControlEvent {
   }
 
   switch (value.event) {
+    case "connector-error":
+      return (
+        isRecord(value.data) &&
+        isString(value.data.code) &&
+        isString(value.data.message) &&
+        isOptional(value.data.deviceSerial, isString) &&
+        isOptional(value.data.clientId, isNumber)
+      );
     case "report":
       return (
         isRecord(value.data) &&
@@ -342,7 +350,14 @@ export function isControlRpcParams(
     case "stopAllDeviceClientWatchers":
       return Object.keys(params).length === 0;
     case "sendMessageWithReply":
-      return isNumber(params.clientId) && isRequireMessage(params.message);
+      return (
+        isNumber(params.clientId) &&
+        isRequireMessage(params.message) &&
+        isOptional(
+          params.timeout,
+          (value): value is number => isNumber(value) && value >= 0,
+        )
+      );
     case "sendMessageWithoutReply":
       return (
         (params.target === "app" || params.target === "web") &&

@@ -4,7 +4,7 @@
 
 import { UsbClient } from "./Client";
 import { BaseDevice } from "../device/BaseDevice";
-import { ClientDescription, ClientQuery } from "../utils/type";
+import { ClientDescription, ClientQuery, DeviceOS } from "../utils/type";
 import ClientAdapter, { ClientEventsListener } from "./ClientAdapter";
 import { Connection } from "./Connection";
 import { USBConnection } from "./USBConnection";
@@ -13,6 +13,8 @@ import { defaultLogger } from "../utils/logger";
 
 export class ClientController implements ClientEventsListener {
   private timer: NodeJS.Timeout | undefined;
+  private watching = false;
+  private scanning = false;
   private sockets: Map<number, ClientAdapter> = new Map();
   private ports: Map<number, boolean> = new Map();
   private clientInfos: Map<number, number> = new Map();
@@ -114,6 +116,19 @@ export class ClientController implements ClientEventsListener {
   }
 
   private watchClient() {
+    if (!this.watching) return;
+    if (this.device.info.os === DeviceOS.Android) {
+      if (this.scanning) return;
+      this.scanning = true;
+      void this.watchAndroidClients()
+        .catch((error) =>
+          defaultLogger.warn(`Android client scan failed: ${error}`),
+        )
+        .finally(() => {
+          this.scanning = false;
+        });
+      return;
+    }
     for (const port of this.ports.keys()) {
       if (!this.ports.get(port)) {
         const connectAdapter = this.sockets.get(port);
@@ -130,7 +145,32 @@ export class ClientController implements ClientEventsListener {
     }
   }
 
+  private async watchAndroidClients() {
+    for (const port of this.ports.keys()) {
+      if (!this.watching) return;
+      if (!this.ports.get(port)) {
+        // Retire the previous unregistered attempt before opening a probe.
+        const connectAdapter = this.sockets.get(port);
+        connectAdapter?.destroy();
+        this.sockets.delete(port);
+        const result = await this.device.checkClientPort(port);
+        if (!this.watching || result === "pause") return;
+        if (result === "skip") continue;
+        const newAdapter = this.createAdapter(connectAdapter, port);
+        if (newAdapter === null) {
+          defaultLogger.debug("newAdapter === null:" + port);
+          return;
+        }
+        this.sockets.set(port, newAdapter);
+        defaultLogger.debug("watchClient:connect:" + port);
+        newAdapter.connect();
+      }
+    }
+  }
+
   startWatchClient(): void {
+    if (this.watching) return;
+    this.watching = true;
     this.watchClient();
     if (process.env.DriverAutoFindClientsEnv === "false") {
       defaultLogger.warn("AutoFinding new client is closed for debug");
@@ -142,6 +182,7 @@ export class ClientController implements ClientEventsListener {
   }
 
   stopWatchClient(): void {
+    this.watching = false;
     if (this.timer) {
       clearInterval(this.timer);
     }

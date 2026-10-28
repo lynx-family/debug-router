@@ -856,6 +856,9 @@ export class DebugRouterConnector {
   applyHostEvent(event: ControlEvent): void {
     // Translate daemon events into local mirrors and the existing Connector event API.
     switch (event.event) {
+      case "connector-error":
+        this.emit("connector-error", event.data);
+        break;
       case "report":
         this.reportService?.report(
           event.data.eventName,

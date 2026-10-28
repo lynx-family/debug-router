@@ -64,6 +64,7 @@ export type PendingTargetSeed = {
   kind: "control" | "websocket";
   requesterId: number;
   clientId: number;
+  timeoutMs?: number;
   resolve?: (value: unknown) => void;
   reject?: (error: Error) => void;
 };
@@ -1203,6 +1204,7 @@ export class MultiplexerDaemonHost {
         kind: "control",
         requesterId: controlId,
         clientId: params.clientId,
+        timeoutMs: params.timeout,
         resolve: (value) => resolve(value as ResponseMessageType),
         reject,
       });
@@ -1708,7 +1710,14 @@ export class MultiplexerDaemonHost {
     this.webSocketController.sendMessageToWebClient(webClientId, message);
   }
 
+  private readonly handleConnectorError = (
+    data: PhysicalConnectorEvent["connector-error"],
+  ): void => {
+    this.broadcast({ kind: "event", event: "connector-error", data });
+  };
+
   private bindPhysicalConnectorEvents(): void {
+    this.physicalConnector.on("connector-error", this.handleConnectorError);
     this.physicalConnector.on("device-connected", this.handleDeviceConnected);
     this.physicalConnector.on(
       "device-disconnected",
@@ -1726,6 +1735,7 @@ export class MultiplexerDaemonHost {
   }
 
   private unbindPhysicalConnectorEvents(): void {
+    this.physicalConnector.off("connector-error", this.handleConnectorError);
     this.physicalConnector.off("device-connected", this.handleDeviceConnected);
     this.physicalConnector.off(
       "device-disconnected",
