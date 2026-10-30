@@ -7,6 +7,8 @@
 
 #include <condition_variable>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <queue>
 #include <thread>
 
@@ -46,12 +48,10 @@ class ThreadLooper {
   void Stop();
 
  private:
-  volatile bool keep_running_;
-  std::shared_ptr<std::queue<std::function<void()>>> working_queue_;
-  std::shared_ptr<std::queue<std::function<void()>>> incoming_queue_;
-  std::mutex incoming_queue_lock_;
-  std::condition_variable_any condition_;
-  std::mutex condition_lock_;
+  bool keep_running_;
+  std::queue<std::function<void()>> queue_;
+  std::mutex queue_lock_;
+  std::condition_variable condition_;
 };
 
 }  // namespace thread
