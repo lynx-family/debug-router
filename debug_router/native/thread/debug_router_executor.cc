@@ -5,6 +5,7 @@
 #include "debug_router/native/thread/debug_router_executor.h"
 
 #include <iostream>
+#include <utility>
 
 namespace debugrouter {
 namespace thread {
@@ -43,36 +44,37 @@ void DebugRouterExecutor::Post(std::function<void()> work, bool run_now) {
   looper_->Post(work);
 }
 
-ThreadLooper::ThreadLooper()
-    : keep_running_(true),
-      working_queue_(std::make_shared<std::queue<std::function<void()>>>()),
-      incoming_queue_(std::make_shared<std::queue<std::function<void()>>>()) {}
+ThreadLooper::ThreadLooper() : keep_running_(true) {}
 
 void ThreadLooper::Run() {
-  while (keep_running_) {
-    if (!working_queue_->empty()) {
-      auto work = working_queue_->front();
-      working_queue_->pop();
-      work();
-    } else if (!incoming_queue_->empty()) {
-      std::lock_guard<std::mutex> lock(incoming_queue_lock_);
-      working_queue_.swap(incoming_queue_);
-    } else {
-      std::unique_lock<std::mutex> lock(condition_lock_);
-      condition_.wait(lock);
+  while (true) {
+    std::function<void()> work;
+    {
+      std::unique_lock<std::mutex> lock(queue_lock_);
+      condition_.wait(lock,
+                      [this]() { return !keep_running_ || !queue_.empty(); });
+      if (!keep_running_) {
+        return;
+      }
+      work = std::move(queue_.front());
+      queue_.pop();
     }
+    work();
   }
 }
 
 void ThreadLooper::Stop() {
-  keep_running_ = false;
+  {
+    std::lock_guard<std::mutex> lock(queue_lock_);
+    keep_running_ = false;
+  }
   condition_.notify_one();
 }
 
 void ThreadLooper::Post(std::function<void()> work) {
   {
-    std::lock_guard<std::mutex> lock(incoming_queue_lock_);
-    incoming_queue_->push(work);
+    std::lock_guard<std::mutex> lock(queue_lock_);
+    queue_.push(std::move(work));
   }
   condition_.notify_one();
 }

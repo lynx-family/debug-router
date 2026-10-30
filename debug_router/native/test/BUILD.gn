@@ -78,6 +78,7 @@ unit_test("example_unittest") {
     "socket_server_posix_unittest.cc",
     "socket_server_smoke_unittest.cc",
     "socket_util_unittest.cc",
+    "thread_looper_unittest.cc",
     "usb_client_unittest.cc",
     "usb_reconnect_race_unittest.cc",
     "util_unittest.cc",
