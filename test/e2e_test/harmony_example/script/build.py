@@ -14,6 +14,12 @@ CUR_DIR = os.path.dirname(os.path.abspath(__file__))
 HARMONY_EXAMPLE_DIR = os.path.normpath(os.path.join(CUR_DIR, '..'))
 ROOT_DIR = os.path.normpath(os.path.join(HARMONY_EXAMPLE_DIR, '..', '..', '..'))
 
+# Package both device and emulator native libraries in the HAR.
+ABI_CPU_MAP = {
+    'arm64-v8a': 'arm64',
+    'x86_64': 'x64',
+}
+
 DEFAULT_MODULES = [
     'debug_router',
 ]
@@ -24,8 +30,8 @@ def get_build_type(args):
         build_type = 'release'
     return build_type
 
-def run_gn(is_debug, gn_out_dir):
-    cmd = f'buildtools/gn/gn gen {gn_out_dir} --args=\'target_os="harmony" is_debug={str(is_debug).lower()} target_cpu="arm64" harmony_sdk_version="default"\''
+def run_gn(is_debug, gn_out_dir, abi):
+    cmd = f'buildtools/gn/gn gen {gn_out_dir} --args=\'target_os="harmony" is_debug={str(is_debug).lower()} target_cpu="{ABI_CPU_MAP[abi]}" harmony_sdk_version="default"\''
     print(f'run command {cmd}')
     print(f'cwd is {ROOT_DIR}')
     check_call(cmd, shell=True, cwd=ROOT_DIR)
@@ -39,15 +45,14 @@ def run_build_so(output_path, args):
     check_call(cmd, shell=True, cwd=ROOT_DIR)
 
 
-def run_cp_so(output_path, args):
+def run_cp_so(output_path, args, abi):
     shared_object_cp_map = {
-        'libdebugrouter.so': 'debug_router/harmony/debug_router/libs/arm64-v8a/',
+        'libdebugrouter.so': f'debug_router/harmony/debug_router/libs/{abi}/',
     }
     for so, dst in shared_object_cp_map.items():
         src = os.path.join(output_path, so)
         if not os.path.isfile(src):
-            print(f'skip cp {so} to {dst} as the {so} file is not built')
-            continue
+            raise FileNotFoundError(f'Missing native library for {abi}: {src}')
         dst = os.path.join(ROOT_DIR, dst)
         cmd = f'mkdir -p {dst} && cp {src} {dst}'
         if args.verbose:
@@ -55,8 +60,8 @@ def run_cp_so(output_path, args):
         check_call(cmd, shell=True, cwd=ROOT_DIR)
 
 
-def get_out_dir(args):
-    dir_name = f'harmony_{get_build_type(args)}_arm64'
+def get_out_dir(args, abi):
+    dir_name = f'harmony_{get_build_type(args)}_{ABI_CPU_MAP[abi]}'
     out_dir = os.path.join(ROOT_DIR, 'out', dir_name)
     return out_dir
 
@@ -165,10 +170,11 @@ def main(argv):
     else:
         print('harmony_home is ' + harmony_home)
 
-    gn_out_dir = get_out_dir(args)
-    run_gn(args.is_debug, gn_out_dir)
-    run_build_so(gn_out_dir, args)
-    run_cp_so(gn_out_dir, args)
+    for abi in ABI_CPU_MAP:
+        gn_out_dir = get_out_dir(args, abi)
+        run_gn(args.is_debug, gn_out_dir, abi)
+        run_build_so(gn_out_dir, args)
+        run_cp_so(gn_out_dir, args, abi)
 
     if args.build_har and len(modules) > 0:
         commit_hash = os.popen('git rev-parse HEAD').read().strip()
