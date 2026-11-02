@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "description": "DebugRouter",
   "main": "./Index.ets",
-  "author": "Lynx",
+  "repository": "https://github.com/lynx-family/debug-router",
+  "author": "Lynx Authors <lynx.authors@gmail.com> (https://github.com/lynx-family/debug-router)",
   "license": "Apache-2.0",
   "dependencies": {
     "libdebugrouter.so": "file:./src/main/ets/types/libdebugrouter"
