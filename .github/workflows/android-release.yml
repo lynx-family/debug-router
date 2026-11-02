@@ -51,7 +51,7 @@ jobs:
           popd
         id: build_artifact
       - name: Publish artifact to maven
-        uses: lynx-infra/maven-publish-action@c48e3067642c7ceccf807cd52e6644a257cd8ded
+        uses: lynx-infra/maven-publish-action@6f85a4b3f286e904e31f71ffbc9fb3641fcb2aab # main
         with:
           portal_api_token: ${{ secrets.PORTAL_API_TOKEN }}
           artifact_path_list: ${{ steps.build_artifact.outputs.artifact_list }}
