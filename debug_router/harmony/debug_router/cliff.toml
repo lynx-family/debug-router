@@ -1,12 +1,11 @@
 [git]
 conventional_commits = false
 filter_commits = true
+tag_pattern = ".*-harmony$"
 commit_parsers = [
   { message = ".*changelog: no.*", skip = true },
-
-  { message = "(?i).*harmony.*", group = "Harmony" },
-
-  { message = ".*", skip = true }
+  { message = "(?i).*(harmony|\\bhar\\b).*", group = "Harmony" },
+  { message = ".*", group = "Changes" }
 ]
 
 [changelog]
