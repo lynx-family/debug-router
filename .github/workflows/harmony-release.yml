@@ -31,6 +31,8 @@ jobs:
           git-cliff --version
       - name: Download Source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
       - name: Get Tag Information
         run: |-
           version=$(echo ${{ github.ref }} | awk -F "/" '{print $3}')
