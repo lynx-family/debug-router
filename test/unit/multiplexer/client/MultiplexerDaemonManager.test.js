@@ -211,6 +211,13 @@ describe("MultiplexerDaemonManager", function () {
 
     assert.deepStrictEqual(stopReasons, ["force-stop", "force-stop"]);
     assert.strictEqual(spawnCalls.length, 2);
+    for (const call of spawnCalls) {
+      assert.deepStrictEqual(call.options.stdio, [
+        "ignore",
+        "inherit",
+        "inherit",
+      ]);
+    }
     assert.strictEqual(discovery.calls, 4);
     assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
   });
@@ -247,11 +254,7 @@ describe("MultiplexerDaemonManager", function () {
     );
     assert.strictEqual(spawnCalls[0].options.argv0, manager.daemonProcessName);
     assert.strictEqual(spawnCalls[0].options.detached, true);
-    assert.deepStrictEqual(spawnCalls[0].options.stdio, [
-      "ignore",
-      "inherit",
-      "inherit",
-    ]);
+    assert.strictEqual(spawnCalls[0].options.stdio, "ignore");
     assert.strictEqual(spawnCalls[0].options.windowsHide, true);
     assert.strictEqual(spawnCalls[0].unref, true);
   });

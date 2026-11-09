@@ -252,6 +252,8 @@ spawnLockStaleTimeout = startupTimeout + replacementTimeout + 1000ms
 
 Manager starts `multiplexer/daemon/entry.js` as a detached child process. A process marker derived from the Multiplexer data directory lets Manager identify the daemon during replacement or stale cleanup, but it is not part of the daemon's runtime protocol or Host configuration. Entry receives only the configuration required to construct Host, such as the control endpoint, protocol version, physical connection options, WebSocket settings, trace settings, and idle policy.
 
+Daemon standard input and output are ignored by default so background logs cannot disrupt the caller's terminal UI. With `enableDebugMode`, standard input remains ignored while stdout and stderr inherit the spawning Connector's streams for internal diagnostics. This setting applies when spawning a daemon; reusing an existing daemon does not change its output streams.
+
 Unix-like systems discover marked processes with `pgrep -f`; Windows uses `find-process`. Process lookup is best-effort: no match is an empty result, and a Windows lookup failure is logged and converted to an empty result so an optional cleanup probe cannot terminate the Connector process. Artifact cleanup still runs even when no pid is found.
 
 Debug-only stop and replacement share `stopDaemonForDebugging(withRespawn = false)`. Closing a debug Connector uses the default to stop and clean up, while `enableDebugMode` calls it with `true` from every reached `ensureDaemon()` to stop, spawn, and wait for a fresh daemon. There is no separate force-respawn pending flag or force-respawn replacement reason.
