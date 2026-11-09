@@ -92,7 +92,7 @@ export class AdbHealthGuard {
       // connection (normal for unused SDK ports) with this timeout or freezing.
       if (result === "nc: Timeout" || result === "netcat: Timeout") {
         this.portRetryAt.set(remotePort, Date.now() + this.retryDelayMs);
-        defaultLogger.warn(
+        defaultLogger.debug(
           `TCP probe timed out: serial=${this.serial} port=${remotePort}; skipping port`,
         );
         return "skip";
@@ -103,7 +103,7 @@ export class AdbHealthGuard {
           `Android TCP preflight failed: serial=${this.serial} port=${remotePort} ${result}`,
         );
       } else if (this.portRetryAt.delete(remotePort)) {
-        defaultLogger.info(
+        defaultLogger.debug(
           `[ANDROID_SDK_PORT_RESPONSIVE] serial=${this.serial} port=${remotePort}`,
         );
       }

@@ -443,7 +443,7 @@ export class DebugRouterConnector {
     // Debug mode explicitly stops the shared daemon and removes its artifacts.
     if (this.enableDebugMode) {
       try {
-        defaultLogger.info(
+        defaultLogger.debug(
           "Debug-mode Connector is closing; force-stopping the current daemon and cleaning its artifacts.",
         );
         await this.daemonClient.forceStopDaemon();

@@ -181,7 +181,7 @@ export class PhysicalConnector {
   // functions Migrated from DebugRouterConnector， not modified
 
   disableAllClients() {
-    defaultLogger.info("disableAllClients");
+    defaultLogger.debug("disableAllClients");
     // close usb autoConnect
     this.devices.forEach((device) => {
       device.stopWatchClient();

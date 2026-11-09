@@ -60,7 +60,7 @@ export async function startMultiplexerDaemonEntry(
 
   registerProcessCleanup(host);
   await host.start();
-  defaultLogger.info(
+  defaultLogger.debug(
     `Multiplexer daemon started with control endpoint ${entryOption.controlEndpoint}`,
   );
 

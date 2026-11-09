@@ -66,7 +66,7 @@ export class LegacyOwnershipGuard {
     // Coordinate device ownership with legacy Drivers through their shared owner file.
     // Create the parent directory, attempt to claim ownership, then start the monitoring interval.
     if (process.env.DriverCloseMultiOpen === "true") {
-      defaultLogger.warn(
+      defaultLogger.debug(
         "Legacy ownership guard disabled by DriverCloseMultiOpen",
       );
       this.currentStatus = "attached";
