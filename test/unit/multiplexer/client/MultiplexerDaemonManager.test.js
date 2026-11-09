@@ -211,6 +211,13 @@ describe("MultiplexerDaemonManager", function () {
 
     assert.deepStrictEqual(stopReasons, ["force-stop", "force-stop"]);
     assert.strictEqual(spawnCalls.length, 2);
+    for (const call of spawnCalls) {
+      assert.deepStrictEqual(call.options.stdio, [
+        "ignore",
+        "inherit",
+        "inherit",
+      ]);
+    }
     assert.strictEqual(discovery.calls, 4);
     assert.strictEqual(fs.existsSync(manager.spawnLock.lockPath), false);
   });

@@ -259,7 +259,7 @@ export class MultiplexerDaemonManager {
         // Set argv0 to daemonProcessName so find-process can identify the daemon later.
         argv0: this.daemonProcessName,
         detached: true,
-        // Keep daemon logs visible in the spawning Connector process.
+        // Preserve daemon diagnostics; routine logs use the debug level.
         stdio: ["ignore", "inherit", "inherit"],
         windowsHide: true,
         // Desktop hosts use the Electron executable; run only the daemon as Node.

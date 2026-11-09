@@ -82,7 +82,7 @@ export class PendingRouteTable {
         return;
       }
 
-      defaultLogger.warn(
+      defaultLogger.debug(
         `Pending route timed out: ${JSON.stringify({
           globalMessageId,
           kind: route.kind,

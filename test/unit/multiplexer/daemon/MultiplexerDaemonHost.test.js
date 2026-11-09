@@ -4286,10 +4286,10 @@ describe("MultiplexerDaemonHost", function () {
     physical.usbClients.set(expectedClient.clientId(), expectedClient);
     physical.usbClients.set(wrongClient.clientId(), wrongClient);
     const controlServer = attachControlServer(host);
-    const warnings = [];
+    const debugLogs = [];
     defaultLogger.setOutput((level, ...messages) => {
-      if (level === "warn") {
-        warnings.push(messages.join(" "));
+      if (level === "debug") {
+        debugLogs.push(messages.join(" "));
       }
     });
 
@@ -4324,7 +4324,7 @@ describe("MultiplexerDaemonHost", function () {
     assert.notStrictEqual(host.pendingRoutes.get(globalId), null);
     assert.deepStrictEqual(controlServer.targeted, []);
     assert(
-      warnings.some(
+      debugLogs.some(
         (message) =>
           message.includes(`global message id ${globalId}`) &&
           message.includes("runtime 34") &&

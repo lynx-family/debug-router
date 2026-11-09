@@ -236,7 +236,7 @@ export class MultiplexerDaemonHost {
   // A closed Host is terminal, while a ready Host makes repeated starts no-ops.
   async start(): Promise<void> {
     if (this.lifecycleStatus === "closed") {
-      defaultLogger.info(
+      defaultLogger.debug(
         "Multiplexer daemon host is closed; ignoring a start request",
       );
       return;
@@ -491,7 +491,7 @@ export class MultiplexerDaemonHost {
     },
   ): void {
     this.activeControlIds.add(controlId);
-    defaultLogger.info(
+    defaultLogger.debug(
       `Multiplexer control connected: controlId=${controlId}, activeControlCount=${this.activeControlIds.size}`,
     );
     if (!connectorFacadeOption.manualConnect) {
@@ -671,7 +671,7 @@ export class MultiplexerDaemonHost {
         existingKey.ip === key.ip
       ) {
         manager.controlIds.add(controlId);
-        defaultLogger.info(
+        defaultLogger.debug(
           `Physical device manager already enabled: ${JSON.stringify(
             key,
           )}, controlId=${controlId}`,
@@ -680,7 +680,7 @@ export class MultiplexerDaemonHost {
       }
     }
     this.enabledManagers.set(key, { controlIds: new Set([controlId]), close });
-    defaultLogger.info(
+    defaultLogger.debug(
       `Enabling physical device manager: ${JSON.stringify(
         key,
       )}, controlId=${controlId}`,
@@ -1465,7 +1465,7 @@ export class MultiplexerDaemonHost {
     // Register the route before sending so an immediate runtime response can be correlated.
     const route = this.rewriteOutboundMessageData(data, target);
     try {
-      defaultLogger.info(
+      defaultLogger.debug(
         `Sending multiplexer runtime message: ${JSON.stringify({
           globalMessageId: route?.globalMessageId ?? null,
           originalId: route?.originalId ?? null,
@@ -1510,7 +1510,7 @@ export class MultiplexerDaemonHost {
               return true;
             }
           } catch (error) {
-            defaultLogger.warn(
+            defaultLogger.debug(
               `Stop retrying memoized query for runtime ${clientId}: ${
                 error instanceof Error ? error.message : String(error)
               }`,
@@ -1664,7 +1664,7 @@ export class MultiplexerDaemonHost {
     const pendingTarget = this.pendingRoutes.get(globalMessageId);
     // Validate the runtime origin before consuming a globally unique route.
     if (pendingTarget && pendingTarget.clientId !== sourceClientId) {
-      defaultLogger.warn(
+      defaultLogger.debug(
         `Drop multiplexer response with global message id ${globalMessageId} ` +
           `from runtime ${sourceClientId}; expected runtime ${pendingTarget.clientId}`,
       );
@@ -1688,11 +1688,11 @@ export class MultiplexerDaemonHost {
 
   sendMessageToWeb(message: string): void {
     if (!this.enableWebSocket) {
-      defaultLogger.warn("enableWebSocket isn't opened!");
+      defaultLogger.debug("enableWebSocket isn't opened!");
       return;
     }
     if (!this.webSocketController) {
-      defaultLogger.warn("websocket server hasn't started up");
+      defaultLogger.debug("websocket server hasn't started up");
       return;
     }
     this.webSocketController.sendMessageToWeb(message);
@@ -1700,11 +1700,11 @@ export class MultiplexerDaemonHost {
 
   sendMessageToWebClient(webClientId: number, message: string): void {
     if (!this.enableWebSocket) {
-      defaultLogger.warn("enableWebSocket isn't opened!");
+      defaultLogger.debug("enableWebSocket isn't opened!");
       return;
     }
     if (!this.webSocketController) {
-      defaultLogger.warn("websocket server hasn't started up");
+      defaultLogger.debug("websocket server hasn't started up");
       return;
     }
     this.webSocketController.sendMessageToWebClient(webClientId, message);
