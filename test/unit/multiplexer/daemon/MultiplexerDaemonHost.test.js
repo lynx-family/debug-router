@@ -3030,6 +3030,7 @@ describe("MultiplexerDaemonHost", function () {
     const { host } = createHost({
       enableWebSocket: true,
     });
+    const controlServer = attachControlServer(host);
     const closeGate = createDeferred();
     const controller = {
       closeCalls: 0,
@@ -3059,6 +3060,7 @@ describe("MultiplexerDaemonHost", function () {
     await nextTick();
 
     assert.strictEqual(controller.closeCalls, 1);
+    assert.strictEqual(controlServer.stopCalls, 1);
     assert.strictEqual(stopped, false);
 
     closeGate.resolve();
@@ -3144,6 +3146,7 @@ describe("MultiplexerDaemonHost", function () {
     const { host } = createHost({
       enableWebSocket: true,
     });
+    const controlServer = attachControlServer(host);
 
     try {
       const startPromise = host.handleControlRpc(
@@ -3153,6 +3156,7 @@ describe("MultiplexerDaemonHost", function () {
       await detectEntered.promise;
 
       const stopPromise = host.stop();
+      assert.strictEqual(controlServer.stopCalls, 1);
       detectGate.resolve(19001);
 
       assert.deepStrictEqual(await startPromise, {

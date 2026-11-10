@@ -162,7 +162,7 @@ function registerProcessCleanup(host: MultiplexerDaemonHost): void {
         ]);
         return undefined;
       } catch (error: any) {
-        defaultLogger.error(
+        defaultLogger.debug(
           source
             ? `Multiplexer daemon ${source} cleanup failed: ${error?.message}`
             : `Multiplexer daemon cleanup failed: ${error?.message}`,

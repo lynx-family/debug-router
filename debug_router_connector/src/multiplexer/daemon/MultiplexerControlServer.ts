@@ -95,7 +95,7 @@ export class MultiplexerControlServer {
     const server = this.server;
     this.server = null;
 
-    const closePromises: Promise<void>[] = [];
+    const closePromises: Promise<void>[] = [closeNetServer(server)];
     for (const transport of Array.from(this.provisionalTransports)) {
       closePromises.push(transport.end());
     }
@@ -106,13 +106,18 @@ export class MultiplexerControlServer {
       closePromises.push(connection.close());
     }
 
-    await Promise.all([...closePromises, closeNetServer(server)]);
+    await Promise.all(closePromises);
     if (process.platform !== "win32") {
       removeSocketFile(this.controlEndpoint);
     }
   }
 
   private handleSocket(socket: Socket): void {
+    if (!this.server || this.host.closed) {
+      socket.destroy();
+      return;
+    }
+
     /**
      * Tracks a newly connected socket as a provisional connection,
      * waits for and responds to its handshake message, and rejects
@@ -123,6 +128,11 @@ export class MultiplexerControlServer {
     let receivedFirstMessage = false;
 
     const unsubscribeMessage = transport.onMessage((message) => {
+      // Shutdown may begin after accept but before the first message arrives.
+      if (!this.server || this.host.closed) {
+        transport.destroy();
+        return;
+      }
       if (receivedFirstMessage) {
         return;
       }
