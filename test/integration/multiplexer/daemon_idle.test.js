@@ -3,6 +3,18 @@
 // LICENSE file in the root directory of this source tree.
 
 const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const {
+  MultiplexerDaemonHost,
+} = require("../../../debug_router_connector/dist/cjs/src/multiplexer/daemon/MultiplexerDaemonHost");
+const {
+  MultiplexerDiscovery,
+} = require("../../../debug_router_connector/dist/cjs/src/multiplexer/client/MultiplexerDiscovery");
+const {
+  MULTIPLEXER_PROTOCOL_VERSION,
+} = require("../../../debug_router_connector/dist/cjs/src/multiplexer/protocol");
 const {
   createIntegrationContext,
   delay,
@@ -23,6 +35,58 @@ describe("multiplexer integration daemon idle", function () {
     if (context) {
       await context.cleanup();
       context = undefined;
+    }
+  });
+
+  it("closes the control endpoint before waiting for idle WebSocket cleanup", async function () {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mux-idle-stop-"));
+    const endpoint = path.join(dir, "control.sock");
+    let releaseClose;
+    const closeGate = new Promise((resolve) => {
+      releaseClose = resolve;
+    });
+    let notifyClosing;
+    const closing = new Promise((resolve) => {
+      notifyClosing = resolve;
+    });
+    const host = new MultiplexerDaemonHost({
+      controlEndpoint: endpoint,
+      protocolVersion: MULTIPLEXER_PROTOCOL_VERSION,
+      legacyDriverDir: path.join(dir, "legacy"),
+      multiplexerDaemonIdleTimeout: 20,
+      connectionTrace: { enabled: false },
+    });
+    host.webSocketController = {
+      close() {
+        notifyClosing();
+        return closeGate;
+      },
+      getAllWebsocketAppClients: () => new Map(),
+      getAllWebsocketWebClients: () => new Map(),
+    };
+    let stopPromise;
+    host.setIdleTimeoutHandler(() => {
+      stopPromise = host.stop();
+      stopPromise.catch(() => {});
+      return stopPromise;
+    });
+
+    try {
+      await host.start();
+      await closing;
+      const discovery = new MultiplexerDiscovery({
+        controlEndpoint: endpoint,
+        localProtocolVersion: MULTIPLEXER_PROTOCOL_VERSION,
+      });
+      const health = await discovery.probeHealth();
+      assert.strictEqual(health.status, "unusable");
+      assert.strictEqual(health.reason, "unreachable");
+      assert.strictEqual(host.isInUse(), false);
+    } finally {
+      releaseClose();
+      await stopPromise;
+      await host.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 

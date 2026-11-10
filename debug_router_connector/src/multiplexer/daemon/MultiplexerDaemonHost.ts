@@ -309,12 +309,6 @@ export class MultiplexerDaemonHost {
       });
     }
 
-    // WebSocket serving is demand-driven, so serialize it with shutdown as well.
-    if (this.webSocketServerStarting) {
-      await this.webSocketServerStarting.catch(() => {
-        // The startWSServer caller observes the startup error; stop reports cleanup errors.
-      });
-    }
     await this.stopInternal();
   }
 
@@ -333,6 +327,21 @@ export class MultiplexerDaemonHost {
     this.activeWebSocketDriverIds.clear();
     this.unbindPhysicalConnectorEvents();
 
+    // Close the control endpoint before waiting for WebSocket startup or cleanup.
+    const controlServer = this.controlServer;
+    this.controlServer = null;
+    try {
+      await controlServer?.stop();
+    } catch (error) {
+      stopErrors.push(error);
+    }
+
+    if (this.webSocketServerStarting) {
+      await this.webSocketServerStarting.catch(() => {
+        // The startWSServer caller observes the startup error; stop reports cleanup errors.
+      });
+    }
+
     const webSocketController = this.webSocketController;
     const webSocketServerInfo = this.webSocketServerInfo;
     this.webSocketController = null;
@@ -348,14 +357,6 @@ export class MultiplexerDaemonHost {
           reason: "daemon_stop",
         });
       }
-    } catch (error) {
-      stopErrors.push(error);
-    }
-
-    const controlServer = this.controlServer;
-    this.controlServer = null;
-    try {
-      await controlServer?.stop();
     } catch (error) {
       stopErrors.push(error);
     }
@@ -391,6 +392,10 @@ export class MultiplexerDaemonHost {
 
   setShutdownHandler(handler: () => void | Promise<void>): void {
     this.shutdownHandler = handler;
+  }
+
+  get closed(): boolean {
+    return this.lifecycleStatus === "closed";
   }
 
   isInUse(): boolean {

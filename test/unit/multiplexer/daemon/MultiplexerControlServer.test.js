@@ -154,6 +154,40 @@ describe("MultiplexerControlServer", function () {
     assert.strictEqual(server.connections.size, 0);
   });
 
+  it("rejects new sockets once the host starts shutting down", async function () {
+    await server.start();
+    host.closed = true;
+    const transport = await connectTransport(endpoint);
+    const messages = [];
+    transport.onMessage((message) => messages.push(message));
+    await new Promise((resolve) => transport.onClose(resolve));
+
+    assert.deepStrictEqual(messages, []);
+    assert.deepStrictEqual(connected, []);
+    assert.strictEqual(server.provisionalTransports.size, 0);
+  });
+
+  for (const request of [
+    { kind: "health" },
+    { kind: "register", reportServiceEnabled: false },
+  ]) {
+    it(`rejects an accepted ${request.kind} handshake after shutdown starts`, async function () {
+      await server.start();
+      const transport = await connectTransport(endpoint);
+      const messages = [];
+      transport.onMessage((message) => messages.push(message));
+      const closed = new Promise((resolve) => transport.onClose(resolve));
+      host.closed = true;
+      transport.send(request);
+      await closed;
+      await waitForProvisionalTransportsToBeRemoved(server);
+
+      assert.deepStrictEqual(messages, []);
+      assert.deepStrictEqual(connected, []);
+      assert.strictEqual(server.connections.size, 0);
+    });
+  }
+
   it("registers only after Register and unregisters on close", async function () {
     await server.start();
     const transport = await connectTransport(endpoint);
@@ -300,7 +334,10 @@ describe("MultiplexerControlServer", function () {
     assert.strictEqual(server.provisionalTransports.size, 0);
   });
 
-  for (const code of ["invalid-control-handshake", "control-handshake-timeout"]) {
+  for (const code of [
+    "invalid-control-handshake",
+    "control-handshake-timeout",
+  ]) {
     it(`cleans up when sending ${code} fails`, async function () {
       const originalSend = MultiplexerControlTransport.prototype.send;
       let sendAttempted = false;
