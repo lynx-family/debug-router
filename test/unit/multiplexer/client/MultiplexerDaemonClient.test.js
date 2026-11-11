@@ -34,14 +34,14 @@ describe("MultiplexerDaemonClient", function () {
   let client;
   let ensureCalls;
   let connectedIds;
-  let reportFlags;
+  let registrations;
 
   beforeEach(function () {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "debug-router-client-"));
     endpoint = path.join(tempDir, "control.sock");
     ensureCalls = 0;
     connectedIds = [];
-    reportFlags = [];
+    registrations = [];
   });
 
   afterEach(async function () {
@@ -58,9 +58,9 @@ describe("MultiplexerDaemonClient", function () {
         isInUse() {
           return connectedIds.length > 0;
         },
-        handleControlConnected(id, reportEnabled) {
+        handleControlConnected(id, reportEnabled, _facadeOption, websocketHost) {
           connectedIds.push(id);
-          reportFlags.push(reportEnabled);
+          registrations.push({ reportEnabled, websocketHost });
           server.sendToControl(id, {
             kind: "event",
             event: "snapshot",
@@ -101,6 +101,7 @@ describe("MultiplexerDaemonClient", function () {
       controlEndpoint: endpoint,
       rpcTimeout: option.rpcTimeout ?? 1000,
       reportServiceEnabled: option.reportServiceEnabled,
+      websocketHost: option.websocketHost,
       debugInfo: option.debugInfo,
       now: () => 123,
     });
@@ -634,8 +635,8 @@ describe("MultiplexerDaemonClient", function () {
     assert.deepStrictEqual(firstStates, []);
     assert.deepStrictEqual(secondStates, ["connected", "disconnected"]);
   });
-  it("advertises the report flag on every registration, including reconnect", async function () {
-    await start({ reportServiceEnabled: true });
+  it("advertises the report flag and WebSocket host again after reconnect", async function () {
+    await start({ reportServiceEnabled: true, websocketHost: "192.168.1.23" });
     await client.connect();
     // close() is terminal in MR6; simulate a remote disconnect to reconnect.
     const disconnected = new Promise((resolve) => {
@@ -646,7 +647,10 @@ describe("MultiplexerDaemonClient", function () {
     await server.connections.get(connectedIds[0]).close();
     await disconnected;
     await client.connect();
-    assert.deepStrictEqual(reportFlags, [true, true]);
+    assert.deepStrictEqual(registrations, [
+      { reportEnabled: true, websocketHost: "192.168.1.23" },
+      { reportEnabled: true, websocketHost: "192.168.1.23" },
+    ]);
     const report = {
       kind: "event",
       event: "report",

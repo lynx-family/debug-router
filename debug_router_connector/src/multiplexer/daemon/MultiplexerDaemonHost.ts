@@ -167,6 +167,8 @@ export class MultiplexerDaemonHost {
   private controlServer: MultiplexerControlServer | null = null;
   private webSocketController: WebSocketController | null = null;
   private webSocketServerInfo: WebSocketServerInfo | undefined;
+  private webSocketStartupHost?: string;
+  private automaticWebSocketAddress?: Promise<string>;
   // Watcher state is keyed by device serial; concurrent starts share one Promise per device.
   private readonly clientWatcherStartedDeviceIds = new Set<string>();
   private readonly clientWatcherStartingByDeviceId = new Map<
@@ -192,6 +194,7 @@ export class MultiplexerDaemonHost {
     },
   );
   private readonly webSocketRequesterControlIds = new Set<number>();
+  private readonly webSocketHostsByControlId = new Map<number, string>();
   private readonly activeWebSocketDriverIds = new Set<number>();
   private readonly legacyOwnershipGuard: LegacyOwnershipGuard;
   private idleTimer: NodeJS.Timeout | null = null;
@@ -324,6 +327,7 @@ export class MultiplexerDaemonHost {
     this.autoConnectControlIds.clear();
     this.enabledManagers.clear();
     this.webSocketRequesterControlIds.clear();
+    this.webSocketHostsByControlId.clear();
     this.activeWebSocketDriverIds.clear();
     this.unbindPhysicalConnectorEvents();
 
@@ -494,8 +498,12 @@ export class MultiplexerDaemonHost {
       enableDesktop: false,
       enableNetworkDevice: false,
     },
+    websocketHost?: string,
   ): void {
     this.activeControlIds.add(controlId);
+    if (websocketHost !== undefined) {
+      this.webSocketHostsByControlId.set(controlId, websocketHost);
+    }
     defaultLogger.debug(
       `Multiplexer control connected: controlId=${controlId}, activeControlCount=${this.activeControlIds.size}`,
     );
@@ -723,6 +731,7 @@ export class MultiplexerDaemonHost {
       activeControlCount: this.activeControlIds.size,
     });
     this.webSocketRequesterControlIds.delete(controlId);
+    this.webSocketHostsByControlId.delete(controlId);
     this.releasePhysicalDeviceManagers(controlId);
     // Remaining shared runtimes stay alive; routes belong to their requester.
     this.rejectRoutes(
@@ -1077,32 +1086,22 @@ export class MultiplexerDaemonHost {
 
     // Subscribe before awaiting startup so this control cannot miss concurrent WebSocket snapshots.
     this.webSocketRequesterControlIds.add(controlId);
+    const host = this.webSocketHostsByControlId.get(controlId);
     try {
-      if (this.webSocketServerStarted) {
-        const info = this.webSocketServerInfo;
-        if (!info) {
-          throw {
-            code: "websocket-server-info-unavailable",
-            message:
-              "The multiplexer daemon WebSocket server information is unavailable",
-          };
-        }
-        this.sendSnapshot([controlId]);
-        return info;
-      }
-
-      if (!this.webSocketServerStarting) {
+      if (!this.webSocketServerStarted && !this.webSocketServerStarting) {
         // All concurrent requesters observe the same startup attempt and failure cleanup.
-        this.webSocketServerStarting = this.startWebSocketServerInternal()
+        this.webSocketServerStarting = this.startWebSocketServerInternal(host)
           .then((info) => {
             this.webSocketServerStarted = true;
             this.webSocketServerInfo = info;
+            this.webSocketStartupHost = host;
             this.connectionTraceRecorder?.recordWebsocketServerStarted(info);
             return info;
           })
           .catch(async (error) => {
             const webSocketController = this.webSocketController;
             this.webSocketController = null;
+            this.automaticWebSocketAddress = undefined;
             try {
               await webSocketController?.close();
             } catch (closeError) {
@@ -1120,19 +1119,50 @@ export class MultiplexerDaemonHost {
             this.webSocketServerStarting = null;
           });
       }
-      const info = await this.webSocketServerStarting;
+      const info =
+        this.webSocketServerInfo ?? (await this.webSocketServerStarting);
+      if (!info) {
+        throw {
+          code: "websocket-server-info-unavailable",
+          message:
+            "The multiplexer daemon WebSocket server information is unavailable",
+        };
+      }
+      // All callers share the listener. Advertise the address each caller requested.
+      const result =
+        host === this.webSocketStartupHost
+          ? info
+          : {
+              ...info,
+              host: `${host ?? (await this.getAutomaticWebSocketAddress())}:${
+                info.port
+              }`,
+            };
       this.sendSnapshot([controlId]);
-      return info;
+      return result;
     } catch (error) {
       this.webSocketRequesterControlIds.delete(controlId);
       throw error;
     }
   }
 
-  private async startWebSocketServerInternal(): Promise<WebSocketServerInfo> {
+  private getAutomaticWebSocketAddress(): Promise<string> {
+    this.automaticWebSocketAddress ??= InternalIpDetector.detectInternalIPv4()
+      .then(({ selected }) => selected.address)
+      .catch((error) => {
+        this.automaticWebSocketAddress = undefined;
+        throw error;
+      });
+    return this.automaticWebSocketAddress;
+  }
+
+  private async startWebSocketServerInternal(
+    host?: string,
+  ): Promise<WebSocketServerInfo> {
     const wssPort = await detectPort(DEFAULT_DEV_SERVE_PORT);
-    const detectionResult = await InternalIpDetector.detectInternalIPv4();
-    const wssHost = `${detectionResult.selected.address}:${wssPort}`;
+    const wssHost = `${
+      host ?? (await this.getAutomaticWebSocketAddress())
+    }:${wssPort}`;
     const info: WebSocketServerInfo = {
       port: wssPort,
       host: wssHost,

@@ -210,8 +210,13 @@ export function isMultiplexerRegisterRequest(
     value.kind === "register" &&
     isBoolean(value.reportServiceEnabled) &&
     isOptional(value.connectorFacadeOption, isConnectorFacadeOption) &&
+    isOptional(value.websocketHost, isWebSocketHost) &&
     isOptional(value.debugInfo, isMultiplexerDebugInfo)
   );
+}
+
+export function isWebSocketHost(value: unknown): value is string {
+  return isString(value) && /^[a-z\d][a-z\d._-]*$/i.test(value);
 }
 
 export function isMultiplexerRegisterResponse(

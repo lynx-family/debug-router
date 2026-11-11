@@ -424,6 +424,21 @@ describe("multiplexer protocol validation", function () {
     );
   });
 
+  it("validates the optional WebSocket host on Register", function () {
+    for (const websocketHost of [undefined, "192.168.1.23", "dev-machine.local"]) {
+      assert.strictEqual(
+        isMultiplexerRegisterRequest({ kind: "register", reportServiceEnabled: false, websocketHost }),
+        true
+      );
+    }
+    for (const websocketHost of [null, 123, "", " ", "::1", "http://host", "host:1234", "host/path", "host&room=other"]) {
+      assert.strictEqual(
+        isMultiplexerRegisterRequest({ kind: "register", reportServiceEnabled: false, websocketHost }),
+        false
+      );
+    }
+  });
+
   it("validates every control RPC request method branch", function () {
     const validCases = [
       [
@@ -585,6 +600,7 @@ describe("multiplexer protocol validation", function () {
       createRpcRequest("disconnectDevice", { deviceId: 1 }),
       createRpcRequest("shutdownDaemon", { reason: 1 }),
       createRpcRequest("startWSServer", { unexpected: true }),
+      createRpcRequest("startWSServer", { host: "192.168.1.23" }),
       createRpcRequest("sendMessageToWeb", { message: "hello" }),
       createRpcRequest("sendMessageToApp", {
         id: 1,

@@ -3071,6 +3071,64 @@ describe("MultiplexerDaemonHost", function () {
     assert.strictEqual(host.webSocketServerStarted, false);
   });
 
+  for (const firstHost of [undefined, "192.168.1.23"]) {
+    it(`keeps per-caller WebSocket addresses when the first host is ${firstHost ?? "automatic"}`, async function () {
+      let detectionCalls = 0;
+      const instances = [];
+      class FakeWebSocketController {
+        constructor(_host, option) {
+          instances.push(this);
+          setImmediate(() => option.callback());
+        }
+        getAllWebsocketAppClients() {
+          return new Map();
+        }
+        getAllWebsocketWebClients() {
+          return new Map();
+        }
+        close() {}
+      }
+      const reset = replaceWebSocketStartDependencies({
+        detectPortImpl: async () => 19001,
+        detectIPv4Impl: async () => {
+          detectionCalls++;
+          return { selected: { address: "10.0.0.5" } };
+        },
+        WebSocketControllerCtor: FakeWebSocketController,
+      });
+      const { host } = createHost({
+        enableWebSocket: true,
+        websocketOption: { roomId: "shared-room" },
+      });
+      attachControlServer(host);
+      const start = (controlId) =>
+        host.handleControlRpc(controlId, createRpcRequest("startWSServer", {}));
+      try {
+        host.handleControlConnected(1, false, { manualConnect: true }, firstHost);
+        host.handleControlConnected(
+          2, false, { manualConnect: true }, "dev-machine.local"
+        );
+        host.handleControlConnected(3, false, { manualConnect: true });
+        const [first, second] = await Promise.all([start(1), start(2)]);
+        assert.strictEqual(first.host, `${firstHost ?? "10.0.0.5"}:19001`);
+        assert.strictEqual(second.host, "dev-machine.local:19001");
+        assert.strictEqual(detectionCalls, firstHost === undefined ? 1 : 0);
+        assert.deepStrictEqual(await start(3), {
+          host: "10.0.0.5:19001",
+          port: 19001,
+          roomId: "shared-room",
+        });
+        assert.deepStrictEqual(await start(1), first);
+        assert.deepStrictEqual(await start(2), second);
+        assert.strictEqual(detectionCalls, 1);
+        assert.strictEqual(instances.length, 1);
+      } finally {
+        await host.stop();
+        reset();
+      }
+    });
+  }
+
   it("startWSServer shares in-flight starts and is idempotent after success", async function () {
     const { host } = createHost({
       enableWebSocket: true,
