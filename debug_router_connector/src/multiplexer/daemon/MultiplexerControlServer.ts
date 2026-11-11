@@ -167,6 +167,7 @@ export class MultiplexerControlServer {
           connection.controlId,
           message.reportServiceEnabled,
           message.connectorFacadeOption,
+          message.websocketHost,
         );
         return;
       }

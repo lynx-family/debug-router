@@ -33,6 +33,7 @@ import {
   WebSocketClientSnapshot,
   WebSocketServerInfo,
 } from "../multiplexer/protocol";
+import { isWebSocketHost } from "../multiplexer/protocol/validation";
 import { MultiplexerDaemonClient } from "../multiplexer/client/MultiplexerDaemonClient";
 import {
   DEFAULT_MULTIPLEXER_STARTUP_TIMEOUT,
@@ -86,6 +87,7 @@ class WebSocketServerCompat {
  * | websocketOption              | Optional shared WebSocket settings; see nested fields below.        |
  * | websocketOption.port         | Legacy compatibility field; ignored, port selection starts at 19783. |
  * | websocketOption.roomId       | Optional room identifier returned in WebSocket RoomJoined.          |
+ * | websocketOption.host         | IPv4 address or hostname advertised by this Connector's WebSocket URL. |
  * | connectionTrace              | Optional daemon-owned tracing: enabled, output, and bufferSize.     |
  * | connectionTrace.enabled      | Enable tracing; omission follows the trace output/environment rules. |
  * | connectionTrace.output       | Output file path; WritableStream cannot cross IPC and is ignored.   |
@@ -106,7 +108,8 @@ class WebSocketServerCompat {
  *
  * Capability flags normally filter this facade's mirrors and events. Transport,
  * WebSocket, trace, and idle options configure a newly spawned shared daemon;
- * later facades do not reconfigure an already running daemon.
+ * later facades do not reconfigure an already running daemon. Each facade can
+ * choose its advertised WebSocket host independently.
  *
  * About reportService:
  * The service stays in the Connector process and is not passed to the daemon.
@@ -151,6 +154,7 @@ export type DebugRouterConnectorOption = PhysicalConnectorOption & {
   websocketOption?: {
     port?: number;
     roomId?: string;
+    host?: string;
   };
 };
 
@@ -177,6 +181,7 @@ export class DebugRouterConnector {
   private readonly reportService: DriverReportService | null;
   private readonly daemonClient: MultiplexerDaemonClient;
   private readonly enableDebugMode: boolean;
+  private readonly websocketHost?: string;
   private readonly websocketAppClients: Map<
     number,
     MultiplexerWebSocketClient
@@ -217,6 +222,12 @@ export class DebugRouterConnector {
       websocketOption: {},
     },
   ) {
+    const websocketHost = option.websocketOption?.host;
+    if (websocketHost !== undefined && !isWebSocketHost(websocketHost)) {
+      throw new Error(
+        "websocketOption.host must be an IPv4 address or hostname",
+      );
+    }
     // Reporting implementations can contain circular SDK state and never cross
     // the daemon boundary, including through configuration logging.
     const msg = "DebugRouterOption:" + JSON.stringify(option);
@@ -235,6 +246,7 @@ export class DebugRouterConnector {
     this.enableNetworkDevice = option.enableNetworkDevice ?? false;
     this.enableDebugMode = option.enableDebugMode ?? false;
     this.roomId = option.websocketOption?.roomId;
+    this.websocketHost = websocketHost;
     if (this.enableDebugMode) {
       defaultLogger.warn(
         "enableDebugMode is enabled; every daemon access that needs a new control connection will replace the daemon shared by this multiplexerDataDir using this Connector's local daemon entry and exact capability options, and closing this Connector will force-stop that daemon and clean its artifacts.",
@@ -274,6 +286,7 @@ export class DebugRouterConnector {
       controlEndpoint: paths.controlEndpoint,
       rpcTimeout: option.multiplexerRpcTimeout,
       reportServiceEnabled: this.reportService !== null,
+      websocketHost,
       connectorFacadeOption: {
         ...createDaemonPhysicalConnectorOption(option),
         enableWebSocket: this.enableWebSocket,
@@ -755,12 +768,15 @@ export class DebugRouterConnector {
   }
 
   private applyWebSocketServerInfo(info: WebSocketServerInfo): void {
+    // Older daemons ignore websocketHost at registration and listen on all interfaces.
+    const host =
+      this.websocketHost === undefined
+        ? info.host
+        : `${this.websocketHost}:${info.port}`;
     this.wssPort = info.port;
-    this.wssHost = info.host;
+    this.wssHost = host;
     this.roomId = info.roomId;
-    this.wss = new WebSocketServerCompat(
-      `ws://${info.host}/mdevices/page/android`,
-    );
+    this.wss = new WebSocketServerCompat(`ws://${host}/mdevices/page/android`);
   }
 
   private shouldExposeWebSocketState(): boolean {

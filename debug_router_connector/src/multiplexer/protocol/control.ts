@@ -69,6 +69,8 @@ export type MultiplexerRegisterRequest = {
   reportServiceEnabled: boolean;
   // Protocol v1 clients omit this field; v2 clients always send it.
   connectorFacadeOption?: ConnectorFacadeOption;
+  /** Address advertised for this control connection's WebSocket requests. */
+  websocketHost?: string;
   debugInfo?: MultiplexerDebugInfo;
 };
 

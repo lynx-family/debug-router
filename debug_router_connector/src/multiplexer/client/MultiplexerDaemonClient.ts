@@ -47,6 +47,7 @@ export type MultiplexerDaemonClientOption = {
   rpcTimeout?: number;
   reportServiceEnabled?: boolean;
   connectorFacadeOption: ConnectorFacadeOption;
+  websocketHost?: string;
   debugInfo?: MultiplexerDebugInfo;
 
   // only used for tests or embedding
@@ -76,6 +77,7 @@ export class MultiplexerDaemonClient {
   private readonly rpcTimeout: number;
   private readonly reportServiceEnabled: boolean;
   private readonly connectorFacadeOption: ConnectorFacadeOption;
+  private readonly websocketHost?: string;
   private readonly debugInfo?: MultiplexerDebugInfo;
   private readonly now: () => number;
   private eventListener?: (event: ControlEvent) => void;
@@ -96,6 +98,7 @@ export class MultiplexerDaemonClient {
     this.rpcTimeout = option.rpcTimeout ?? DEFAULT_MULTIPLEXER_RPC_TIMEOUT;
     this.reportServiceEnabled = option.reportServiceEnabled ?? false;
     this.connectorFacadeOption = option.connectorFacadeOption;
+    this.websocketHost = option.websocketHost;
     this.debugInfo = option.debugInfo
       ? {
           protocolVersion:
@@ -341,6 +344,9 @@ export class MultiplexerDaemonClient {
           kind: "register",
           reportServiceEnabled: this.reportServiceEnabled,
           connectorFacadeOption: this.connectorFacadeOption,
+          ...(this.websocketHost === undefined
+            ? {}
+            : { websocketHost: this.websocketHost }),
           ...(debugInfo ? { debugInfo } : {}),
         };
         if (!transport.send(request) && !transport.closed) {

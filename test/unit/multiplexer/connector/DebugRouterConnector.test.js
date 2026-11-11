@@ -1407,6 +1407,57 @@ describe("DebugRouterConnector multiplexer facade", function () {
     }
   });
 
+  it("registers its WebSocket host and starts with empty params on startup and recovery", async function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes({
+      results: [
+        [
+          "startWSServer",
+          { port: 19783, host: "10.0.0.5:19783", roomId: "room-2" },
+        ],
+      ],
+    });
+    const connector = new DebugRouterConnector({
+      manualConnect: true,
+      enableWebSocket: true,
+      websocketOption: { host: "192.168.1.23" },
+    });
+    try {
+      assert.strictEqual(state.clients[0].option.websocketHost, "192.168.1.23");
+      await connector.startWSServer();
+      assert.strictEqual(connector.wssHost, "192.168.1.23:19783");
+      assert.strictEqual(connector.roomId, "room-2");
+      assert.strictEqual(
+        connector.wss.wssPath,
+        "ws://192.168.1.23:19783/mdevices/page/android"
+      );
+      connector.handleDaemonDisconnected();
+      await connector.restoreDesiredState();
+      assert.deepStrictEqual(
+        state.clients[0].calls.filter((call) => call.method === "startWSServer"),
+        [
+          { method: "startWSServer", params: {} },
+          { method: "startWSServer", params: {} },
+        ]
+      );
+    } finally {
+      await connector.close();
+      restore();
+    }
+  });
+
+  it("rejects an invalid WebSocket host before creating a daemon client", function () {
+    const { DebugRouterConnector, state, restore } = loadConnectorWithFakes();
+    try {
+      assert.throws(
+        () => new DebugRouterConnector({ websocketOption: { host: "http://host" } }),
+        /websocketOption.host/
+      );
+      assert.strictEqual(state.clients.length, 0);
+    } finally {
+      restore();
+    }
+  });
+
   for (const fails of [false, true]) {
     it(`forwards concurrent websocket starts and ${
       fails
