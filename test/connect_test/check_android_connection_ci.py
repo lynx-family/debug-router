@@ -79,11 +79,21 @@ def TestAndroidCon(args):
   if (args.conection_type == "websocket"):
     print('start: websocket common test.')
     command_run = "../../../buildtools/node/bin/npm install && ../../../buildtools/node/bin/node websocket.js"
+    CheckExecute(command_run)
+    print('start: websocket multi connection test')
+    command_run = "../../../buildtools/node/bin/npm install && ../../../buildtools/node/bin/node multi_connection_test.js"
+    CheckExecute(command_run)
   else:
     if(args.conection_type == "usb"):
-      print('start: usb common test and large message test.')
-      command_run = "../../../buildtools/node/bin/npm install && ../../../buildtools/node/bin/node usb.js && ../../../buildtools/node/bin/node large_message_test.js"
-  CheckExecute(command_run)
+      print('start: usb common test.')
+      command_run = "../../../buildtools/node/bin/npm install && ../../../buildtools/node/bin/node usb.js"
+      CheckExecute(command_run)
+      print('start: usb large message test')
+      command_run = "../../../buildtools/node/bin/npm install && ../../../buildtools/node/bin/node large_message_test.js"
+      CheckExecute(command_run)
+      print('start: usb multi connection test')
+      command_run = "../../../buildtools/node/bin/npm install && ../../../buildtools/node/bin/node multi_connection_test.js"
+      CheckExecute(command_run)
 
 def CheckBuildDebugRouterTestApk(args):
   command = './gradlew clean'
