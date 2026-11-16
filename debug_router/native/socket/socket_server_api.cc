@@ -78,6 +78,7 @@ void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
       }
       old_client_ = usb_client_;
       usb_client_ = client;
+      temp_usb_client_.reset();
       should_notify = true;
     }
     LOGI("SocketServerApi OnOpen: replace old client.");
