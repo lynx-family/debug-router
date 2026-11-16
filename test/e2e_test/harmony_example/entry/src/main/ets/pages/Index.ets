@@ -41,17 +41,17 @@ class testGlobalHandler implements DebugRouterGlobalHandlerHarmony {
   }
 }
 
-class testSessionHandler implements DebugRouterSessionHandlerHarmony {
-  public onSessionCreate(session_id: number, url: string): void {
-    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testSessionHandler: onSessionCreate. session_id: ' + session_id + ' url: ' + url);
+class testTargetHandler implements DebugRouterSessionHandlerHarmony {
+  public onSessionCreate(targetId: number, url: string): void {
+    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testTargetHandler: onSessionCreate. targetId: ' + targetId + ' url: ' + url);
   }
 
-  public onSessionDestroy(session_id: number): void {
-    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testSessionHandler: onSessionDestroy. session_id: ' + session_id);
+  public onSessionDestroy(targetId: number): void {
+    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testTargetHandler: onSessionDestroy. targetId: ' + targetId);
   }
 
-  public onMessage(message: string, type: string, session_id: number): void {
-    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testSessionHandler: onMessage. message: ' + message + ' type: ' + type + ' session_id: ' + session_id);
+  public onMessage(message: string, type: string, targetId: number): void {
+    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testTargetHandler: onMessage. message: ' + message + ' type: ' + type + ' targetId: ' + targetId);
   }
 }
 
@@ -67,13 +67,13 @@ class testMessageHandler implements DebugRouterMessageHandlerHarmony {
   }
 }
 
-class testSlotDelegate implements DebugRouterSlotDelegate {
+class testTargetDelegate implements DebugRouterSlotDelegate {
   public getTemplateUrl(): string {
     return 'test templateUrl'
   }
 
   public onMessage(message: string, type: string): void {
-    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testSlotDelegate: onMessage.');
+    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: testTargetDelegate: onMessage.');
   }
 }
 
@@ -96,17 +96,17 @@ struct Index {
     DebugRouter.addGlobalHandler(new testGlobalHandler());
 
     // test DebugRouterSessionHandler
-    DebugRouter.addSessionHandler(new testSessionHandler());
+    DebugRouter.addSessionHandler(new testTargetHandler());
 
     // test DebugRouterMessageHandler
     DebugRouter.addMessageHandler(new testMessageHandler());
 
-    // tset add slot and sessionhandler
-    const delegate = new testSlotDelegate();
-    let slot: DebugRouterSlot = new DebugRouterSlot();
-    slot.setDelegate(delegate);
-    let sessionId: number = DebugRouter.plug(slot);
-    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: add a new slot get sessionId: ' + sessionId);
+    // Test target registration and callbacks.
+    const delegate = new testTargetDelegate();
+    let target: DebugRouterSlot = new DebugRouterSlot();
+    target.setDelegate(delegate);
+    let targetId: number = DebugRouter.plug(target);
+    hilog.info(DOMAIN, 'Index', '%{public}s', 'Index: add a new target get targetId: ' + targetId);
   }
   build() {
     Column() {

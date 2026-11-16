@@ -42,7 +42,7 @@ typedef enum { DISCONNECTED = 0, CONNECTING, CONNECTED } ConnectionState;
 
 class DebugRouterSlot;
 class DebugRouterGlobalHandlerDelegate;
-class DebugRouterSessionHandlerDelegate;
+class DebugRouterTargetHandlerDelegate;
 
 // DebugRouter for Common
 class DEBUG_ROUTER_EXPORT DebugRouter {
@@ -56,19 +56,20 @@ class DEBUG_ROUTER_EXPORT DebugRouter {
   void SendAsync(const std::string &message);
 
   void SendDataAsync(const std::string &data, const std::string &type,
-                     int32_t session);
+                     int32_t target_id);
 
   void SendDataAsync(const std::string &data, const std::string &type,
-                     int32_t session, bool is_object);
+                     int32_t target_id, bool is_object);
 
-  int32_t Plug(const std::shared_ptr<DebugRouterSlot> &slot);
+  int32_t Plug(const std::shared_ptr<DebugRouterSlot> &target);
 
-  void Pull(int32_t session_id);
+  void Pull(int32_t target_id);
 
   void AddGlobalHandler(DebugRouterGlobalHandler *handler);
 
   bool RemoveGlobalHandler(DebugRouterGlobalHandler *handler);
 
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   void AddSessionHandler(DebugRouterSessionHandler *handler);
 
   bool RemoveSessionHandler(DebugRouterSessionHandler *handler);
@@ -88,9 +89,10 @@ class DEBUG_ROUTER_EXPORT DebugRouter {
   void AddStateListener(
       const std::shared_ptr<DebugRouterStateListener> &listener);
 
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   void EnableAllSessions();
-  // session_id must be > 0.
-  void EnableSingleSession(int32_t session_id);
+  // target_id must be > 0.
+  void EnableSingleSession(int32_t target_id);
   void EnableDebugChannel();
   void DisableDebugChannel();
   bool IsDebugChannelEnabled();
@@ -105,7 +107,7 @@ class DEBUG_ROUTER_EXPORT DebugRouter {
   DebugRouter();
 
   std::map<DebugRouterGlobalHandler *, int> global_handlers_map_;
-  std::map<DebugRouterSessionHandler *, int> session_handlers_map_;
+  std::map<DebugRouterSessionHandler *, int> target_handlers_map_;
 };
 
 }  // namespace common

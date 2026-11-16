@@ -10,10 +10,11 @@
 namespace debugrouter {
 namespace android {
 
-DebugRouterReportAndroid::DebugRouterReportAndroid(JNIEnv *env, jobject slot)
+DebugRouterReportAndroid::DebugRouterReportAndroid(JNIEnv *env,
+                                                   jobject report_delegate)
     : jobj_ptr_(std::make_unique<
                 debugrouter::common::android::ScopedGlobalJavaRef<jobject>>(
-          env, slot)) {}
+          env, report_delegate)) {}
 
 void DebugRouterReportAndroid::report(const std::string &eventName,
                                       const std::string &category,

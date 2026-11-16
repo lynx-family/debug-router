@@ -11,7 +11,7 @@
 #include "debug_router/native/core/debug_router_config.h"
 #include "debug_router/native/core/debug_router_message_handler.h"
 #include "debug_router/native/core/debug_router_state_listener.h"
-#include "debug_router/native/core/native_slot.h"
+#include "debug_router/native/core/native_target.h"
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
 #include "debug_router/native/net/socket_server_client.h"
@@ -40,28 +40,28 @@ class MessageHandlerCore : public processor::MessageHandler {
     return DebugRouterCore::GetInstance().app_info_;
   }
 
-  std::unordered_map<int, std::string> GetSessionList() override {
-    std::unordered_map<int, std::string> session_list;
+  std::unordered_map<int, std::string> GetTargetList() override {
+    std::unordered_map<int, std::string> target_list;
     auto& core = DebugRouterCore::GetInstance();
-    const bool enable_all_sessions =
-        core.enable_all_sessions_.load(std::memory_order_relaxed);
-    std::unordered_set<int32_t> enabled_session_ids;
-    if (!enable_all_sessions) {
-      std::shared_lock lock(core.enabled_sessions_mutex_);
-      enabled_session_ids = core.enabled_session_ids_;
+    const bool enable_all_targets =
+        core.enable_all_targets_.load(std::memory_order_relaxed);
+    std::unordered_set<int32_t> enabled_target_ids;
+    if (!enable_all_targets) {
+      std::shared_lock lock(core.enabled_targets_mutex_);
+      enabled_target_ids = core.enabled_target_ids_;
     }
 
-    std::shared_lock lock(core.slots_mutex_);
-    for (const auto& slot : core.slots_) {
-      if (!enable_all_sessions && enabled_session_ids.count(slot.first) == 0) {
+    std::shared_lock lock(core.targets_mutex_);
+    for (const auto& target : core.targets_) {
+      if (!enable_all_targets && enabled_target_ids.count(target.first) == 0) {
         continue;
       }
-      Json::Value session_info;
-      session_info["type"] = slot.second->GetType();
-      session_info["url"] = slot.second->GetUrl();
-      session_list[slot.first] = session_info.toStyledString();
+      Json::Value target_info;
+      target_info["type"] = target.second->GetType();
+      target_info["url"] = target.second->GetUrl();
+      target_list[target.first] = target_info.toStyledString();
     }
-    return session_list;
+    return target_list;
   }
 
   std::string HandleAppAction(const std::string& method,
@@ -83,9 +83,9 @@ class MessageHandlerCore : public processor::MessageHandler {
     }
   }
 
-  void OnMessage(const std::string& type, int session_id,
+  void OnMessage(const std::string& type, int target_id,
                  const std::string& message) override {
-    if (session_id < 0) {
+    if (target_id < 0) {
       std::vector<std::shared_ptr<DebugRouterGlobalHandler>> handlers;
       {
         std::shared_lock lock(
@@ -104,46 +104,45 @@ class MessageHandlerCore : public processor::MessageHandler {
     }
 
     // Defensive second-layer filtering: transport-level filtering should
-    // already drop inactive session-bound messages, but keep this guard here
-    // so raw/custom paths cannot accidentally fan out inactive session_id > 0
+    // already drop inactive target-bound messages, but keep this guard here
+    // so raw/custom paths cannot accidentally fan out inactive target_id > 0
     // payloads to handlers if they bypass the transport helper.
-    if (!DebugRouterCore::GetInstance().isEnableAllSessions() &&
-        session_id > 0 &&
-        !DebugRouterCore::GetInstance().isActiveSession(session_id)) {
+    if (!DebugRouterCore::GetInstance().isEnableAllTargets() && target_id > 0 &&
+        !DebugRouterCore::GetInstance().isActiveTarget(target_id)) {
       return;
     }
 
     {
-      std::vector<std::shared_ptr<DebugRouterSessionHandler>> handlers;
+      std::vector<std::shared_ptr<DebugRouterTargetHandler>> handlers;
       {
         std::shared_lock lock(
-            DebugRouterCore::GetInstance().session_handler_mutex_);
-        const auto& session_handler_map =
-            DebugRouterCore::GetInstance().session_handler_map_;
-        handlers.reserve(session_handler_map.size());
-        for (auto it : session_handler_map) {
+            DebugRouterCore::GetInstance().target_handler_mutex_);
+        const auto& target_handler_map =
+            DebugRouterCore::GetInstance().target_handler_map_;
+        handlers.reserve(target_handler_map.size());
+        for (auto it : target_handler_map) {
           handlers.push_back(it.second);
         }
       }
       for (const auto& handler : handlers) {
-        handler->OnMessage(message, type, session_id);
+        handler->OnMessage(message, type, target_id);
       }
     }
 
-    // Never hold slots_mutex_ while invoking app callbacks.
-    // Otherwise Pull(session) may block on UI thread and trigger ANR if the
+    // Never hold targets_mutex_ while invoking app callbacks.
+    // Otherwise Pull(target_id) may block on UI thread and trigger ANR if the
     // callback is slow / re-enters DebugRouter.
-    std::shared_ptr<core::NativeSlot> slot;
+    std::shared_ptr<core::NativeTarget> target;
     {
-      std::shared_lock lock(DebugRouterCore::GetInstance().slots_mutex_);
-      const auto& slots = DebugRouterCore::GetInstance().slots_;
-      auto it = slots.find(session_id);
-      if (it != slots.end()) {
-        slot = it->second;
+      std::shared_lock lock(DebugRouterCore::GetInstance().targets_mutex_);
+      const auto& targets = DebugRouterCore::GetInstance().targets_;
+      auto it = targets.find(target_id);
+      if (it != targets.end()) {
+        target = it->second;
       }
     }
-    if (slot) {
-      slot->OnMessage(message, type);
+    if (target) {
+      target->OnMessage(message, type);
     }
   }
 
@@ -184,7 +183,7 @@ DebugRouterCore& DebugRouterCore::GetInstance() {
 DebugRouterCore::DebugRouterCore()
     : connection_state_(DISCONNECTED),
       current_transceiver_(nullptr),
-      max_session_id_(0),
+      max_target_id_(0),
       report_(nullptr),
       processor_(nullptr),
       retry_times_(0),
@@ -317,53 +316,55 @@ void DebugRouterCore::SendAsync(const std::string& message) {
 }
 
 void DebugRouterCore::SendData(const std::string& data, const std::string& type,
-                               int32_t session, int32_t mark, bool is_object) {
+                               int32_t target_id, int32_t mark,
+                               bool is_object) {
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
-    if (!enable_all_sessions_.load(std::memory_order_relaxed) && session > 0 &&
-        !isActiveSession(session)) {
+    if (!enable_all_targets_.load(std::memory_order_relaxed) && target_id > 0 &&
+        !isActiveTarget(target_id)) {
       return;
     }
-    std::string message =
-        processor_->WrapCustomizedMessage(type, session, data, mark, is_object);
+    std::string message = processor_->WrapCustomizedMessage(
+        type, target_id, data, mark, is_object);
     Send(message);
   }
 }
 
 void DebugRouterCore::SendDataAsync(const std::string& data,
-                                    const std::string& type, int32_t session,
+                                    const std::string& type, int32_t target_id,
                                     int32_t mark, bool is_object) {
   if (connection_state_.load(std::memory_order_relaxed) != CONNECTED) {
     return;
   }
   thread::DebugRouterExecutor::GetInstance().Post(
-      [=]() { SendData(data, type, session, mark, is_object); });
+      [=]() { SendData(data, type, target_id, mark, is_object); });
 }
 
-int32_t DebugRouterCore::Plug(const std::shared_ptr<core::NativeSlot>& slot) {
+int32_t DebugRouterCore::Plug(
+    const std::shared_ptr<core::NativeTarget>& target) {
   {
-    std::unique_lock lock(slots_mutex_);
-    max_session_id_++;
-    slots_[max_session_id_] = slot;
+    std::unique_lock lock(targets_mutex_);
+    max_target_id_++;
+    targets_[max_target_id_] = target;
   }
-  LOGI("plug session: " << max_session_id_);
+  LOGI("plug target: " << max_target_id_);
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
-    processor_->FlushSessionList();
+    processor_->FlushTargetList();
   }
   NotifyConnectStateByMessage(GetConnectionState());
   {
-    std::vector<std::shared_ptr<DebugRouterSessionHandler>> handlers;
+    std::vector<std::shared_ptr<DebugRouterTargetHandler>> handlers;
     {
-      std::shared_lock lock(session_handler_mutex_);
-      handlers.reserve(session_handler_map_.size());
-      for (auto it : session_handler_map_) {
+      std::shared_lock lock(target_handler_mutex_);
+      handlers.reserve(target_handler_map_.size());
+      for (auto it : target_handler_map_) {
         handlers.push_back(it.second);
       }
     }
     for (const auto& handler : handlers) {
-      handler->OnSessionCreate(max_session_id_, slot->GetUrl());
+      handler->OnTargetCreate(max_target_id_, target->GetUrl());
     }
   }
-  return max_session_id_;
+  return max_target_id_;
 }
 
 int32_t DebugRouterCore::GetUSBPort() {
@@ -403,32 +404,32 @@ bool DebugRouterCore::SetUSBStartPort(int32_t start_port) {
 }
 #endif
 
-void DebugRouterCore::Pull(int32_t session_id_) {
-  LOGI("pull session: " << session_id_);
-  if (!enable_all_sessions_.load(std::memory_order_relaxed)) {
-    std::unique_lock lock(enabled_sessions_mutex_);
-    enabled_session_ids_.erase(session_id_);
+void DebugRouterCore::Pull(int32_t target_id_) {
+  LOGI("pull target: " << target_id_);
+  if (!enable_all_targets_.load(std::memory_order_relaxed)) {
+    std::unique_lock lock(enabled_targets_mutex_);
+    enabled_target_ids_.erase(target_id_);
   }
-  // Server availability no longer depends on enabled-session ids. Pull() only
-  // updates the filter set used by isActiveSession().
+  // Server availability no longer depends on enabled target IDs. Pull() only
+  // updates the filter set used by isActiveTarget().
   {
-    std::unique_lock lock(slots_mutex_);
-    slots_.erase(session_id_);
+    std::unique_lock lock(targets_mutex_);
+    targets_.erase(target_id_);
   }
   if (connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
-    processor_->FlushSessionList();
+    processor_->FlushTargetList();
   }
   {
-    std::vector<std::shared_ptr<DebugRouterSessionHandler>> handlers;
+    std::vector<std::shared_ptr<DebugRouterTargetHandler>> handlers;
     {
-      std::shared_lock lock(session_handler_mutex_);
-      handlers.reserve(session_handler_map_.size());
-      for (auto it : session_handler_map_) {
+      std::shared_lock lock(target_handler_mutex_);
+      handlers.reserve(target_handler_map_.size());
+      for (auto it : target_handler_map_) {
         handlers.push_back(it.second);
       }
     }
     for (const auto& handler : handlers) {
-      handler->OnSessionDestroy(session_id_);
+      handler->OnTargetDestroy(target_id_);
     }
   }
 }
@@ -713,37 +714,37 @@ bool DebugRouterCore::RemoveMessageHandler(const std::string& handler_name) {
   return true;
 }
 
-int DebugRouterCore::AddSessionHandler(DebugRouterSessionHandler* handler) {
-  return AddSessionHandler(std::shared_ptr<DebugRouterSessionHandler>(
-      handler, [](DebugRouterSessionHandler*) {}));
+int DebugRouterCore::AddTargetHandler(DebugRouterTargetHandler* handler) {
+  return AddTargetHandler(std::shared_ptr<DebugRouterTargetHandler>(
+      handler, [](DebugRouterTargetHandler*) {}));
 }
 
-int DebugRouterCore::AddSessionHandler(
-    const std::shared_ptr<DebugRouterSessionHandler>& handler) {
+int DebugRouterCore::AddTargetHandler(
+    const std::shared_ptr<DebugRouterTargetHandler>& handler) {
   if (!handler) {
     return -1;
   }
-  std::unique_lock lock(session_handler_mutex_);
-  for (const auto& key : session_handler_map_) {
+  std::unique_lock lock(target_handler_mutex_);
+  for (const auto& key : target_handler_map_) {
     if (key.second.get() == handler.get()) {
       return key.first;
     }
   }
   int handler_id = handler_count_.fetch_add(1, std::memory_order_relaxed);
-  session_handler_map_[handler_id] = handler;
+  target_handler_map_[handler_id] = handler;
   return handler_id;
 }
 
-bool DebugRouterCore::RemoveSessionHandler(int handler_id) {
-  std::shared_ptr<DebugRouterSessionHandler> removed_handler;
+bool DebugRouterCore::RemoveTargetHandler(int handler_id) {
+  std::shared_ptr<DebugRouterTargetHandler> removed_handler;
   {
-    std::unique_lock lock(session_handler_mutex_);
-    auto it = session_handler_map_.find(handler_id);
-    if (it == session_handler_map_.end()) {
+    std::unique_lock lock(target_handler_mutex_);
+    auto it = target_handler_map_.find(handler_id);
+    if (it == target_handler_map_.end()) {
       return false;
     }
     removed_handler = std::move(it->second);
-    session_handler_map_.erase(it);
+    target_handler_map_.erase(it);
   }
   return true;
 }
@@ -886,6 +887,7 @@ void DebugRouterCore::NotifyConnectStateByMessage(ConnectionState state) {
   processor_->Process(state_msg);
 }
 
+// Obsoleted legacy protocol: session_id = -1 means global.
 std::string DebugRouterCore::GetConnectionStateMsg(ConnectionState state) {
   if (state == CONNECTED) {
     return "{\"event\": \"Customized\",\"data\": {\"type\": "
@@ -909,7 +911,7 @@ std::string DebugRouterCore::GetConnectionStateMsg(ConnectionState state) {
 }
 
 bool DebugRouterCore::ShouldServerRun() {
-  return enable_all_sessions_.load(std::memory_order_relaxed) ||
+  return enable_all_targets_.load(std::memory_order_relaxed) ||
          debug_channel_enabled_.load(std::memory_order_relaxed);
 }
 
@@ -963,52 +965,52 @@ void DebugRouterCore::UpdateServerState() {
       /*run_now=*/false);
 }
 
-void DebugRouterCore::EnableAllSessions() {
-  if (enable_all_sessions_.exchange(true, std::memory_order_relaxed)) {
+void DebugRouterCore::EnableAllTargets() {
+  if (enable_all_targets_.exchange(true, std::memory_order_relaxed)) {
     return;
   }
-  LOGI("enableAllSessions");
+  LOGI("enableAllTargets");
   UpdateServerState();
 }
 
-void DebugRouterCore::EnableSingleSession(int32_t session_id) {
-  // if enable all sessions, then no need to enable single session.
-  if (enable_all_sessions_.load(std::memory_order_relaxed)) {
+void DebugRouterCore::EnableSingleTarget(int32_t target_id) {
+  // If all targets are enabled, there is no need to enable a single target.
+  if (enable_all_targets_.load(std::memory_order_relaxed)) {
     return;
   }
-  if (session_id <= 0) {
-    LOGW("enableSingleSession ignored invalid session id: " << session_id);
+  if (target_id <= 0) {
+    LOGW("enableSingleTarget ignored invalid target id: " << target_id);
     return;
   }
-  LOGI("enableSingleSession: " << session_id);
+  LOGI("enableSingleTarget: " << target_id);
   bool newly_enabled = false;
   {
-    std::unique_lock lock(enabled_sessions_mutex_);
-    newly_enabled = enabled_session_ids_.insert(session_id).second;
+    std::unique_lock lock(enabled_targets_mutex_);
+    newly_enabled = enabled_target_ids_.insert(target_id).second;
   }
-  // Visibility only flips here in single-session mode: Plug()'s flush runs
-  // before enable and GetSessionList() filters out not-yet-enabled ids.
+  // Visibility only flips here in single-target mode: Plug()'s flush runs
+  // before enable and GetTargetList() filters out not-yet-enabled ids.
   // Push the list when connected, mirroring Pull()'s flush on removal.
   if (newly_enabled &&
       connection_state_.load(std::memory_order_relaxed) == CONNECTED) {
-    processor_->FlushSessionList();
+    processor_->FlushTargetList();
   }
 }
 
-bool DebugRouterCore::isActiveSession(int32_t session_id) {
-  if (enable_all_sessions_.load(std::memory_order_relaxed)) {
+bool DebugRouterCore::isActiveTarget(int32_t target_id) {
+  if (enable_all_targets_.load(std::memory_order_relaxed)) {
     return true;
   }
   bool is_active = false;
   {
-    std::shared_lock lock(enabled_sessions_mutex_);
-    is_active = enabled_session_ids_.count(session_id) > 0;
+    std::shared_lock lock(enabled_targets_mutex_);
+    is_active = enabled_target_ids_.count(target_id) > 0;
   }
   return is_active;
 }
 
-bool DebugRouterCore::isEnableAllSessions() {
-  return enable_all_sessions_.load(std::memory_order_relaxed);
+bool DebugRouterCore::isEnableAllTargets() {
+  return enable_all_targets_.load(std::memory_order_relaxed);
 }
 
 void DebugRouterCore::EnableDebugChannel() {
@@ -1024,7 +1026,7 @@ void DebugRouterCore::DisableDebugChannel() {
     return;
   }
   LOGI("DisableDebugChannel");
-  if (!enable_all_sessions_.load(std::memory_order_relaxed) &&
+  if (!enable_all_targets_.load(std::memory_order_relaxed) &&
       current_transceiver_ != nullptr &&
       current_transceiver_->GetType() == ConnectionType::kUsb) {
     connection_state_.store(DISCONNECTED, std::memory_order_relaxed);

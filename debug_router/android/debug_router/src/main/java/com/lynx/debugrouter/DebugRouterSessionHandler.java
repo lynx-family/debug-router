@@ -6,9 +6,10 @@ package com.lynx.debugrouter;
 
 import androidx.annotation.Keep;
 
+// Obsoleted legacy protocol: Session callbacks describe Targets.
 @Keep
 public interface DebugRouterSessionHandler {
-  public void onSessionCreate(int sessionId, String url);
-  public void onSessionDestroy(int sessionId);
-  public void onMessage(String message, String type, int sessionId);
+  public void onSessionCreate(int targetId, String url);
+  public void onSessionDestroy(int targetId);
+  public void onMessage(String message, String type, int targetId);
 }

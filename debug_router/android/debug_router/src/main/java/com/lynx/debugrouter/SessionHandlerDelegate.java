@@ -18,25 +18,25 @@ public class SessionHandlerDelegate implements DebugRouterSessionHandler {
 
   @Override
   @CalledByNative
-  public void onSessionCreate(int sessionId, String url) {
+  public void onSessionCreate(int targetId, String url) {
     if (handler != null) {
-      handler.onSessionCreate(sessionId, url);
+      handler.onSessionCreate(targetId, url);
     }
   }
 
   @Override
   @CalledByNative
-  public void onSessionDestroy(int sessionId) {
+  public void onSessionDestroy(int targetId) {
     if (handler != null) {
-      handler.onSessionDestroy(sessionId);
+      handler.onSessionDestroy(targetId);
     }
   }
 
   @Override
   @CalledByNative
-  public void onMessage(String message, String type, int sessionId) {
+  public void onMessage(String message, String type, int targetId) {
     if (handler != null) {
-      handler.onMessage(message, type, sessionId);
+      handler.onMessage(message, type, targetId);
     }
   }
 }

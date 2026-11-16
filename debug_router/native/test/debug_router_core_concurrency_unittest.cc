@@ -11,7 +11,7 @@
 
 #include "debug_router/native/core/debug_router_core.h"
 #include "debug_router/native/core/debug_router_global_handler.h"
-#include "debug_router/native/core/debug_router_session_handler.h"
+#include "debug_router/native/core/debug_router_target_handler.h"
 #include "gtest/gtest.h"
 
 namespace debugrouter {
@@ -25,13 +25,13 @@ class TestGlobalHandler : public DebugRouterGlobalHandler {
   }
 };
 
-class TestSessionHandler : public DebugRouterSessionHandler {
+class TestTargetHandler : public DebugRouterTargetHandler {
  public:
-  virtual ~TestSessionHandler() = default;
-  void OnSessionCreate(int session_id, const std::string& url) override {}
-  void OnSessionDestroy(int session_id) override {}
+  virtual ~TestTargetHandler() = default;
+  void OnTargetCreate(int target_id, const std::string& url) override {}
+  void OnTargetDestroy(int target_id) override {}
   void OnMessage(const std::string& message, const std::string& type,
-                 int session_id) override {}
+                 int target_id) override {}
 };
 
 class BlockingGlobalHandler final : public DebugRouterGlobalHandler {
@@ -81,12 +81,12 @@ class DebugRouterCoreConcurrencyTest : public ::testing::Test {
   void SetUp() override {
     core_ = &DebugRouterCore::GetInstance();
     ClearGlobalHandlers();
-    ClearSessionHandlers();
+    ClearTargetHandlers();
   }
 
   void TearDown() override {
     ClearGlobalHandlers();
-    ClearSessionHandlers();
+    ClearTargetHandlers();
   }
 
   void ClearGlobalHandlers() {
@@ -99,14 +99,14 @@ class DebugRouterCoreConcurrencyTest : public ::testing::Test {
     return core_->global_handler_map_.size();
   }
 
-  void ClearSessionHandlers() {
-    std::unique_lock lock(core_->session_handler_mutex_);
-    core_->session_handler_map_.clear();
+  void ClearTargetHandlers() {
+    std::unique_lock lock(core_->target_handler_mutex_);
+    core_->target_handler_map_.clear();
   }
 
-  size_t GetSessionHandlerCount() {
-    std::shared_lock lock(core_->session_handler_mutex_);
-    return core_->session_handler_map_.size();
+  size_t GetTargetHandlerCount() {
+    std::shared_lock lock(core_->target_handler_mutex_);
+    return core_->target_handler_map_.size();
   }
 
   DebugRouterCore* core_;
@@ -284,8 +284,8 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveGlobalHandlers) {
             static_cast<size_t>(handlers.size() + kNumThreads / 2));
 }
 
-TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddSameSessionHandler) {
-  TestSessionHandler handler;
+TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddSameTargetHandler) {
+  TestTargetHandler handler;
   std::vector<std::thread> threads;
   std::vector<int> returned_ids;
   std::mutex ids_mutex;
@@ -293,7 +293,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddSameSessionHandler) {
 
   for (size_t i = 0; i < kNumThreads; ++i) {
     threads.emplace_back([&, this]() {
-      int id = core_->AddSessionHandler(&handler);
+      int id = core_->AddTargetHandler(&handler);
       std::lock_guard<std::mutex> lock(ids_mutex);
       returned_ids.push_back(id);
     });
@@ -310,13 +310,13 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddSameSessionHandler) {
     EXPECT_EQ(id, first_id);
   }
 
-  EXPECT_EQ(GetSessionHandlerCount(), static_cast<size_t>(1));
+  EXPECT_EQ(GetTargetHandlerCount(), static_cast<size_t>(1));
 }
 
-TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddDifferentSessionHandlers) {
-  std::vector<std::unique_ptr<TestSessionHandler>> handlers;
+TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddDifferentTargetHandlers) {
+  std::vector<std::unique_ptr<TestTargetHandler>> handlers;
   for (int i = 0; i < 10; ++i) {
-    handlers.push_back(std::make_unique<TestSessionHandler>());
+    handlers.push_back(std::make_unique<TestTargetHandler>());
   }
 
   std::vector<std::thread> threads;
@@ -324,20 +324,20 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddDifferentSessionHandlers) {
 
   for (size_t i = 0; i < kNumThreads; ++i) {
     threads.emplace_back(
-        [&, i, this]() { core_->AddSessionHandler(handlers[i].get()); });
+        [&, i, this]() { core_->AddTargetHandler(handlers[i].get()); });
   }
 
   for (auto& t : threads) {
     t.join();
   }
 
-  EXPECT_EQ(GetSessionHandlerCount(), kNumThreads);
+  EXPECT_EQ(GetTargetHandlerCount(), kNumThreads);
 }
 
-TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentRemoveSessionHandler) {
-  TestSessionHandler handler;
+TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentRemoveTargetHandler) {
+  TestTargetHandler handler;
 
-  int handler_id = core_->AddSessionHandler(&handler);
+  int handler_id = core_->AddTargetHandler(&handler);
 
   std::vector<std::thread> threads;
   std::atomic<int> success_count(0);
@@ -345,7 +345,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentRemoveSessionHandler) {
 
   for (size_t i = 0; i < kNumThreads; ++i) {
     threads.emplace_back([&, handler_id, this]() {
-      if (core_->RemoveSessionHandler(handler_id)) {
+      if (core_->RemoveTargetHandler(handler_id)) {
         success_count.fetch_add(1, std::memory_order_relaxed);
       }
     });
@@ -357,18 +357,18 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentRemoveSessionHandler) {
 
   EXPECT_EQ(success_count.load(std::memory_order_relaxed), 1);
 
-  EXPECT_EQ(GetSessionHandlerCount(), static_cast<size_t>(0));
+  EXPECT_EQ(GetTargetHandlerCount(), static_cast<size_t>(0));
 }
 
-TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveSessionHandlers) {
-  std::vector<std::unique_ptr<TestSessionHandler>> handlers;
+TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveTargetHandlers) {
+  std::vector<std::unique_ptr<TestTargetHandler>> handlers;
   for (int i = 0; i < 5; ++i) {
-    handlers.push_back(std::make_unique<TestSessionHandler>());
+    handlers.push_back(std::make_unique<TestTargetHandler>());
   }
 
   std::vector<int> handler_ids;
   for (auto& h : handlers) {
-    handler_ids.push_back(core_->AddSessionHandler(h.get()));
+    handler_ids.push_back(core_->AddTargetHandler(h.get()));
   }
 
   std::vector<std::thread> threads;
@@ -378,12 +378,12 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveSessionHandlers) {
     if (i % 2 == 0) {
       threads.emplace_back([&, i, this]() {
         int idx = i % handlers.size();
-        core_->AddSessionHandler(handlers[idx].get());
+        core_->AddTargetHandler(handlers[idx].get());
       });
     } else {
       threads.emplace_back([&, i, this]() {
         int idx = i % handler_ids.size();
-        core_->RemoveSessionHandler(handler_ids[idx]);
+        core_->RemoveTargetHandler(handler_ids[idx]);
       });
     }
   }
@@ -394,7 +394,7 @@ TEST_F(DebugRouterCoreConcurrencyTest, ConcurrentAddAndRemoveSessionHandlers) {
 
   // Lightweight assertions to ensure final handler count is within reasonable
   // bounds
-  size_t final_count = GetSessionHandlerCount();
+  size_t final_count = GetTargetHandlerCount();
   // At least 0 (always true, but explicitly written as documentation)
   EXPECT_GE(final_count, static_cast<size_t>(0));
   // At most: initial 5 + 10 adds = 15 (different threads might add same

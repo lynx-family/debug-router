@@ -57,7 +57,7 @@ TEST(UtilTest, LogAppCustomizedMessageAsInfo) {
   EXPECT_EQ(VerboseMessageLogLevel::kInfo, GetVerboseMessageLogLevel(message));
 }
 
-TEST(UtilTest, LogListSessionCustomizedMessageAsInfo) {
+TEST(UtilTest, LogListTargetCustomizedMessageAsInfo) {
   const std::string message = R"({
     "event":"Customized",
     "data":{

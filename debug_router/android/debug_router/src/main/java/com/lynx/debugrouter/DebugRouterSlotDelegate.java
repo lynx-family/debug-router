@@ -4,6 +4,7 @@
 
 package com.lynx.debugrouter;
 
+// Obsoleted legacy protocol: public Target delegate name.
 public interface DebugRouterSlotDelegate {
   String getTemplateUrl();
   void onMessage(String type, String message);

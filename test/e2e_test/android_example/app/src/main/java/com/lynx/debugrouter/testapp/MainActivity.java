@@ -92,21 +92,21 @@ public class MainActivity extends AppCompatActivity implements StateListener {
   private void testAddSessionHandlerJNI() {
     DebugRouter.getInstance().addSessionHandler(new DebugRouterSessionHandler() {
       @Override
-      public void onSessionCreate(int sessionId, String url) {
-        LLog.i(TAG, "onSessionCreate:" + sessionId + url);
+      public void onSessionCreate(int targetId, String url) {
+        LLog.i(TAG, "onSessionCreate:" + targetId + url);
       }
       @Override
-      public void onSessionDestroy(int sessionId) {
-        LLog.i(TAG, "onSessionDestroy:" + sessionId);
+      public void onSessionDestroy(int targetId) {
+        LLog.i(TAG, "onSessionDestroy:" + targetId);
       }
       @Override
-      public void onMessage(String message, String type, int sessionId) {
-        LLog.i(TAG, "onMessage:" + message + type + sessionId);
+      public void onMessage(String message, String type, int targetId) {
+        LLog.i(TAG, "onMessage:" + message + type + targetId);
       }
     });
 
-    final DebugRouterSlot[] slotHolder = new DebugRouterSlot[1];
-    DebugRouterSlot slot = new DebugRouterSlot(new DebugRouterSlotDelegate() {
+    final DebugRouterSlot[] targetHolder = new DebugRouterSlot[1];
+    DebugRouterSlot target = new DebugRouterSlot(new DebugRouterSlotDelegate() {
       @Override
       public String getTemplateUrl() {
         return "templateUrl";
@@ -125,7 +125,7 @@ public class MainActivity extends AppCompatActivity implements StateListener {
           JSONObject notification = new JSONObject();
           notification.put("method", E2E_CDP_NOTIFICATION_METHOD);
           notification.put("params", request.optJSONObject("params"));
-          slotHolder[0].sendData("CDP", notification.toString());
+          targetHolder[0].sendData("CDP", notification.toString());
 
           JSONObject result = new JSONObject();
           result.put("ok", true);
@@ -134,17 +134,17 @@ public class MainActivity extends AppCompatActivity implements StateListener {
           JSONObject response = new JSONObject();
           response.put("id", request.getInt("id"));
           response.put("result", result);
-          slotHolder[0].sendData("CDP", response.toString());
+          targetHolder[0].sendData("CDP", response.toString());
         } catch (Exception error) {
           LLog.e(TAG, "failed to handle E2E CDP ping:" + error.getMessage());
         }
       }
     });
-    slotHolder[0] = slot;
+    targetHolder[0] = target;
 
-    int sessionId = DebugRouter.getInstance().plug(slot);
+    int targetId = DebugRouter.getInstance().plug(target);
     // // 2. enable single session test
-    // DebugRouter.getInstance().enableSingleSession(sessionId);
+    // DebugRouter.getInstance().enableSingleSession(targetId);
     // // sleep 10s
     // try {
     //   Thread.sleep(10000);
@@ -152,7 +152,7 @@ public class MainActivity extends AppCompatActivity implements StateListener {
     //   e.printStackTrace();
     // }
     // // test plug -> pull
-    // DebugRouter.getInstance().pull(sessionId);
+    // DebugRouter.getInstance().pull(targetId);
     // // sleep 10s
     // try {
     //   Thread.sleep(10000);
@@ -160,8 +160,8 @@ public class MainActivity extends AppCompatActivity implements StateListener {
     //   e.printStackTrace();
     // }
     // // test plug -> pull -> plug
-    // sessionId = DebugRouter.getInstance().plug(slot);
-    // DebugRouter.getInstance().enableSingleSession(sessionId);
+    // targetId = DebugRouter.getInstance().plug(target);
+    // DebugRouter.getInstance().enableSingleSession(targetId);
   }
 
   private void handleUsb(Intent intent) {

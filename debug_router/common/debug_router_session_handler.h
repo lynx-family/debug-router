@@ -10,12 +10,13 @@
 namespace debugrouter {
 namespace common {
 
+// Obsoleted legacy protocol: Session callbacks describe Targets.
 class DebugRouterSessionHandler {
  public:
-  virtual void OnSessionCreate(int session_id, const std::string &url) = 0;
-  virtual void OnSessionDestroy(int session_id) = 0;
+  virtual void OnSessionCreate(int target_id, const std::string &url) = 0;
+  virtual void OnSessionDestroy(int target_id) = 0;
   virtual void OnMessage(const std::string &message, const std::string &type,
-                         int session_id) = 0;
+                         int target_id) = 0;
 };
 
 }  // namespace common

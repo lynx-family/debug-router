@@ -645,7 +645,7 @@ describe("multiplexer client mirror sync", function () {
     }
   });
 
-  it("emits session list, CDP, App, once, off, and all-event callbacks from USB messages", function () {
+  it("emits target list, CDP, App, once, off, and all-event callbacks from USB messages", function () {
     const daemonClient = createDaemonClient();
     const client = MultiplexerUsbClient.fromSnapshot(
       createClientSnapshot(),
@@ -661,17 +661,17 @@ describe("multiplexer client mirror sync", function () {
     client.on("off-event", offHandler);
     client.off("off-event", offHandler);
     client.once("once-event", (...params) => onceEvents.push(params));
-    client.onAllEvents((method, params, session) =>
+    client.onAllEvents((method, params, target) =>
       allEvents.push({
         method,
         params,
-        session,
+        target,
       })
     );
 
-    let sessions;
+    let targets;
     client.on("SessionList", (value) => {
-      sessions = value;
+      targets = value;
     });
 
     client.handleMessage(
@@ -722,7 +722,7 @@ describe("multiplexer client mirror sync", function () {
       })
     );
 
-    assert.deepStrictEqual(sessions, [
+    assert.deepStrictEqual(targets, [
       {
         session_id: 1,
         url: "https://example.test",
@@ -755,7 +755,7 @@ describe("multiplexer client mirror sync", function () {
         params: {
           value: 1,
         },
-        session: {
+        target: {
           session_id: 9,
         },
       },
@@ -764,7 +764,7 @@ describe("multiplexer client mirror sync", function () {
         params: {
           count: 1,
         },
-        session: {
+        target: {
           session_id: -1,
         },
       },
@@ -773,14 +773,14 @@ describe("multiplexer client mirror sync", function () {
         params: {
           count: 2,
         },
-        session: {
+        target: {
           session_id: -1,
         },
       },
       {
         method: "off-event",
         params: {},
-        session: {
+        target: {
           session_id: -1,
         },
       },

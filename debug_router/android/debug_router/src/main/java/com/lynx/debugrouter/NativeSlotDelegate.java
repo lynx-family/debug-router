@@ -7,25 +7,26 @@ package com.lynx.debugrouter;
 import androidx.annotation.Keep;
 import com.lynx.debugrouter.base.CalledByNative;
 
+// Obsoleted legacy protocol: public Target adapter name.
 @Keep
 public class NativeSlotDelegate {
   // TODO weak
-  private DebugRouterSlot slot;
+  private DebugRouterSlot target;
 
   private String url;
 
   private String type;
 
-  public NativeSlotDelegate(DebugRouterSlot slot) {
-    this.slot = slot;
-    this.url = slot.getTemplateUrl();
-    this.type = slot.getType();
+  public NativeSlotDelegate(DebugRouterSlot target) {
+    this.target = target;
+    this.url = target.getTemplateUrl();
+    this.type = target.getType();
   }
 
   @CalledByNative
   public void onMessage(String type, String message) {
-    if (slot != null) {
-      slot.onMessage(type, message);
+    if (target != null) {
+      target.onMessage(type, message);
     }
   }
 

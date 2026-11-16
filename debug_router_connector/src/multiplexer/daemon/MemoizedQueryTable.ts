@@ -54,6 +54,7 @@ type PendingQuery = {
 
 const DEFAULT_QUERY_DEFINITIONS: readonly MemoizedQueryDefinition[] = [
   {
+    // Obsoleted legacy protocol: Target-list request/event names.
     requestType: "ListSession",
     notificationType: "SessionList",
   },

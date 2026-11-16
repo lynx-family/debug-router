@@ -27,9 +27,9 @@ extern const char *kRemoteDebugServerEvent4ChangeRoomServerAck;
 extern const char *kRemoteDebugServerEvent4Custom;
 
 extern const char *kRemoteDebugProtocolBodyData4CDP;
-extern const char *kRemoteDebugProtocolBodyData4Custom4ListSession;
+extern const char *kRemoteDebugProtocolBodyData4Custom4ListTargets;
 extern const char *kRemoteDebugProtocolBodyData4Custom4MessageHandler;
-extern const char *kRemoteDebugProtocolBodyData4Custom4SessionList;
+extern const char *kRemoteDebugProtocolBodyData4Custom4TargetList;
 extern const char *kRemoteDebugProtocolBodyData4Custom4OpenSession;
 extern const char *kRemoteDebugProtocolBodyData4Custom4CloseSession;
 extern const char *kRemoteDebugProtocolBodyData4Custom4D2RStopAtEntry;
@@ -44,7 +44,7 @@ extern const char *kKeyRoom;
 extern const char *kKeyType;
 extern const char *kKeyInfo;
 extern const char *kKeyClientId;
-extern const char *kKeySessionId;
+extern const char *kLegacyTargetId;
 extern const char *kKeyUrl;
 extern const char *kKeyCode;
 extern const char *kKeyMessage;
@@ -160,25 +160,25 @@ struct RemoteDebugProtocolBodyData4ChangeRoomServerAck : public Stringifiable {
   void Stringify(Json::Value &data) override { data = client_id_; };
 };
 
-struct SessionInfo {
-  int session_id_;
+struct TargetInfo {
+  int target_id_;
   std::string url_;
   std::string type_;
 };
 
-struct CustomData4SessionList : public Stringifiable {
-  std::vector<std::shared_ptr<SessionInfo>> list_;
+struct CustomData4TargetList : public Stringifiable {
+  std::vector<std::shared_ptr<TargetInfo>> list_;
 
-  ~CustomData4SessionList() override = default;
+  ~CustomData4TargetList() override = default;
 
   void Stringify(Json::Value &ref) override {
     Json::Value v(Json::arrayValue);
-    for (std::shared_ptr<SessionInfo> it : list_) {
-      Json::Value sessionItem(Json::objectValue);
-      sessionItem[kKeySessionId] = it->session_id_;
-      sessionItem[kKeyUrl] = it->url_;
-      sessionItem[kKeyType] = it->type_;
-      v[v.size()] = sessionItem;
+    for (std::shared_ptr<TargetInfo> it : list_) {
+      Json::Value targetItem(Json::objectValue);
+      targetItem[kLegacyTargetId] = it->target_id_;
+      targetItem[kKeyUrl] = it->url_;
+      targetItem[kKeyType] = it->type_;
+      v[v.size()] = targetItem;
     }
     ref = v;
   }
@@ -241,7 +241,7 @@ struct AppMessageData : public Stringifiable {
 };
 
 struct CustomData4CDP : public Stringifiable {
-  int session_id_;
+  int target_id_;
   RemoteDebugPrococolClientId client_id_;
   std::string message_;
   bool is_object_ = false;
@@ -250,7 +250,7 @@ struct CustomData4CDP : public Stringifiable {
 
   void Stringify(Json::Value &ref) override {
     Json::Value v(Json::objectValue);
-    v[kKeySessionId] = session_id_;
+    v[kLegacyTargetId] = target_id_;
     v[kKeyClientId] = client_id_;
     if (is_object_) {
       Json::Reader reader;
@@ -277,7 +277,7 @@ struct CustomData4OpenCard : public Stringifiable {
   }
 };
 
-struct CustomData4ListSession : public Stringifiable {
+struct CustomData4ListTargets : public Stringifiable {
   RemoteDebugPrococolClientId client_id_;
   void Stringify(Json::Value &ref) override {
     Json::Value v(Json::objectValue);
@@ -308,10 +308,10 @@ struct RemoteDebugProtocolBodyData4Custom : public Stringifiable {
   std::string type_;
   // TODO(zhanglei): change to union
   std::shared_ptr<CustomData4CDP> cdp_data_;
-  std::shared_ptr<CustomData4SessionList> session_data_list_;
+  std::shared_ptr<CustomData4TargetList> target_data_list_;
   std::shared_ptr<CustomData4OpenCard> open_card_data_;
-  std::shared_ptr<CustomData4ListSession>
-      list_session_data_;  // is diffent from CustomData4SessionList !!
+  std::shared_ptr<CustomData4ListTargets>
+      list_targets_data_;  // is diffent from CustomData4TargetList !!
   std::shared_ptr<AppProtocolData> app_protocol_data_;
   bool should_stop_at_entry_;
   bool should_stop_lepus_at_entry_;
@@ -324,8 +324,8 @@ struct RemoteDebugProtocolBodyData4Custom : public Stringifiable {
     v[kKeyType] = type_;
     v[kKeySender] = client_id_;
 
-    if (Is4SessionList()) {
-      this->session_data_list_->Stringify(v[kKeyData]);
+    if (Is4TargetList()) {
+      this->target_data_list_->Stringify(v[kKeyData]);
       // concatenate signature data
       Json::FastWriter writer;
       std::string sig_data = writer.write(v[kKeyData]) + kSignatureSalt;
@@ -351,11 +351,11 @@ struct RemoteDebugProtocolBodyData4Custom : public Stringifiable {
   bool Is4CDP() { return type_.compare(kRemoteDebugProtocolBodyData4CDP) == 0; }
   std::shared_ptr<CustomData4CDP> AsCDP() { return cdp_data_; }
   std::shared_ptr<CustomData4Extension> AsExtension() { return cdp_data_; }
-  bool Is4SessionList() {
-    return type_.compare(kRemoteDebugProtocolBodyData4Custom4SessionList) == 0;
+  bool Is4TargetList() {
+    return type_.compare(kRemoteDebugProtocolBodyData4Custom4TargetList) == 0;
   }
-  std::shared_ptr<CustomData4SessionList> AsSessionList() {
-    return session_data_list_;
+  std::shared_ptr<CustomData4TargetList> AsTargetList() {
+    return target_data_list_;
   }
   bool Is4R2DStopAtEntry() {
     return type_.compare(kRemoteDebugProtocolBodyData4Custom4R2DStopAtEntry) ==
@@ -380,8 +380,8 @@ struct RemoteDebugProtocolBodyData4Custom : public Stringifiable {
   bool Is4OpenCard() {
     return !type_.compare(kRemoteDebugProtocolBodyData4Custom4OpenCard);
   }
-  bool Is4ListSession() {
-    return !type_.compare(kRemoteDebugProtocolBodyData4Custom4ListSession);
+  bool Is4ListTargets() {
+    return !type_.compare(kRemoteDebugProtocolBodyData4Custom4ListTargets);
   }
   bool Is4MessageHandler() {
     return !type_.compare(kRemoteDebugProtocolBodyData4Custom4MessageHandler);
@@ -535,7 +535,7 @@ std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4AppMessage(
 
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Custom(
     std::string type, RemoteDebugPrococolClientId client_id,
-    std::shared_ptr<CustomData4SessionList> session_list);
+    std::shared_ptr<CustomData4TargetList> target_list);
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Custom(
     std::string type, RemoteDebugPrococolClientId client_id,
     bool should_stop_at_entry);

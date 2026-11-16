@@ -68,7 +68,7 @@ export class MultiplexerWebSocketClient extends Client {
   sendCustomizedMessage(
     method: string,
     params: Object | string = "",
-    sessionId: number = -1,
+    targetId: number = -1,
     type: string = "CDP",
   ): Promise<string> {
     const message: RequireMessageType = {
@@ -77,7 +77,7 @@ export class MultiplexerWebSocketClient extends Client {
         type,
         data: {
           client_id: -1,
-          session_id: sessionId,
+          session_id: targetId,
           message: {
             id: Client.messageIdCounter++,
             method,

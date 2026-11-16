@@ -384,9 +384,9 @@ TEST_F(UsbReconnectIntegrationTest,
   const size_t messages_before_b = listener_->Messages().size();
 
   const std::string init_b = R"({"event":"Initialize","data":-1})";
-  const std::string list_session =
+  const std::string list_targets =
       R"({"event":"Customized","data":{"type":"ListSession"}})";
-  ASSERT_TRUE(SendAll(sock_b, PackFrame(init_b) + PackFrame(list_session)));
+  ASSERT_TRUE(SendAll(sock_b, PackFrame(init_b) + PackFrame(list_targets)));
 
   ASSERT_TRUE(
       listener_->WaitForStatusCount(kConnected, connected_before_b + 1, 3000));
@@ -396,7 +396,7 @@ TEST_F(UsbReconnectIntegrationTest,
   std::vector<std::string> messages = listener_->Messages();
   ASSERT_GE(messages.size(), messages_before_b + 2);
   EXPECT_EQ(messages[messages.size() - 2], init_b);
-  EXPECT_EQ(messages[messages.size() - 1], list_session);
+  EXPECT_EQ(messages[messages.size() - 1], list_targets);
 
   close(sock_b);
   ASSERT_TRUE(listener_->WaitForStatusCount(kDisconnected,

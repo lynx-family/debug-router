@@ -48,15 +48,15 @@ source_set("debug_router_source") {
     "../native/core/debug_router_core.h",
     "../native/core/debug_router_global_handler.h",
     "../native/core/debug_router_message_handler.h",
-    "../native/core/debug_router_session_handler.h",
     "../native/core/debug_router_state_listener.cc",
     "../native/core/debug_router_state_listener.h",
+    "../native/core/debug_router_target_handler.h",
     "../native/core/message_transceiver.cc",
     "../native/core/message_transceiver.h",
-    "../native/core/native_slot.cc",
-    "../native/core/native_slot.h",
-    "../native/core/session_filter_util.cc",
-    "../native/core/session_filter_util.h",
+    "../native/core/native_target.cc",
+    "../native/core/native_target.h",
+    "../native/core/target_filter_util.cc",
+    "../native/core/target_filter_util.h",
     "../native/core/util.cc",
     "../native/core/util.h",
     "../native/log/logging.cc",
@@ -101,7 +101,7 @@ source_set("debug_router_source") {
     "debug_router_slot.h",
     "debug_router_slot_delegate.h",
     "debug_router_state_listener.h",
-    "native_slot_delegate.h",
+    "native_target_delegate.h",
   ]
   if (is_win) {
     sources += [
@@ -129,6 +129,6 @@ source_set("debug_router_cpp_interface") {
     "debug_router_slot.h",
     "debug_router_slot_delegate.h",
     "debug_router_state_listener.h",
-    "native_slot_delegate.h",
+    "native_target_delegate.h",
   ]
 }

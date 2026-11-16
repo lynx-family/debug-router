@@ -86,13 +86,13 @@ function createWebSocketSnapshot(overrides = {}) {
   };
 }
 
-function createCustomizedMessage(method, params = {}, sessionId = 1) {
+function createCustomizedMessage(method, params = {}, targetId = 1) {
   return JSON.stringify({
     event: "Customized",
     data: {
       type: "CDP",
       data: {
-        session_id: sessionId,
+        session_id: targetId,
         message: JSON.stringify({
           method,
           params,

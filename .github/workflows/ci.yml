@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+      - session-manager
 
 # Step budgets use successful CI runs from 2026-10-12 through 2026-10-20
 # with matching job definitions. Add the greater of 50% of the maximum

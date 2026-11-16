@@ -2,7 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/native/core/session_filter_util.h"
+#include "debug_router/native/core/target_filter_util.h"
 
 #include "gtest/gtest.h"
 
@@ -11,7 +11,7 @@ namespace core {
 namespace internal {
 namespace {
 
-TEST(SessionFilterUtilTest, ExtractSessionIdFromCustomizedPayload) {
+TEST(TargetFilterUtilTest, ExtractTargetIdFromCustomizedPayload) {
   const std::string message = R"({
     "event":"Customized",
     "data":{
@@ -25,12 +25,12 @@ TEST(SessionFilterUtilTest, ExtractSessionIdFromCustomizedPayload) {
     }
   })";
 
-  int32_t session_id = -1;
-  EXPECT_TRUE(ExtractIncomingSessionIdForFilter(message, session_id));
-  EXPECT_EQ(session_id, 42);
+  int32_t target_id = -1;
+  EXPECT_TRUE(ExtractIncomingTargetIdForFilter(message, target_id));
+  EXPECT_EQ(target_id, 42);
 }
 
-TEST(SessionFilterUtilTest, IgnoreSessionListControlMessage) {
+TEST(TargetFilterUtilTest, IgnoreTargetListControlMessage) {
   const std::string message = R"({
     "event":"Customized",
     "data":{
@@ -42,12 +42,12 @@ TEST(SessionFilterUtilTest, IgnoreSessionListControlMessage) {
     }
   })";
 
-  int32_t session_id = -1;
-  EXPECT_FALSE(ExtractIncomingSessionIdForFilter(message, session_id));
-  EXPECT_EQ(session_id, -1);
+  int32_t target_id = -1;
+  EXPECT_FALSE(ExtractIncomingTargetIdForFilter(message, target_id));
+  EXPECT_EQ(target_id, -1);
 }
 
-TEST(SessionFilterUtilTest, IgnoreNegativeSessionId) {
+TEST(TargetFilterUtilTest, IgnoreNegativeTargetId) {
   const std::string message = R"({
     "event":"Customized",
     "data":{
@@ -61,12 +61,12 @@ TEST(SessionFilterUtilTest, IgnoreNegativeSessionId) {
     }
   })";
 
-  int32_t session_id = -1;
-  EXPECT_FALSE(ExtractIncomingSessionIdForFilter(message, session_id));
-  EXPECT_EQ(session_id, -1);
+  int32_t target_id = -1;
+  EXPECT_FALSE(ExtractIncomingTargetIdForFilter(message, target_id));
+  EXPECT_EQ(target_id, -1);
 }
 
-TEST(SessionFilterUtilTest, IgnoreZeroSessionId) {
+TEST(TargetFilterUtilTest, IgnoreZeroTargetId) {
   const std::string message = R"({
     "event":"Customized",
     "data":{
@@ -80,12 +80,12 @@ TEST(SessionFilterUtilTest, IgnoreZeroSessionId) {
     }
   })";
 
-  int32_t session_id = -1;
-  EXPECT_FALSE(ExtractIncomingSessionIdForFilter(message, session_id));
-  EXPECT_EQ(session_id, 0);
+  int32_t target_id = -1;
+  EXPECT_FALSE(ExtractIncomingTargetIdForFilter(message, target_id));
+  EXPECT_EQ(target_id, 0);
 }
 
-TEST(SessionFilterUtilTest, IgnoreStringLiteralSessionIdInMessageBody) {
+TEST(TargetFilterUtilTest, IgnoreStringLiteralTargetIdInMessageBody) {
   const std::string message = R"({
     "event":"Customized",
     "data":{
@@ -98,12 +98,12 @@ TEST(SessionFilterUtilTest, IgnoreStringLiteralSessionIdInMessageBody) {
     }
   })";
 
-  int32_t session_id = -1;
-  EXPECT_FALSE(ExtractIncomingSessionIdForFilter(message, session_id));
-  EXPECT_EQ(session_id, -1);
+  int32_t target_id = -1;
+  EXPECT_FALSE(ExtractIncomingTargetIdForFilter(message, target_id));
+  EXPECT_EQ(target_id, -1);
 }
 
-TEST(SessionFilterUtilTest, IgnoreNonNumericSessionId) {
+TEST(TargetFilterUtilTest, IgnoreNonNumericTargetId) {
   const std::string message = R"({
     "event":"Customized",
     "data":{
@@ -117,9 +117,9 @@ TEST(SessionFilterUtilTest, IgnoreNonNumericSessionId) {
     }
   })";
 
-  int32_t session_id = -1;
-  EXPECT_FALSE(ExtractIncomingSessionIdForFilter(message, session_id));
-  EXPECT_EQ(session_id, -1);
+  int32_t target_id = -1;
+  EXPECT_FALSE(ExtractIncomingTargetIdForFilter(message, target_id));
+  EXPECT_EQ(target_id, -1);
 }
 
 }  // namespace

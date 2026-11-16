@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "debug_router/common/debug_router_slot.h"
-#include "debug_router/common/native_slot_delegate.h"
+#include "debug_router/common/native_target_delegate.h"
 #include "debug_router/native/base/no_destructor.h"
 #include "debug_router/native/core/debug_router_core.h"
 #include "debug_router/native/core/debug_router_state_listener.h"
@@ -64,21 +64,20 @@ class DebugRouterGlobalHandlerDelegate : public core::DebugRouterGlobalHandler {
   common::DebugRouterGlobalHandler *handler_;
 };
 
-class DebugRouterSessionHandlerDelegate
-    : public core::DebugRouterSessionHandler {
+class DebugRouterTargetHandlerDelegate : public core::DebugRouterTargetHandler {
  public:
-  explicit DebugRouterSessionHandlerDelegate(
+  explicit DebugRouterTargetHandlerDelegate(
       common::DebugRouterSessionHandler *handler)
       : handler_(handler) {}
-  void OnSessionCreate(int session_id, const std::string &url) override {
-    handler_->OnSessionCreate(session_id, url);
+  void OnTargetCreate(int target_id, const std::string &url) override {
+    handler_->OnSessionCreate(target_id, url);
   }
-  void OnSessionDestroy(int session_id) override {
-    handler_->OnSessionDestroy(session_id);
+  void OnTargetDestroy(int target_id) override {
+    handler_->OnSessionDestroy(target_id);
   }
   void OnMessage(const std::string &message, const std::string &type,
-                 int session_id) override {
-    handler_->OnMessage(message, type, session_id);
+                 int target_id) override {
+    handler_->OnMessage(message, type, target_id);
   }
 
  private:
@@ -106,26 +105,26 @@ void DebugRouter::SendAsync(const std::string &message) {
 }
 
 void DebugRouter::SendDataAsync(const std::string &data,
-                                const std::string &type, int32_t session) {
-  core::DebugRouterCore::GetInstance().SendDataAsync(data, type, session, -1,
+                                const std::string &type, int32_t target_id) {
+  core::DebugRouterCore::GetInstance().SendDataAsync(data, type, target_id, -1,
                                                      false);
 }
 
 void DebugRouter::SendDataAsync(const std::string &data,
-                                const std::string &type, int32_t session,
+                                const std::string &type, int32_t target_id,
                                 bool is_object) {
-  core::DebugRouterCore::GetInstance().SendDataAsync(data, type, session, -1,
+  core::DebugRouterCore::GetInstance().SendDataAsync(data, type, target_id, -1,
                                                      is_object);
 }
 
-int32_t DebugRouter::Plug(const std::shared_ptr<DebugRouterSlot> &slot) {
-  std::shared_ptr<core::NativeSlot> native_slot =
-      std::make_shared<NativeSlotDelegate>(slot);
-  return core::DebugRouterCore::GetInstance().Plug(native_slot);
+int32_t DebugRouter::Plug(const std::shared_ptr<DebugRouterSlot> &target) {
+  std::shared_ptr<core::NativeTarget> native_target =
+      std::make_shared<NativeTargetDelegate>(target);
+  return core::DebugRouterCore::GetInstance().Plug(native_target);
 }
 
-void DebugRouter::Pull(int32_t session_id_) {
-  core::DebugRouterCore::GetInstance().Pull(session_id_);
+void DebugRouter::Pull(int32_t target_id_) {
+  core::DebugRouterCore::GetInstance().Pull(target_id_);
 }
 
 void DebugRouter::AddGlobalHandler(DebugRouterGlobalHandler *handler) {
@@ -145,22 +144,22 @@ bool DebugRouter::RemoveGlobalHandler(DebugRouterGlobalHandler *handler) {
 }
 
 void DebugRouter::AddSessionHandler(DebugRouterSessionHandler *handler) {
-  DebugRouterSessionHandlerDelegate *common_session_handler =
-      new DebugRouterSessionHandlerDelegate(handler);
-  int handler_id = core::DebugRouterCore::GetInstance().AddSessionHandler(
-      common_session_handler);
-  session_handlers_map_[handler] = handler_id;
+  DebugRouterTargetHandlerDelegate *common_target_handler =
+      new DebugRouterTargetHandlerDelegate(handler);
+  int handler_id = core::DebugRouterCore::GetInstance().AddTargetHandler(
+      common_target_handler);
+  target_handlers_map_[handler] = handler_id;
 }
 
 bool DebugRouter::RemoveSessionHandler(DebugRouterSessionHandler *handler) {
   if (!handler) {
     return false;
   }
-  int handler_id = session_handlers_map_[handler];
+  int handler_id = target_handlers_map_[handler];
   if (!handler_id) {
     return false;
   }
-  return core::DebugRouterCore::GetInstance().RemoveSessionHandler(handler_id);
+  return core::DebugRouterCore::GetInstance().RemoveTargetHandler(handler_id);
 }
 
 bool DebugRouter::IsValidSchema(const std::string &schema) {
@@ -196,11 +195,11 @@ std::string DebugRouter::GetAppInfoByKey(const std::string &key) {
 }
 
 void DebugRouter::EnableAllSessions() {
-  core::DebugRouterCore::GetInstance().EnableAllSessions();
+  core::DebugRouterCore::GetInstance().EnableAllTargets();
 }
 
-void DebugRouter::EnableSingleSession(int32_t session_id) {
-  core::DebugRouterCore::GetInstance().EnableSingleSession(session_id);
+void DebugRouter::EnableSingleSession(int32_t target_id) {
+  core::DebugRouterCore::GetInstance().EnableSingleTarget(target_id);
 }
 
 void DebugRouter::EnableDebugChannel() {

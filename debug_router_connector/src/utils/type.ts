@@ -33,6 +33,7 @@ export enum CustomizedEventType {
   OpenCard = "OpenCard",
   SetGlobalSwitch = "SetGlobalSwitch",
   GetGlobalSwitch = "GetGlobalSwitch",
+  // Obsoleted legacy protocol: Target-list event name.
   SessionList = "SessionList",
   App = "App",
 }
@@ -147,6 +148,7 @@ export type RegisterResponseType = {
   };
 };
 
+// Obsoleted legacy protocol: Session types describe Targets; session_id is a Target ID.
 export type SessionInfoType = {
   type: string;
   session_id: number;
@@ -159,6 +161,7 @@ export type SessionListType = {
   sender: number;
 };
 
+// Obsoleted legacy protocol: session_id is a Target ID.
 export type CDPResponseType = {
   type: string;
   data: {
@@ -190,6 +193,7 @@ export type InitializeMessageType = {
   data: number;
 };
 
+// Obsoleted legacy protocol: session_id is a Target ID.
 export type CustomizeMessageType = {
   event: "Customized";
   data: {
@@ -209,7 +213,7 @@ export type EventHandler = (...params: any[]) => void;
 export type CDPEventHandler = (
   eventName: string,
   params: any,
-  session_id: any,
+  target: any,
 ) => void;
 
 export function isTypedSocketMessage<T extends SocketEvent>(

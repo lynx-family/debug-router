@@ -18,7 +18,7 @@ namespace android {
 class DebugRouterReportAndroid : public report::DebugRouterNativeReport {
  public:
   static bool RegisterJNIUtils(JNIEnv *env);
-  DebugRouterReportAndroid(JNIEnv *env, jobject slot);
+  DebugRouterReportAndroid(JNIEnv *env, jobject report_delegate);
   virtual ~DebugRouterReportAndroid() override = default;
 
   void report(const std::string &eventName, const std::string &category,

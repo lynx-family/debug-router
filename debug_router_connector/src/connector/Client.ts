@@ -9,7 +9,7 @@ export abstract class Client {
   abstract sendCustomizedMessage(
     method: string,
     params: Object,
-    sessionId: number,
+    targetId: number,
     type: string,
   ): Promise<string>;
 }

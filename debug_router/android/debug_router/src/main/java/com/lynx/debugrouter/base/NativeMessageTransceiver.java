@@ -5,5 +5,5 @@
 package com.lynx.debugrouter.base;
 
 public interface NativeMessageTransceiver extends MessageTransceiver {
-  void wrapAndSend(String type, int session, String data, int mark, boolean isObject);
+  void wrapAndSend(String type, int targetId, String data, int mark, boolean isObject);
 }

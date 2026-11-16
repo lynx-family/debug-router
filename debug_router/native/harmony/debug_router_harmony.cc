@@ -8,15 +8,15 @@
 
 #include "debug_router/native/harmony/base/napi_util.h"
 #include "debug_router/native/harmony/debug_router_state_listener_harmony.h"
-#include "debug_router/native/harmony/native_slot_harmony.h"
+#include "debug_router/native/harmony/native_target_harmony.h"
 
 namespace debugrouter {
 namespace harmony {
 
 std::vector<DebugRouterHarmony::GlobalHandlerRegistration>
     DebugRouterHarmony::global_handlers_;
-std::vector<DebugRouterHarmony::SessionHandlerRegistration>
-    DebugRouterHarmony::session_handlers_;
+std::vector<DebugRouterHarmony::TargetHandlerRegistration>
+    DebugRouterHarmony::target_handlers_;
 std::vector<DebugRouterHarmony::MessageHandlerRegistration>
     DebugRouterHarmony::message_handlers_;
 
@@ -28,10 +28,11 @@ napi_value DebugRouterHarmony::Init(napi_env env, napi_value exports) {
        napi_static, 0},
       {"removeGlobalHandler", 0, DebugRouterHarmony::RemoveGlobalHandler, 0, 0,
        0, napi_static, 0},
-      {"addSessionHandler", 0, DebugRouterHarmony::AddSessionHandler, 0, 0, 0,
+      // Obsoleted legacy protocol: ArkTS export names.
+      {"addSessionHandler", 0, DebugRouterHarmony::AddTargetHandler, 0, 0, 0,
        napi_static, 0},
-      {"removeSessionHandler", 0, DebugRouterHarmony::RemoveSessionHandler, 0,
-       0, 0, napi_static, 0},
+      {"removeSessionHandler", 0, DebugRouterHarmony::RemoveTargetHandler, 0, 0,
+       0, napi_static, 0},
       {"addMessageHandler", 0, DebugRouterHarmony::AddMessageHandler, 0, 0, 0,
        napi_static, 0},
       {"removeMessageHandler", 0, DebugRouterHarmony::RemoveMessageHandler, 0,
@@ -57,9 +58,10 @@ napi_value DebugRouterHarmony::Init(napi_env env, napi_value exports) {
        0},
       {"getAppInfoByKey", 0, DebugRouterHarmony::GetAppInfoByKey, 0, 0, 0,
        napi_static, 0},
-      {"enableAllSessions", 0, DebugRouterHarmony::EnableAllSessions, 0, 0, 0,
+      // Obsoleted legacy protocol: ArkTS export names.
+      {"enableAllSessions", 0, DebugRouterHarmony::EnableAllTargets, 0, 0, 0,
        napi_static, 0},
-      {"enableSingleSession", 0, DebugRouterHarmony::EnableSingleSession, 0, 0,
+      {"enableSingleSession", 0, DebugRouterHarmony::EnableSingleTarget, 0, 0,
        0, napi_static, 0},
       {"enableDebugChannel", 0, DebugRouterHarmony::EnableDebugChannel, 0, 0, 0,
        napi_static, 0},
@@ -139,29 +141,29 @@ napi_value DebugRouterHarmony::RemoveGlobalHandler(napi_env env,
   return result;
 }
 
-napi_value DebugRouterHarmony::AddSessionHandler(napi_env env,
-                                                 napi_callback_info info) {
+napi_value DebugRouterHarmony::AddTargetHandler(napi_env env,
+                                                napi_callback_info info) {
   napi_value js_this;
   size_t argc = 1;
   napi_value argv[1];
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
   auto existing = std::find_if(
-      session_handlers_.begin(), session_handlers_.end(),
-      [env, value = argv[0]](const SessionHandlerRegistration& registration) {
+      target_handlers_.begin(), target_handlers_.end(),
+      [env, value = argv[0]](const TargetHandlerRegistration& registration) {
         return registration.handler->IsSame(env, value);
       });
-  if (existing == session_handlers_.end()) {
-    auto session_handler =
-        std::make_shared<DebugRouterSessionHandlerHarmony>(env, argv[0]);
+  if (existing == target_handlers_.end()) {
+    auto target_handler =
+        std::make_shared<DebugRouterTargetHandlerHarmony>(env, argv[0]);
     int handler_id =
-        core::DebugRouterCore::GetInstance().AddSessionHandler(session_handler);
-    session_handlers_.push_back({handler_id, std::move(session_handler)});
+        core::DebugRouterCore::GetInstance().AddTargetHandler(target_handler);
+    target_handlers_.push_back({handler_id, std::move(target_handler)});
   }
   return nullptr;
 }
 
-napi_value DebugRouterHarmony::RemoveSessionHandler(napi_env env,
-                                                    napi_callback_info info) {
+napi_value DebugRouterHarmony::RemoveTargetHandler(napi_env env,
+                                                   napi_callback_info info) {
   napi_value js_this;
   size_t argc = 1;
   napi_value argv[1];
@@ -169,15 +171,15 @@ napi_value DebugRouterHarmony::RemoveSessionHandler(napi_env env,
 
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
   auto existing = std::find_if(
-      session_handlers_.begin(), session_handlers_.end(),
-      [env, value = argv[0]](const SessionHandlerRegistration& registration) {
+      target_handlers_.begin(), target_handlers_.end(),
+      [env, value = argv[0]](const TargetHandlerRegistration& registration) {
         return registration.handler->IsSame(env, value);
       });
-  if (existing != session_handlers_.end()) {
+  if (existing != target_handlers_.end()) {
     existing->handler->Deactivate();
-    bool res = core::DebugRouterCore::GetInstance().RemoveSessionHandler(
+    bool res = core::DebugRouterCore::GetInstance().RemoveTargetHandler(
         existing->handler_id);
-    session_handlers_.erase(existing);
+    target_handlers_.erase(existing);
     napi_get_boolean(env, res, &result);
     return result;
   }
@@ -316,11 +318,11 @@ napi_value DebugRouterHarmony::SendDataAsync(napi_env env,
   napi_value argv[3];
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
   std::string type = base::NapiUtil::ConvertToString(env, argv[0]);
-  int32_t session;
-  napi_get_value_int32(env, argv[1], &session);
+  int32_t target_id;
+  napi_get_value_int32(env, argv[1], &target_id);
   std::string data = base::NapiUtil::ConvertToString(env, argv[2]);
   // 只为harmony提供传递data为string的接口
-  core::DebugRouterCore::GetInstance().SendDataAsync(data, type, session, -1,
+  core::DebugRouterCore::GetInstance().SendDataAsync(data, type, target_id, -1,
                                                      false);
   return nullptr;
 }
@@ -332,10 +334,10 @@ napi_value DebugRouterHarmony::Plug(napi_env env, napi_callback_info info) {
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
   std::string url = base::NapiUtil::ConvertToString(env, argv[1]);
   std::string type = base::NapiUtil::ConvertToString(env, argv[2]);
-  auto slot = std::make_shared<NativeSlotHarmony>(env, argv[0], url, type);
-  int session_id = core::DebugRouterCore::GetInstance().Plug(slot);
+  auto target = std::make_shared<NativeTargetHarmony>(env, argv[0], url, type);
+  int target_id = core::DebugRouterCore::GetInstance().Plug(target);
   napi_value result;
-  napi_create_int32(env, session_id, &result);
+  napi_create_int32(env, target_id, &result);
   return result;
 }
 
@@ -344,9 +346,9 @@ napi_value DebugRouterHarmony::Pull(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value argv[1];
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
-  int session_id;
-  napi_get_value_int32(env, argv[0], &session_id);
-  core::DebugRouterCore::GetInstance().Pull(session_id);
+  int target_id;
+  napi_get_value_int32(env, argv[0], &target_id);
+  core::DebugRouterCore::GetInstance().Pull(target_id);
   return nullptr;
 }
 
@@ -436,21 +438,21 @@ napi_value DebugRouterHarmony::GetAppInfoByKey(napi_env env,
   return result;
 }
 
-napi_value DebugRouterHarmony::EnableAllSessions(napi_env env,
-                                                 napi_callback_info info) {
-  core::DebugRouterCore::GetInstance().EnableAllSessions();
+napi_value DebugRouterHarmony::EnableAllTargets(napi_env env,
+                                                napi_callback_info info) {
+  core::DebugRouterCore::GetInstance().EnableAllTargets();
   return nullptr;
 }
 
-napi_value DebugRouterHarmony::EnableSingleSession(napi_env env,
-                                                   napi_callback_info info) {
+napi_value DebugRouterHarmony::EnableSingleTarget(napi_env env,
+                                                  napi_callback_info info) {
   napi_value js_this;
   size_t argc = 1;
   napi_value argv[1];
   napi_get_cb_info(env, info, &argc, argv, &js_this, nullptr);
-  int32_t session_id;
-  napi_get_value_int32(env, argv[0], &session_id);
-  core::DebugRouterCore::GetInstance().EnableSingleSession(session_id);
+  int32_t target_id;
+  napi_get_value_int32(env, argv[0], &target_id);
+  core::DebugRouterCore::GetInstance().EnableSingleTarget(target_id);
   return nullptr;
 }
 

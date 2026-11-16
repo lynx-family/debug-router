@@ -12,6 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 #define DEPRECATED_API __attribute__((deprecated))
 
+// Obsoleted legacy protocol: public Target delegate name.
 @protocol DebugRouterSlotDelegate <NSObject>
 
 @required
@@ -23,8 +24,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+// Obsoleted legacy protocol: public Target type name.
 @interface DebugRouterSlot : NSObject
 
+// Obsoleted legacy protocol: Target ID.
 @property(readwrite) int session_id;
 @property(readwrite, weak) id<DebugRouterSlotDelegate> delegate;
 @property(readwrite, nonnull) NSString *type;

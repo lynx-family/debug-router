@@ -2,7 +2,7 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug_router/native/harmony/native_slot_harmony.h"
+#include "debug_router/native/harmony/native_target_harmony.h"
 
 #include "debug_router/native/harmony/base/fml/message_loop.h"
 #include "debug_router/native/harmony/base/napi_util.h"
@@ -10,10 +10,10 @@
 namespace debugrouter {
 namespace harmony {
 
-NativeSlotHarmony::NativeSlotHarmony(napi_env env, napi_value js_this,
-                                     const std::string& url,
-                                     const std::string& type)
-    : NativeSlot(type, url), env_(env), js_this_ref_(nullptr) {
+NativeTargetHarmony::NativeTargetHarmony(napi_env env, napi_value js_this,
+                                         const std::string& url,
+                                         const std::string& type)
+    : NativeTarget(type, url), env_(env), js_this_ref_(nullptr) {
   napi_create_reference(env, js_this, 1, &js_this_ref_);
   uv_loop_t* loop = nullptr;
   napi_get_uv_event_loop(env, &loop);
@@ -21,7 +21,7 @@ NativeSlotHarmony::NativeSlotHarmony(napi_env env, napi_value js_this,
       fml::MessageLoop::EnsureInitializedForCurrentThread(loop).GetTaskRunner();
 }
 
-NativeSlotHarmony::~NativeSlotHarmony() {
+NativeTargetHarmony::~NativeTargetHarmony() {
   napi_env env = env_;
   napi_ref reference = js_this_ref_;
   js_this_ref_ = nullptr;
@@ -32,8 +32,8 @@ NativeSlotHarmony::~NativeSlotHarmony() {
   });
 }
 
-void NativeSlotHarmony::OnMessage(const std::string& message,
-                                  const std::string& type) {
+void NativeTargetHarmony::OnMessage(const std::string& message,
+                                    const std::string& type) {
   js_task_runner_->PostTask([weak_ptr = weak_from_this(), message, type]() {
     auto handler = weak_ptr.lock();
     if (!handler) {
