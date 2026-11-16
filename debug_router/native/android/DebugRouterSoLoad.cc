@@ -12,10 +12,10 @@
 #include "debug_router/native/android/debug_router_global_handler_android.h"
 #include "debug_router/native/android/debug_router_listener_android.h"
 #include "debug_router/native/android/debug_router_report_android.h"
-#include "debug_router/native/android/debug_router_session_handler_android.h"
+#include "debug_router/native/android/debug_router_target_handler_android.h"
 #include "debug_router/native/android/log/LLog_impl.h"
 #include "debug_router/native/android/message_handler_android.h"
-#include "debug_router/native/android/native_slot_android.h"
+#include "debug_router/native/android/native_target_android.h"
 
 namespace debugrouter {
 
@@ -36,14 +36,14 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
   }
 
   if (!debugrouter::android::DebugRouterAndroid::RegisterJNIUtils(env) ||
-      !debugrouter::android::NativeSlotAndroid::RegisterJNIUtils(env) ||
+      !debugrouter::android::NativeTargetAndroid::RegisterJNIUtils(env) ||
       !debugrouter::android::DebugRouterListenerAndroid::RegisterJNIUtils(
           env) ||
       !debugrouter::android::DebugRouterReportAndroid::RegisterJNIUtils(env) ||
       !debugrouter::android::MessageHandlerAndroid::RegisterJNIUtils(env) ||
       !debugrouter::android::DebugRouterGlobalHandlerAndroid::RegisterJNIUtils(
           env) ||
-      !debugrouter::android::DebugRouterSessionHandlerAndroid::RegisterJNIUtils(
+      !debugrouter::android::DebugRouterTargetHandlerAndroid::RegisterJNIUtils(
           env) ||
       !debugrouter::android::MessageAssemberJNI::RegisterJNIUtils(env) ||
       !debugrouter::logging::LoggingDelegateAndroid::RegisterJNI(env)) {

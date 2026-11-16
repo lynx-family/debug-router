@@ -72,7 +72,7 @@ export class MultiplexerUsbClient extends Client {
   sendCustomizedMessage(
     method: string,
     params: Object | string = "",
-    sessionId: number = -1,
+    targetId: number = -1,
     type: string = "CDP",
   ): Promise<string> {
     const message: RequireMessageType = {
@@ -81,7 +81,7 @@ export class MultiplexerUsbClient extends Client {
         type,
         data: {
           client_id: -1,
-          session_id: sessionId,
+          session_id: targetId,
           message: {
             id: Client.messageIdCounter++,
             method,
@@ -161,6 +161,7 @@ export class MultiplexerUsbClient extends Client {
   private handleCustomizedMessage(payload: any): void {
     const data = payload.data;
     if (isCustomizedEventType(payload, CustomizedEventType.SessionList)) {
+      // Obsoleted legacy protocol: Target-list event name.
       this.events.emit("SessionList", data.data);
       return;
     }
@@ -192,13 +193,14 @@ export class MultiplexerUsbClient extends Client {
   private handleClientEvent(
     event: string,
     params: unknown,
-    sessionId: number | undefined,
+    targetId: number | undefined,
   ): void {
-    const session = {
-      session_id: sessionId !== undefined ? sessionId : -1,
+    const target = {
+      // Obsoleted legacy protocol: Target ID.
+      session_id: targetId !== undefined ? targetId : -1,
     };
-    this.events.emit(event, params, session);
-    this.events.emit("all-cdp-message", event, params, session);
+    this.events.emit(event, params, target);
+    this.events.emit("all-cdp-message", event, params, target);
   }
 }
 

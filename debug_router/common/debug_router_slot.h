@@ -17,6 +17,7 @@ namespace common {
 
 class DebugRouterSlotDelegate;
 
+// Obsoleted legacy protocol: public Target type name.
 class DEBUG_ROUTER_EXPORT DebugRouterSlot
     : public std::enable_shared_from_this<DebugRouterSlot> {
  public:
@@ -45,7 +46,7 @@ class DEBUG_ROUTER_EXPORT DebugRouterSlot
 
  private:
   bool plugged_;
-  int32_t session_id_;
+  int32_t target_id_;
   std::weak_ptr<DebugRouterSlotDelegate> delegate_;
   std::string type_;
 };

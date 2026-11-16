@@ -167,11 +167,11 @@ function createClient(id, overrides = {}) {
     deviceId() {
       return this.info.query.device_id;
     },
-    async sendCustomizedMessage(method, params, sessionId, type) {
+    async sendCustomizedMessage(method, params, targetId, type) {
       state.sendCustomizedCalls.push({
         method,
         params,
-        sessionId,
+        targetId,
         type,
       });
       if (overrides.sendCustomizedError) {
@@ -239,11 +239,11 @@ function createWebSocketClient(id, type = "runtime", overrides = {}) {
       }
       state.sendMessageCalls.push(message);
     },
-    async sendCustomizedMessage(method, params, sessionId, messageType) {
+    async sendCustomizedMessage(method, params, targetId, messageType) {
       state.sendCustomizedCalls.push({
         method,
         params,
-        sessionId,
+        targetId,
         messageType,
       });
       return overrides.sendCustomizedResult ?? "websocket-customized-result";
@@ -670,7 +670,7 @@ function createCustomizedEnvelope({
   params = {},
   clientId = -1,
   sender = 0,
-  sessionId = -1,
+  targetId = -1,
   type = "CDP",
   messageAsString = false,
 }) {
@@ -691,7 +691,7 @@ function createCustomizedEnvelope({
       type,
       data: {
         client_id: clientId,
-        session_id: sessionId,
+        session_id: targetId,
         message: messageAsString ? JSON.stringify(inner) : inner,
       },
       sender,
@@ -705,7 +705,7 @@ function readCustomizedInner(message) {
   return typeof raw === "string" ? JSON.parse(raw) : raw;
 }
 
-function createListSessionMessage(clientId) {
+function createListTargetsMessage(clientId) {
   return JSON.stringify({
     event: "Customized",
     data: {
@@ -717,12 +717,12 @@ function createListSessionMessage(clientId) {
   });
 }
 
-function createSessionListMessage(clientId, sessions) {
+function createTargetListMessage(clientId, targets) {
   return JSON.stringify({
     event: "Customized",
     data: {
       type: "SessionList",
-      data: sessions,
+      data: targets,
       sender: clientId,
     },
   });
@@ -2150,7 +2150,7 @@ describe("MultiplexerDaemonHost", function () {
       id: 66,
       clientId: 12,
       method: "Runtime.getProperties",
-      sessionId: 7,
+      targetId: 7,
     });
     physical.usbClients.set(client.clientId(), client);
 
@@ -2172,7 +2172,7 @@ describe("MultiplexerDaemonHost", function () {
           id: rawGlobalMessageId,
           result: { raw: true },
           clientId: -1,
-          sessionId: 7,
+          targetId: 7,
           messageAsString: true,
         })
       )
@@ -2403,7 +2403,7 @@ describe("MultiplexerDaemonHost", function () {
     await assertNotRoutable(send());
     assert.strictEqual(client.state.sendMessageCalls.length, 1);
 
-    host.handlePhysicalMessage(14, createSessionListMessage(14, []));
+    host.handlePhysicalMessage(14, createTargetListMessage(14, []));
     await assertNotRoutable(send());
 
     assert.strictEqual(client.state.sendMessageCalls.length, 1);
@@ -2770,7 +2770,7 @@ describe("MultiplexerDaemonHost", function () {
           clientId: 93,
           method: "Runtime.call",
           params: { value: true },
-          sessionId: 3,
+          targetId: 3,
           type: "App",
         }),
       })
@@ -3557,13 +3557,13 @@ describe("MultiplexerDaemonHost", function () {
       close() {},
     };
 
-    const query = createListSessionMessage(20);
+    const query = createListTargetsMessage(20);
     host.handleWebSocketDriverMessage(100, 20, query);
     host.handleWebSocketDriverMessage(101, 20, query);
 
     assert.strictEqual(client.state.sendMessageCalls.length, 1);
 
-    const notification = createSessionListMessage(0, [
+    const notification = createTargetListMessage(0, [
       { session_id: 1, type: "web", url: "app://first" },
     ]);
     host.handlePhysicalMessage(20, notification);
@@ -3601,7 +3601,7 @@ describe("MultiplexerDaemonHost", function () {
         host,
         1,
         client.clientId(),
-        createListSessionMessage(client.clientId())
+        createListTargetsMessage(client.clientId())
       );
       assert.strictEqual(client.state.sendMessageCalls.length, 1);
       assert.strictEqual(timers.timers.length, 1);
@@ -3614,7 +3614,7 @@ describe("MultiplexerDaemonHost", function () {
 
       host.handlePhysicalMessage(
         client.clientId(),
-        createSessionListMessage(client.clientId(), [])
+        createTargetListMessage(client.clientId(), [])
       );
       assert.strictEqual(timers.timers[2].cleared, true);
       timers.run(timers.timers[2]);
@@ -3643,7 +3643,7 @@ describe("MultiplexerDaemonHost", function () {
       host.handleWebSocketDriverMessage(
         1,
         client.clientId(),
-        createListSessionMessage(client.clientId())
+        createListTargetsMessage(client.clientId())
       );
       assert.strictEqual(client.state.sendMessageCalls.length, 1);
 
@@ -3653,7 +3653,7 @@ describe("MultiplexerDaemonHost", function () {
 
       host.handleWebSocketAppMessage(
         client.clientId(),
-        createSessionListMessage(client.clientId(), [])
+        createTargetListMessage(client.clientId(), [])
       );
       assert.strictEqual(timers.timers[2].cleared, true);
       timers.run(timers.timers[2]);
@@ -3672,7 +3672,7 @@ describe("MultiplexerDaemonHost", function () {
     });
     const client = createClient(21);
     const controlServer = attachControlServer(host);
-    const query = createListSessionMessage(21);
+    const query = createListTargetsMessage(21);
     physical.usbClients.set(client.clientId(), client);
 
     sendAppMessageWithoutReply(host, 1, 21, query);
@@ -3684,7 +3684,7 @@ describe("MultiplexerDaemonHost", function () {
     sendAppMessageWithoutReply(host, 3, 21, query);
     assert.strictEqual(client.state.sendMessageCalls.length, 2);
 
-    host.handlePhysicalMessage(21, createSessionListMessage(21, []));
+    host.handlePhysicalMessage(21, createTargetListMessage(21, []));
     controlServer.broadcasts.length = 0;
     now = 2150;
     sendAppMessageWithoutReply(host, 4, 21, query);
@@ -3711,12 +3711,12 @@ describe("MultiplexerDaemonHost", function () {
 
     host.handlePhysicalMessage(
       22,
-      createSessionListMessage(22, [
+      createTargetListMessage(22, [
         { session_id: 1, type: "web", url: "app://first" },
       ])
     );
-    sendAppMessageWithoutReply(host, 6, 22, createListSessionMessage(22));
-    sendAppMessageWithoutReply(host, 7, 23, createListSessionMessage(23));
+    sendAppMessageWithoutReply(host, 6, 22, createListTargetsMessage(22));
+    sendAppMessageWithoutReply(host, 7, 23, createListTargetsMessage(23));
 
     assert.strictEqual(firstClient.state.sendMessageCalls.length, 0);
     assert.strictEqual(secondClient.state.sendMessageCalls.length, 1);
@@ -3925,12 +3925,12 @@ describe("MultiplexerDaemonHost", function () {
     assert.strictEqual(client.state.sendMessageCalls.length, frontendCount);
     assert.strictEqual(controlServer.broadcasts.length, 0);
 
-    for (let sessionCount = 1; sessionCount <= frontendCount; sessionCount++) {
+    for (let targetCount = 1; targetCount <= frontendCount; targetCount++) {
       host.handlePhysicalMessage(
         client.clientId(),
-        createSessionListMessage(
+        createTargetListMessage(
           client.clientId(),
-          Array.from({ length: sessionCount }, (_, index) => ({
+          Array.from({ length: targetCount }, (_, index) => ({
             session_id: index + 1,
             type: "web",
             url: `app://card-${index + 1}`,
@@ -3955,9 +3955,9 @@ describe("MultiplexerDaemonHost", function () {
     physical.usbClients.set(retryClient.clientId(), retryClient);
     bindHostEvents(host);
 
-    host.handlePhysicalMessage(25, createSessionListMessage(25, []));
+    host.handlePhysicalMessage(25, createTargetListMessage(25, []));
     physical.emit("client-disconnected", 25);
-    sendAppMessageWithoutReply(host, 1, 25, createListSessionMessage(25));
+    sendAppMessageWithoutReply(host, 1, 25, createListTargetsMessage(25));
     assert.strictEqual(disconnectedClient.state.sendMessageCalls.length, 1);
 
     const sendMessage = retryClient.sendMessage;
@@ -3966,11 +3966,11 @@ describe("MultiplexerDaemonHost", function () {
     };
     await assert.rejects(
       () =>
-        sendAppMessageWithoutReply(host, 2, 26, createListSessionMessage(26)),
+        sendAppMessageWithoutReply(host, 2, 26, createListTargetsMessage(26)),
       /send failed/
     );
     retryClient.sendMessage = sendMessage;
-    sendAppMessageWithoutReply(host, 3, 26, createListSessionMessage(26));
+    sendAppMessageWithoutReply(host, 3, 26, createListTargetsMessage(26));
     assert.strictEqual(retryClient.state.sendMessageCalls.length, 1);
   });
 

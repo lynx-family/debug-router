@@ -14,18 +14,18 @@ namespace debugrouter {
 namespace common {
 
 DebugRouterSlot::DebugRouterSlot()
-    : plugged_(false), session_id_(0), type_("") {}
+    : plugged_(false), target_id_(0), type_("") {}
 
 int32_t DebugRouterSlot::Plug() {
   Pull();
-  session_id_ = DebugRouter::GetInstance().Plug(shared_from_this());
+  target_id_ = DebugRouter::GetInstance().Plug(shared_from_this());
   plugged_ = true;
-  return session_id_;
+  return target_id_;
 }
 
 void DebugRouterSlot::Pull() {
   if (plugged_) {
-    DebugRouter::GetInstance().Pull(session_id_);
+    DebugRouter::GetInstance().Pull(target_id_);
     plugged_ = false;
   }
 }
@@ -36,7 +36,7 @@ void DebugRouterSlot::SendAsync(const std::string &message) {
 
 void DebugRouterSlot::SendDataAsync(const std::string &data,
                                     const std::string &type) {
-  DebugRouter::GetInstance().SendDataAsync(data, type, session_id_);
+  DebugRouter::GetInstance().SendDataAsync(data, type, target_id_);
 }
 
 std::string DebugRouterSlot::GetTemplateUrl() const {
@@ -78,7 +78,7 @@ void DebugRouterSlot::SendScreenCast(
     const std::unordered_map<std::string, float> &metadata) {
   auto cdp_data =
       debugrouter::processor::MessageAssembler::AssembleScreenCastFrame(
-          session_id_, data, metadata);
+          target_id_, data, metadata);
   SendDataAsync(cdp_data, "CDP");
 }
 

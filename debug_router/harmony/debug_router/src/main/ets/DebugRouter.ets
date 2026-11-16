@@ -11,7 +11,7 @@ import BuildProfile from '../../../BuildProfile';
 
 export class DebugRouter {
   // Keep DebugRouter independent of the concrete UI framework while retaining
-  // object identity for view-to-session mapping.
+  // object identity for view-to-targetId mapping.
   private static viewMap: Map<Object, number> = new Map<Object, number>();
   private static initialized: boolean = false;
 
@@ -45,23 +45,24 @@ export class DebugRouter {
     DebugRouter.ensureInitialized();
   }
 
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   public static getSessionIdByView(view: Object): number {
-    let sessionId = DebugRouter.viewMap.get(view);
-    return sessionId === undefined ? 0 : sessionId;
+    let targetId = DebugRouter.viewMap.get(view);
+    return targetId === undefined ? 0 : targetId;
   }
 
-  public static getViewBySessionId(sessionId: number): Object | null {
+  public static getViewBySessionId(targetId: number): Object | null {
     let result: Object | null = null;
     DebugRouter.viewMap.forEach((id, view) => {
-      if (id === sessionId) {
+      if (id === targetId) {
         result = view;
       }
     });
     return result;
   }
 
-  public static setSessionIdOfView(view: Object, sessionId: number): void {
-    DebugRouter.viewMap.set(view, sessionId);
+  public static setSessionIdOfView(view: Object, targetId: number): void {
+    DebugRouter.viewMap.set(view, targetId);
   }
 
   public static removeView(view: Object): void {
@@ -76,6 +77,7 @@ export class DebugRouter {
     return DebugRouterHarmony.removeGlobalHandler(handler);
   }
 
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   public static addSessionHandler(handler: DebugRouterSessionHandlerHarmony): void {
     DebugRouterHarmony.addSessionHandler(handler);
   }
@@ -112,18 +114,18 @@ export class DebugRouter {
     DebugRouterHarmony.sendAsync(message);
   }
 
-  public static sendDataAsync(type: string, session: number, data: string): void {
-    DebugRouterHarmony.sendDataAsync(type, session, data);
+  public static sendDataAsync(type: string, targetId: number, data: string): void {
+    DebugRouterHarmony.sendDataAsync(type, targetId, data);
   }
 
-  public static plug(slot: DebugRouterSlot): number {
-    return DebugRouterHarmony.plug(slot, slot.getTemplateUrl(), slot.getType());
+  public static plug(target: DebugRouterSlot): number {
+    return DebugRouterHarmony.plug(target, target.getTemplateUrl(), target.getType());
   }
 
-  public static pull(sessionId: number): void {
-    DebugRouterHarmony.pull(sessionId);
+  public static pull(targetId: number): void {
+    DebugRouterHarmony.pull(targetId);
     DebugRouter.viewMap.forEach((id, view) => {
-      if (id === sessionId) {
+      if (id === targetId) {
         DebugRouter.viewMap.delete(view);
       }
     });
@@ -153,13 +155,14 @@ export class DebugRouter {
     return DebugRouterHarmony.getAppInfoByKey(key);
   }
 
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   public static enableAllSessions(): void {
     DebugRouterHarmony.enableAllSessions();
   }
 
-  // sessionId must be > 0. Invalid values are ignored by native layer.
-  public static enableSingleSession(sessionId: number): void {
-    DebugRouterHarmony.enableSingleSession(sessionId);
+  // targetId must be > 0. Invalid values are ignored by native layer.
+  public static enableSingleSession(targetId: number): void {
+    DebugRouterHarmony.enableSingleSession(targetId);
   }
 
   public static enableDebugChannel(): void {

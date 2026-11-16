@@ -10,10 +10,11 @@ import com.lynx.debugrouter.log.LLog;
 import java.lang.reflect.Method;
 import java.util.Map;
 
+// Obsoleted legacy protocol: public Target type name.
 public class DebugRouterSlot {
   private static final String TAG = "DebugRouterSlot";
 
-  private int mSessionId;
+  private int mTargetId;
   private DebugRouterSlotDelegate mDelegate;
   private boolean mPlugged;
   private String mType = "";
@@ -24,14 +25,14 @@ public class DebugRouterSlot {
 
   public int plug() {
     pull();
-    mSessionId = DebugRouter.getInstance().plug(this);
+    mTargetId = DebugRouter.getInstance().plug(this);
     mPlugged = true;
-    return mSessionId;
+    return mTargetId;
   }
 
   public void pull() {
     if (mPlugged) {
-      DebugRouter.getInstance().pull(mSessionId);
+      DebugRouter.getInstance().pull(mTargetId);
       mPlugged = false;
     }
   }
@@ -41,11 +42,11 @@ public class DebugRouterSlot {
   }
 
   public void sendData(String type, String data) {
-    DebugRouter.getInstance().sendData(type, mSessionId, data);
+    DebugRouter.getInstance().sendData(type, mTargetId, data);
   }
 
   public void sendData(String type, String data, int mark) {
-    DebugRouter.getInstance().sendData(type, mSessionId, data, mark);
+    DebugRouter.getInstance().sendData(type, mTargetId, data, mark);
   }
 
   public void sendAsync(String message) {
@@ -53,12 +54,12 @@ public class DebugRouterSlot {
   }
 
   public void sendDataAsync(String type, String data) {
-    DebugRouter.getInstance().sendDataAsync(type, mSessionId, data);
+    DebugRouter.getInstance().sendDataAsync(type, mTargetId, data);
   }
 
   @Deprecated
   public void sendDataAsync(String type, String data, int mark) {
-    DebugRouter.getInstance().sendDataAsync(type, mSessionId, data, mark);
+    DebugRouter.getInstance().sendDataAsync(type, mTargetId, data, mark);
   }
 
   public String getTemplateUrl() {
@@ -114,7 +115,7 @@ public class DebugRouterSlot {
 
   @Deprecated
   public void sendScreenCast(String data, Map<String, Float> metaData) {
-    String msg = MessageAssembler.assembleScreenCastFrame(mSessionId, data, metaData);
+    String msg = MessageAssembler.assembleScreenCastFrame(mTargetId, data, metaData);
     sendDataAsync("CDP", msg);
   }
 

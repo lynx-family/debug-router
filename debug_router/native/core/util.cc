@@ -20,9 +20,9 @@ const char *kTypeKey = "type";
 
 bool IsBuiltinCustomizedType(const std::string &type) {
   return type == protocol::kRemoteDebugProtocolBodyData4CDP ||
-         type == protocol::kRemoteDebugProtocolBodyData4Custom4ListSession ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4ListTargets ||
          type == protocol::kRemoteDebugProtocolBodyData4Custom4MessageHandler ||
-         type == protocol::kRemoteDebugProtocolBodyData4Custom4SessionList ||
+         type == protocol::kRemoteDebugProtocolBodyData4Custom4TargetList ||
          type == protocol::kRemoteDebugProtocolBodyData4Custom4OpenSession ||
          type == protocol::kRemoteDebugProtocolBodyData4Custom4CloseSession ||
          type == protocol::kRemoteDebugProtocolBodyData4Custom4D2RStopAtEntry ||

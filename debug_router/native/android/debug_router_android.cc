@@ -11,9 +11,9 @@
 #include "debug_router/native/android/debug_router_global_handler_android.h"
 #include "debug_router/native/android/debug_router_listener_android.h"
 #include "debug_router/native/android/debug_router_report_android.h"
-#include "debug_router/native/android/debug_router_session_handler_android.h"
+#include "debug_router/native/android/debug_router_target_handler_android.h"
 #include "debug_router/native/android/message_handler_android.h"
-#include "debug_router/native/android/native_slot_android.h"
+#include "debug_router/native/android/native_target_android.h"
 #include "debug_router/native/core/debug_router_config.h"
 #include "debug_router/native/core/debug_router_core.h"
 
@@ -46,10 +46,10 @@ void DisconnectAsync(JNIEnv *env, jobject jcaller) {
   debugrouter::core::DebugRouterCore::GetInstance().DisconnectAsync();
 }
 
-jint Plug(JNIEnv *env, jobject jcaller, jobject slot) {
-  auto native_slot =
-      std::make_shared<debugrouter::android::NativeSlotAndroid>(env, slot);
-  return debugrouter::core::DebugRouterCore::GetInstance().Plug(native_slot);
+jint Plug(JNIEnv *env, jobject jcaller, jobject target) {
+  auto native_target =
+      std::make_shared<debugrouter::android::NativeTargetAndroid>(env, target);
+  return debugrouter::core::DebugRouterCore::GetInstance().Plug(native_target);
 }
 
 void SetReportDelegate(JNIEnv *env, jobject jcaller, jobject delegate) {
@@ -72,8 +72,8 @@ jstring GetAppInfoByKey(JNIEnv *env, jobject jcaller, jstring key) {
                                                                      value);
 }
 
-void Pull(JNIEnv *env, jobject jcaller, jint sessionId) {
-  debugrouter::core::DebugRouterCore::GetInstance().Pull(sessionId);
+void Pull(JNIEnv *env, jobject jcaller, jint targetId) {
+  debugrouter::core::DebugRouterCore::GetInstance().Pull(targetId);
 }
 
 void Send(JNIEnv *env, jobject jcaller, jstring message) {
@@ -81,20 +81,20 @@ void Send(JNIEnv *env, jobject jcaller, jstring message) {
       debugrouter::common::android::JNIHelper::ConvertToString(env, message));
 }
 
-void SendData(JNIEnv *env, jobject jcaller, jstring type, jint session,
+void SendData(JNIEnv *env, jobject jcaller, jstring type, jint target_id,
               jstring data, jint mark, jboolean isObject) {
   debugrouter::core::DebugRouterCore::GetInstance().SendData(
       debugrouter::common::android::JNIHelper::ConvertToString(env, data),
       debugrouter::common::android::JNIHelper::ConvertToString(env, type),
-      session, mark, isObject);
+      target_id, mark, isObject);
 }
 
-void SendDataAsync(JNIEnv *env, jobject jcaller, jstring type, jint session,
+void SendDataAsync(JNIEnv *env, jobject jcaller, jstring type, jint target_id,
                    jstring data, jint mark, jboolean isObject) {
   debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(
       debugrouter::common::android::JNIHelper::ConvertToString(env, data),
       debugrouter::common::android::JNIHelper::ConvertToString(env, type),
-      session, mark, isObject);
+      target_id, mark, isObject);
 }
 
 void SendAsync(JNIEnv *env, jobject jcaller, jstring message) {
@@ -141,14 +141,14 @@ jboolean RemoveNativeMessageHandler(JNIEnv *env, jobject jcaller,
                                                                handler_name));
 }
 
-jint AddNativeSessionHandler(JNIEnv *env, jobject jcaller, jobject handler) {
-  return debugrouter::core::DebugRouterCore::GetInstance().AddSessionHandler(
-      new debugrouter::android::DebugRouterSessionHandlerAndroid(env, handler));
+jint AddNativeTargetHandler(JNIEnv *env, jobject jcaller, jobject handler) {
+  return debugrouter::core::DebugRouterCore::GetInstance().AddTargetHandler(
+      new debugrouter::android::DebugRouterTargetHandlerAndroid(env, handler));
 }
 
-jboolean RemoveNativeSessionHandler(JNIEnv *env, jobject jcaller,
-                                    jint handler_id) {
-  return debugrouter::core::DebugRouterCore::GetInstance().RemoveSessionHandler(
+jboolean RemoveNativeTargetHandler(JNIEnv *env, jobject jcaller,
+                                   jint handler_id) {
+  return debugrouter::core::DebugRouterCore::GetInstance().RemoveTargetHandler(
       handler_id);
 }
 
@@ -181,13 +181,13 @@ jstring GetServerUrl(JNIEnv *env, jobject jcaller) {
       env, debugrouter::core::DebugRouterCore::GetInstance().GetServerUrl());
 }
 
-void EnableAllSessions(JNIEnv *env, jobject jcaller) {
-  debugrouter::core::DebugRouterCore::GetInstance().EnableAllSessions();
+void EnableAllTargets(JNIEnv *env, jobject jcaller) {
+  debugrouter::core::DebugRouterCore::GetInstance().EnableAllTargets();
 }
 
-void EnableSingleSession(JNIEnv *env, jobject jcaller, jint session_id) {
-  debugrouter::core::DebugRouterCore::GetInstance().EnableSingleSession(
-      session_id);
+void EnableSingleTarget(JNIEnv *env, jobject jcaller, jint target_id) {
+  debugrouter::core::DebugRouterCore::GetInstance().EnableSingleTarget(
+      target_id);
 }
 
 void EnableDebugChannel(JNIEnv *env, jobject jcaller) {

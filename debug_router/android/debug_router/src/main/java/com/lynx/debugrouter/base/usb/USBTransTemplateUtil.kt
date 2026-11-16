@@ -133,6 +133,7 @@ object USBTransTemplateUtil {
         }
         val future = executor.schedule(task, 8, TimeUnit.SECONDS)
         requestTimeOutTask[reqId] = future
+        // Obsoleted legacy protocol: session_id = -1 means global.
         mTransceiver?.send("""{"data":{"data":{"client_id":-1,"message": "{\"method\":\"DownloadTemplateByUsb\",\"params\":{\"requestId\":${reqId}, \"url\":\"${url}\"}}","session_id": -1},"sender": -1,"type": "CDP"},"event": "Customized"}""")
 
         return reqId

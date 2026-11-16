@@ -4,13 +4,14 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// Obsoleted legacy protocol: Session callbacks describe Targets.
 @protocol DebugRouterSessionHandler <NSObject>
 
 @required
 
-- (void)onSessionCreate:(int)session_id withUrl:(NSString *)url;
-- (void)onSessionDestroy:(int)session_id;
-- (void)onMessage:(NSString *)message withType:(NSString *)type withSessionId:(int)session_id;
+- (void)onSessionCreate:(int)target_id withUrl:(NSString *)url;
+- (void)onSessionDestroy:(int)target_id;
+- (void)onMessage:(NSString *)message withType:(NSString *)type withSessionId:(int)target_id;
 
 @end
 

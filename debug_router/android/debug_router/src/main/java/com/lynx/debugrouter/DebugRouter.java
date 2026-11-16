@@ -34,8 +34,7 @@ public class DebugRouter {
 
   private static final WeakHashMap<View, Integer> viewMap = new WeakHashMap<>();
   // TODO(txl): We need throw add and remove operations to the DebugRouter thread for execution
-  private final Map<DebugRouterSessionHandler, Integer> mSessionHandlers =
-      new ConcurrentHashMap<>();
+  private final Map<DebugRouterSessionHandler, Integer> mTargetHandlers = new ConcurrentHashMap<>();
   private final Map<DebugRouterGlobalHandler, Integer> mGlobalHandlers = new ConcurrentHashMap<>();
 
   private DebugRouter() {
@@ -188,29 +187,30 @@ public class DebugRouter {
 
   private native boolean nativeRemoveNativeMessageHandler(String handlerName);
 
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   public void addSessionHandler(DebugRouterSessionHandler handler) {
     if (handler == null) {
       return;
     }
     SessionHandlerDelegate currHandler = new SessionHandlerDelegate(handler);
-    int handlerId = nativeAddNativeSessionHandler(currHandler);
-    mSessionHandlers.put(handler, handlerId);
+    int handlerId = nativeAddNativeTargetHandler(currHandler);
+    mTargetHandlers.put(handler, handlerId);
   }
 
-  private native int nativeAddNativeSessionHandler(SessionHandlerDelegate handler);
+  private native int nativeAddNativeTargetHandler(SessionHandlerDelegate handler);
 
   public boolean removeSessionHandler(DebugRouterSessionHandler handler) {
     if (handler == null) {
       return false;
     }
-    Integer removedHandlerId = mSessionHandlers.remove(handler);
+    Integer removedHandlerId = mTargetHandlers.remove(handler);
     if (removedHandlerId != null) {
-      return nativeRemoveNativeSessionHandler(removedHandlerId);
+      return nativeRemoveNativeTargetHandler(removedHandlerId);
     }
     return false;
   }
 
-  private native boolean nativeRemoveNativeSessionHandler(int handlerId);
+  private native boolean nativeRemoveNativeTargetHandler(int handlerId);
 
   @Deprecated
   public void connect(String url, String room) {
@@ -226,19 +226,20 @@ public class DebugRouter {
 
   private native void nativeDisconnectAsync();
 
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   public int getSessionIdByView(@NonNull View view) {
     synchronized (viewMap) {
-      Integer sessionId = viewMap.get(view);
-      return sessionId == null ? 0 : sessionId;
+      Integer targetId = viewMap.get(view);
+      return targetId == null ? 0 : targetId;
     }
   }
 
   @Nullable
-  public View getViewBySessionId(int sessionId) {
+  public View getViewBySessionId(int targetId) {
     synchronized (viewMap) {
       for (Map.Entry<View, Integer> entry : viewMap.entrySet()) {
-        int viewSessionId = entry.getValue();
-        if (viewSessionId == sessionId) {
+        int viewTargetId = entry.getValue();
+        if (viewTargetId == targetId) {
           return entry.getKey();
         }
       }
@@ -246,9 +247,9 @@ public class DebugRouter {
     }
   }
 
-  public void setSessionIdOfView(@NonNull View view, int sessionId) {
+  public void setSessionIdOfView(@NonNull View view, int targetId) {
     synchronized (viewMap) {
-      viewMap.put(view, sessionId);
+      viewMap.put(view, targetId);
     }
   }
 
@@ -269,26 +270,26 @@ public class DebugRouter {
     nativeDisconnectAsync();
   }
 
-  private native int nativePlug(NativeSlotDelegate slot);
+  private native int nativePlug(NativeSlotDelegate target);
 
-  public int plug(@NonNull DebugRouterSlot slot) {
-    LLog.i(TAG, "plug session " + slot.getTemplateUrl());
+  public int plug(@NonNull DebugRouterSlot target) {
+    LLog.i(TAG, "plug target " + target.getTemplateUrl());
 
-    int sessionId = nativePlug(new NativeSlotDelegate(slot));
-    View view = slot.getTemplateView();
+    int targetId = nativePlug(new NativeSlotDelegate(target));
+    View view = target.getTemplateView();
     if (view != null) {
       synchronized (viewMap) {
-        viewMap.put(view, sessionId);
+        viewMap.put(view, targetId);
       }
     }
-    return sessionId;
+    return targetId;
   }
 
-  private native void nativePull(int sessionId);
+  private native void nativePull(int targetId);
 
-  public void pull(int sessionId) {
-    LLog.i(TAG, "pull session " + sessionId);
-    nativePull(sessionId);
+  public void pull(int targetId) {
+    LLog.i(TAG, "pull target " + targetId);
+    nativePull(targetId);
   }
 
   private native void nativeSend(String message);
@@ -301,34 +302,34 @@ public class DebugRouter {
     nativeSend(message);
   }
 
-  public void sendData(String type, int session, String data) {
-    sendData(type, session, data, -1);
+  public void sendData(String type, int targetId, String data) {
+    sendData(type, targetId, data, -1);
   }
 
-  public void sendData(String type, int session, String data, int mark) {
-    sendData(type, session, data, mark, false);
+  public void sendData(String type, int targetId, String data, int mark) {
+    sendData(type, targetId, data, mark, false);
   }
 
-  public void sendData(String type, int session, JSONObject data) {
-    sendData(type, session, data, -1);
+  public void sendData(String type, int targetId, JSONObject data) {
+    sendData(type, targetId, data, -1);
   }
 
-  public void sendData(String type, int session, JSONObject data, int mark) {
-    sendData(type, session, data.toString(), mark, true);
+  public void sendData(String type, int targetId, JSONObject data, int mark) {
+    sendData(type, targetId, data.toString(), mark, true);
   }
 
   private native void nativeSendData(
-      String type, int session, String data, int mark, boolean isObject);
+      String type, int targetId, String data, int mark, boolean isObject);
 
   private native void nativeSendDataAsync(
-      String type, int session, String data, int mark, boolean isObject);
+      String type, int targetId, String data, int mark, boolean isObject);
 
-  private void sendData(String type, int session, String data, int mark, boolean isObject) {
+  private void sendData(String type, int targetId, String data, int mark, boolean isObject) {
     if (data == null) {
       LLog.i(TAG, "sendData: message == null");
       return;
     }
-    nativeSendData(type, session, data, mark, isObject);
+    nativeSendData(type, targetId, data, mark, isObject);
   }
 
   private native void nativeSendAsync(String message);
@@ -337,20 +338,20 @@ public class DebugRouter {
     nativeSendAsync(message);
   }
 
-  public void sendDataAsync(String type, int session, String data) {
-    sendDataAsync(type, session, data, -1);
+  public void sendDataAsync(String type, int targetId, String data) {
+    sendDataAsync(type, targetId, data, -1);
   }
 
-  public void sendDataAsync(String type, int session, String data, int mark) {
-    nativeSendDataAsync(type, session, data, mark, false);
+  public void sendDataAsync(String type, int targetId, String data, int mark) {
+    nativeSendDataAsync(type, targetId, data, mark, false);
   }
 
-  public void sendDataAsync(String type, int session, JSONObject data) {
-    sendDataAsync(type, session, data, -1);
+  public void sendDataAsync(String type, int targetId, JSONObject data) {
+    sendDataAsync(type, targetId, data, -1);
   }
 
-  public void sendDataAsync(String type, int session, JSONObject data, int mark) {
-    nativeSendDataAsync(type, session, data.toString(), mark, true);
+  public void sendDataAsync(String type, int targetId, JSONObject data, int mark) {
+    nativeSendDataAsync(type, targetId, data.toString(), mark, true);
   }
 
   private native boolean nativeIsValidSchema(String schema);
@@ -459,9 +460,9 @@ public class DebugRouter {
     return false;
   }
 
-  private native void nativeEnableAllSessions();
+  private native void nativeEnableAllTargets();
 
-  private native void nativeEnableSingleSession(int session_id);
+  private native void nativeEnableSingleTarget(int target_id);
 
   private native void nativeEnableDebugChannel();
 
@@ -469,13 +470,14 @@ public class DebugRouter {
 
   private native boolean nativeIsDebugChannelEnabled();
 
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   public void enableAllSessions() {
-    nativeEnableAllSessions();
+    nativeEnableAllTargets();
   }
 
-  // session_id must be > 0. Invalid values are ignored by native layer.
-  public void enableSingleSession(int session_id) {
-    nativeEnableSingleSession(session_id);
+  // target_id must be > 0. Invalid values are ignored by native layer.
+  public void enableSingleSession(int target_id) {
+    nativeEnableSingleTarget(target_id);
   }
 
   public void enableDebugChannel() {

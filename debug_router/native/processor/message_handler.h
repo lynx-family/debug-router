@@ -16,8 +16,8 @@ class MessageHandler {
   virtual ~MessageHandler() {}
   virtual std::string GetRoomId() = 0;
   virtual std::unordered_map<std::string, std::string> GetClientInfo() = 0;
-  virtual std::unordered_map<int, std::string> GetSessionList() = 0;
-  virtual void OnMessage(const std::string &type, int session_id,
+  virtual std::unordered_map<int, std::string> GetTargetList() = 0;
+  virtual void OnMessage(const std::string &type, int target_id,
                          const std::string &message) = 0;
   virtual void SendMessage(const std::string &message) = 0;
   virtual void OpenCard(const std::string &url) = 0;

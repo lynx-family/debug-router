@@ -274,19 +274,21 @@ export default class ClientAdapter {
 
   protected handleClientEvent(
     message: string,
-    session_id: number | undefined,
+    targetId: number | undefined,
   ): void {
     const response: CDPEventMessage = JSON.parse(message);
     if (response.method && this.connection) {
       this.connection.handleClientEvent(response.method, response.params, {
-        session_id: session_id !== undefined ? session_id : -1,
+        // Obsoleted legacy protocol: Target ID.
+        session_id: targetId !== undefined ? targetId : -1,
       });
     }
   }
 
-  protected handleSessionList(sessionList: any) {
+  // Obsoleted legacy protocol: protected callback name.
+  protected handleSessionList(targetList: any) {
     if (this.connection) {
-      this.connection.handleSessionList(sessionList);
+      this.connection.handleSessionList(targetList);
     }
   }
 

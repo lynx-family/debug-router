@@ -20,9 +20,12 @@ const char *kRemoteDebugServerEvent4ChangeRoomServerAck = "ChangeRoomServerAck";
 const char *kRemoteDebugServerEvent4Custom = "Customized";
 
 const char *kRemoteDebugProtocolBodyData4CDP = "CDP";
-const char *kRemoteDebugProtocolBodyData4Custom4ListSession = "ListSession";
+// Obsoleted legacy protocol: Target-list request name.
+const char *kRemoteDebugProtocolBodyData4Custom4ListTargets = "ListSession";
 const char *kRemoteDebugProtocolBodyData4Custom4MessageHandler = "App";
-const char *kRemoteDebugProtocolBodyData4Custom4SessionList = "SessionList";
+// Obsoleted legacy protocol: Target-list event name.
+const char *kRemoteDebugProtocolBodyData4Custom4TargetList = "SessionList";
+// Obsoleted legacy protocol: historical messages, not new Session APIs.
 const char *kRemoteDebugProtocolBodyData4Custom4OpenSession = "OpenSession";
 const char *kRemoteDebugProtocolBodyData4Custom4CloseSession = "CloseSession";
 const char *kRemoteDebugProtocolBodyData4Custom4D2RStopAtEntry =
@@ -41,7 +44,8 @@ const char *kKeyRoom = "room";
 const char *kKeyType = "type";
 const char *kKeyInfo = "info";
 const char *kKeyClientId = "client_id";
-const char *kKeySessionId = "session_id";
+// Obsoleted legacy protocol: session_id is a Target ID.
+const char *kLegacyTargetId = "session_id";
 const char *kKeyUrl = "url";
 const char *kKeyCode = "code";
 const char *kKeyMessage = "message";
@@ -250,12 +254,12 @@ std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4AppMessage(
 
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Custom(
     std::string type, RemoteDebugPrococolClientId client_id,
-    std::shared_ptr<CustomData4SessionList> session_list_data) {
+    std::shared_ptr<CustomData4TargetList> target_list_data) {
   std::shared_ptr<RemoteDebugProtocolBodyData4Custom> custom_content =
       std::make_shared<RemoteDebugProtocolBodyData4Custom>();
   custom_content->type_ = type;
   custom_content->client_id_ = client_id;
-  custom_content->session_data_list_ = session_list_data;
+  custom_content->target_data_list_ = target_list_data;
   std::shared_ptr<RemoteDebugProtocolBody> custom_body =
       std::make_shared<RemoteDebugProtocolBody>(kRemoteDebugServerEvent4Custom,
                                                 custom_content);
@@ -375,19 +379,19 @@ std::shared_ptr<RemoteDebugProtocolBody> Parse(const Json::Value &value) {
           }
 
           if (message_type.asString().compare(
-                  kRemoteDebugProtocolBodyData4Custom4ListSession) == 0) {
+                  kRemoteDebugProtocolBodyData4Custom4ListTargets) == 0) {
             auto custom_data =
                 std::make_shared<RemoteDebugProtocolBodyData4Custom>();
-            auto list_session = std::make_shared<CustomData4ListSession>();
+            auto list_targets = std::make_shared<CustomData4ListTargets>();
             if (payload.isObject()) {
               const Json::Value client_id = payload[kKeyClientId];
               if (client_id.isInt()) {
-                list_session->client_id_ = client_id.asInt();
+                list_targets->client_id_ = client_id.asInt();
               }
             }
-            custom_data->list_session_data_ = list_session;
+            custom_data->list_targets_data_ = list_targets;
             custom_data->type_ =
-                kRemoteDebugProtocolBodyData4Custom4ListSession;
+                kRemoteDebugProtocolBodyData4Custom4ListTargets;
             auto body = std::make_shared<RemoteDebugProtocolBody>(eventStr,
                                                                   custom_data);
             return body;
@@ -420,15 +424,15 @@ std::shared_ptr<RemoteDebugProtocolBody> Parse(const Json::Value &value) {
 
           // parsing custom data 4 cdp & other
           if (payload.isObject()) {
-            const Json::Value &session_id = payload[kKeySessionId];
+            const Json::Value &target_id = payload[kLegacyTargetId];
             const Json::Value &client_id = payload[kKeyClientId];
             const Json::Value &message = payload[kKeyMessage];
             std::shared_ptr<CustomData4CDP> cdp =
                 std::make_shared<CustomData4CDP>();
-            if (client_id.isInt() && session_id.isInt() &&
+            if (client_id.isInt() && target_id.isInt() &&
                 (message.isString() || message.isObject())) {
               cdp->client_id_ = client_id.asInt();
-              cdp->session_id_ = session_id.asInt();
+              cdp->target_id_ = target_id.asInt();
               if (message.isString()) {
                 cdp->message_ = message.asString();
               } else {

@@ -5,29 +5,30 @@
 import { DebugRouterSlotDelegate } from './DebugRouterSlotDelegate';
 import { DebugRouter } from './DebugRouter';
 
+// Obsoleted legacy protocol: public Target type name.
 export class DebugRouterSlot {
   private plugged: boolean;
-  private sessionId: number;
+  private targetId: number;
   private delegate: DebugRouterSlotDelegate | null;
   private type: string;
 
   constructor() {
     this.plugged = false;
-    this.sessionId = 0;
+    this.targetId = 0;
     this.type = '';
     this.delegate = null;
   }
 
   public plug(): number {
     this.pull();
-    this.sessionId = DebugRouter.plug(this);
+    this.targetId = DebugRouter.plug(this);
     this.plugged = true;
-    return this.sessionId;
+    return this.targetId;
   }
 
   public pull(): void {
     if (this.plugged) {
-      DebugRouter.pull(this.sessionId);
+      DebugRouter.pull(this.targetId);
       this.plugged = false;
     }
   }
@@ -37,7 +38,7 @@ export class DebugRouterSlot {
   }
 
   public sendDataAsync(data: string, type: string): void {
-    DebugRouter.sendDataAsync(type, this.sessionId, data);
+    DebugRouter.sendDataAsync(type, this.targetId, data);
   }
 
   // delegate methods

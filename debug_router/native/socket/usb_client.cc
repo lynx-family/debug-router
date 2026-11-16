@@ -7,7 +7,7 @@
 #include <chrono>
 
 #include "debug_router/native/core/debug_router_core.h"
-#include "debug_router/native/core/session_filter_util.h"
+#include "debug_router/native/core/target_filter_util.h"
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
 #include "debug_router/native/socket/socket_server_api.h"
@@ -346,7 +346,7 @@ void UsbClient::ReadMessage() {
     if (log_level == util::VerboseMessageLogLevel::kInfo) {
       LOGI("[RX]:" << payload_str);
     }
-    if (core::internal::ShouldDropIncomingBySessionFilter(payload_str, "USB")) {
+    if (core::internal::ShouldDropIncomingByTargetFilter(payload_str, "USB")) {
       continue;
     }
 

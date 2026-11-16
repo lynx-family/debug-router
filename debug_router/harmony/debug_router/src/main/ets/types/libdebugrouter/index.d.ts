@@ -7,10 +7,11 @@ export interface DebugRouterGlobalHandlerHarmony {
   onMessage: (message: string, type: string) => void;
 }
 
+// Obsoleted legacy protocol: Session APIs operate on Targets.
 export interface DebugRouterSessionHandlerHarmony {
-  onSessionCreate: (session_id: number, url: string) => void;
-  onSessionDestroy: (session_id: number) => void;
-  onMessage: (message: string, type: string, session_id: number) => void;
+  onSessionCreate: (target_id: number, url: string) => void;
+  onSessionDestroy: (target_id: number) => void;
+  onMessage: (message: string, type: string, target_id: number) => void;
 }
 
 export interface DebugRouterMessageHandlerHarmony {
@@ -25,6 +26,7 @@ export interface DebugRouterStateListenerHarmony {
   onError: (error: string) => void;
 }
 
+// Obsoleted legacy protocol: public Target interface name.
 export interface NativeSlotHarmony {
   onMessage: (message: string, type: string) => void;
 }
@@ -33,6 +35,7 @@ export declare class DebugRouterHarmony {
   static createInstance: () => void;
   static addGlobalHandler: (handler: DebugRouterGlobalHandlerHarmony) => void;
   static removeGlobalHandler: (handler: DebugRouterGlobalHandlerHarmony) => boolean;
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   static addSessionHandler: (handler: DebugRouterSessionHandlerHarmony) => void;
   static removeSessionHandler: (handler: DebugRouterSessionHandlerHarmony) => boolean;
   static addMessageHandler: (handler: DebugRouterMessageHandlerHarmony) => void;
@@ -44,10 +47,10 @@ export declare class DebugRouterHarmony {
   static isConnected: () => boolean;
 
   static sendAsync: (message: string) => void;
-  static sendDataAsync: (type: string, session: number, data: string) => void;
+  static sendDataAsync: (type: string, targetId: number, data: string) => void;
 
-  static plug: (slot: NativeSlotHarmony, url:string, type:string) => number;
-  static pull: (sessionId: number) => void;
+  static plug: (target: NativeSlotHarmony, url:string, type:string) => number;
+  static pull: (targetId: number) => void;
 
   static isValidSchema: (schema: string) => boolean;
   static handleSchema: (schema: string) => boolean;
@@ -55,9 +58,10 @@ export declare class DebugRouterHarmony {
   static setAppInfo: (arg1: Record<string, string> | string, arg2?: string) => void;
   static getAppInfoByKey: (key:string) => string;
   
+  // Obsoleted legacy protocol: Session APIs operate on Targets.
   static enableAllSessions: () => void;
-  /** sessionId must be > 0. Invalid values are ignored by native layer. */
-  static enableSingleSession: (sessionId: number) => void;
+  /** targetId must be > 0. Invalid values are ignored by native layer. */
+  static enableSingleSession: (targetId: number) => void;
   static enableDebugChannel: () => void;
   static disableDebugChannel: () => void;
   static isDebugChannelEnabled: () => boolean;

@@ -4,7 +4,7 @@
 
 #include "debug_router/native/net/websocket_task.h"
 
-#include "debug_router/native/core/session_filter_util.h"
+#include "debug_router/native/core/target_filter_util.h"
 #include "debug_router/native/core/util.h"
 
 #if defined(_WIN32)
@@ -306,7 +306,7 @@ void WebSocketTask::StartInternal() {
     if (log_level == util::VerboseMessageLogLevel::kInfo) {
       LOGI("[RX]:" << msg);
     }
-    if (core::internal::ShouldDropIncomingBySessionFilter(msg, "WebSocket")) {
+    if (core::internal::ShouldDropIncomingByTargetFilter(msg, "WebSocket")) {
       continue;
     }
     onMessage(msg);

@@ -258,14 +258,14 @@ TEST(SocketUtilTestSuite, SendNoSigPipeFailsWithoutTerminatingOnClosedPeer) {
 }
 
 TEST(SocketUtilTestSuite,
-     EnableSingleSessionDoesNotStartUsbServerUntilDebugChannelEnabled) {
+     EnableSingleTargetDoesNotStartUsbServerUntilDebugChannelEnabled) {
   const std::set<int32_t> ports_before = ScanOccupiedDebugRouterPorts();
 
   auto& core = debugrouter::core::DebugRouterCore::GetInstance();
   core.DisableDebugChannel();
-  core.EnableSingleSession(123);
+  core.EnableSingleTarget(123);
 
-  EXPECT_TRUE(core.isActiveSession(123));
+  EXPECT_TRUE(core.isActiveTarget(123));
   EXPECT_TRUE(WaitUntil([&ports_before]() {
     return ScanOccupiedDebugRouterPorts() == ports_before;
   }));
@@ -285,13 +285,12 @@ TEST(SocketUtilTestSuite,
   }));
 }
 
-TEST(
-    SocketUtilTestSuite,
-    DisableDebugChannelRestoresDisconnectedStateForSingleSessionUsbConnection) {
+TEST(SocketUtilTestSuite,
+     DisableDebugChannelRestoresDisconnectedStateForSingleTargetUsbConnection) {
   auto& core = debugrouter::core::DebugRouterCore::GetInstance();
   core.DisableDebugChannel();
 
-  core.EnableSingleSession(123);
+  core.EnableSingleTarget(123);
   core.EnableDebugChannel();
   int client_socket = -1;
   ASSERT_TRUE(WaitUntil([&]() {

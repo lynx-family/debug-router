@@ -18,10 +18,10 @@
 
 #include "debug_router/native/core/debug_router_global_handler.h"
 #include "debug_router/native/core/debug_router_message_handler.h"
-#include "debug_router/native/core/debug_router_session_handler.h"
 #include "debug_router/native/core/debug_router_state_listener.h"
+#include "debug_router/native/core/debug_router_target_handler.h"
 #include "debug_router/native/core/message_transceiver.h"
-#include "debug_router/native/core/native_slot.h"
+#include "debug_router/native/core/native_target.h"
 #include "debug_router/native/report/debug_router_native_report.h"
 
 namespace debugrouter {
@@ -50,8 +50,6 @@ typedef enum {
   FIRST_CONNECT,
   NON_FIRST_CONNECT
 } WebSocketConnectType;
-
-class DebugRouterSlot;
 
 #if ENABLE_MESSAGE_IMPL
 static constexpr size_t kTransceiverCount = 2;
@@ -93,24 +91,24 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   void Disconnect();
   void DisconnectAsync();
 
-  // Sends a fully wrapped protocol message without applying session filtering.
-  // Callers that send session-bound Customized payloads must use SendData /
-  // SendDataAsync so active-session filtering is enforced centrally.
+  // Sends a fully wrapped protocol message without applying target filtering.
+  // Callers that send target-bound Customized payloads must use SendData /
+  // SendDataAsync so active-target filtering is enforced centrally.
   void Send(const std::string &message);
 
   // Async variant of Send(). This is also a raw bypass and does not apply
-  // session filtering.
+  // target filtering.
   void SendAsync(const std::string &message);
 
-  // Sends a session-bound Customized payload and applies active-session
-  // filtering for session_id > 0. Control messages should use Send / SendAsync.
+  // Sends a target-bound Customized payload and applies active-target
+  // filtering for target_id > 0. Control messages should use Send / SendAsync.
   void SendData(const std::string &data, const std::string &type,
-                int32_t session, int32_t mark, bool is_object);
+                int32_t target_id, int32_t mark, bool is_object);
 
   void SendDataAsync(const std::string &data, const std::string &type,
-                     int32_t session, int32_t mark, bool is_object);
+                     int32_t target_id, int32_t mark, bool is_object);
 
-  int32_t Plug(const std::shared_ptr<core::NativeSlot> &slot);
+  int32_t Plug(const std::shared_ptr<core::NativeTarget> &target);
 
   int32_t GetUSBPort();
 
@@ -118,7 +116,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   bool SetUSBStartPort(int32_t start_port);
 #endif
 
-  void Pull(int32_t session_id);
+  void Pull(int32_t target_id);
 
   std::string GetRoomId();
   std::string GetServerUrl();
@@ -138,10 +136,10 @@ class DebugRouterCore : public MessageTransceiverDelegate {
       const std::shared_ptr<DebugRouterMessageHandler> &handler);
   bool RemoveMessageHandler(const std::string &handler_name);
 
-  int AddSessionHandler(DebugRouterSessionHandler *handler);
-  int AddSessionHandler(
-      const std::shared_ptr<DebugRouterSessionHandler> &handler);
-  bool RemoveSessionHandler(int handler_id);
+  int AddTargetHandler(DebugRouterTargetHandler *handler);
+  int AddTargetHandler(
+      const std::shared_ptr<DebugRouterTargetHandler> &handler);
+  bool RemoveTargetHandler(int handler_id);
 
   bool IsValidSchema(const std::string &schema);
 
@@ -162,18 +160,18 @@ class DebugRouterCore : public MessageTransceiverDelegate {
       const std::shared_ptr<core::DebugRouterStateListener> &listener);
 
   // these two methods are conflictive, only one of them can be enabled
-  void EnableAllSessions();
-  // Records the session ids allowed by isActiveSession(). This does not
-  // affect whether the local server stays available. session_id must be > 0.
-  void EnableSingleSession(int32_t session_id);
+  void EnableAllTargets();
+  // Records the target IDs allowed by isActiveTarget(). This does not
+  // affect whether the local server stays available. target_id must be > 0.
+  void EnableSingleTarget(int32_t target_id);
   // Debug channel only controls whether the server should stay available.
-  // It does not bypass session filtering or alter message routing semantics.
+  // It does not bypass target filtering or alter message routing semantics.
   void EnableDebugChannel();
   void DisableDebugChannel();
   bool IsDebugChannelEnabled();
 
-  bool isActiveSession(int32_t session_id);
-  bool isEnableAllSessions();
+  bool isActiveTarget(int32_t target_id);
+  bool isEnableAllTargets();
 
   DebugRouterCore(const DebugRouterCore &) = delete;
   DebugRouterCore &operator=(const DebugRouterCore &) = delete;
@@ -183,13 +181,13 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   virtual ~DebugRouterCore();
 
  protected:
-  std::shared_mutex slots_mutex_;
+  std::shared_mutex targets_mutex_;
   std::shared_mutex state_listeners_mutex_;
   std::shared_mutex global_handler_mutex_;
-  std::shared_mutex session_handler_mutex_;
+  std::shared_mutex target_handler_mutex_;
   std::shared_mutex message_handler_mutex_;
   friend class MessageHandlerCore;
-  std::unordered_map<int32_t, std::shared_ptr<core::NativeSlot> > slots_;
+  std::unordered_map<int32_t, std::shared_ptr<core::NativeTarget> > targets_;
   std::string room_id_;
   std::string server_url_;
   std::string host_url_;
@@ -197,12 +195,11 @@ class DebugRouterCore : public MessageTransceiverDelegate {
       message_handlers_;
   std::unordered_map<std::string, std::string> app_info_;
 
-  // for add global handler and session handler, judge if handler is valid
-  // for remove global handler and session handler
+  // Track global and target handlers for registration and removal.
   std::unordered_map<int, std::shared_ptr<DebugRouterGlobalHandler> >
       global_handler_map_;
-  std::unordered_map<int, std::shared_ptr<DebugRouterSessionHandler> >
-      session_handler_map_;
+  std::unordered_map<int, std::shared_ptr<DebugRouterTargetHandler> >
+      target_handler_map_;
 
  private:
   bool ShouldServerRun();
@@ -217,7 +214,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
   std::shared_ptr<net::SocketServerClient> socket_server_client_;
 #endif
-  int32_t max_session_id_;
+  int32_t max_target_id_;
   std::unique_ptr<report::DebugRouterNativeReport> report_;
   std::unique_ptr<debugrouter::processor::Processor> processor_;
   std::vector<std::shared_ptr<core::DebugRouterStateListener> >
@@ -240,10 +237,10 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   // before it exits and apply only the latest merged server state.
   std::atomic<bool> server_state_update_dirty_{false};
 
-  std::atomic<bool> enable_all_sessions_{false};
+  std::atomic<bool> enable_all_targets_{false};
   std::atomic<bool> debug_channel_enabled_{false};
-  std::unordered_set<int32_t> enabled_session_ids_;
-  std::shared_mutex enabled_sessions_mutex_;
+  std::unordered_set<int32_t> enabled_target_ids_;
+  std::shared_mutex enabled_targets_mutex_;
 };
 
 }  // namespace core

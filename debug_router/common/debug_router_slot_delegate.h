@@ -10,6 +10,7 @@
 namespace debugrouter {
 namespace common {
 
+// Obsoleted legacy protocol: public Target delegate name.
 class DebugRouterSlotDelegate {
  public:
   virtual std::string GetTemplateUrl() = 0;

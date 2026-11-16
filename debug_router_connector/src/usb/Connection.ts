@@ -24,13 +24,14 @@ export abstract class Connection {
     data: RequireMessageType,
   ): Promise<ResponseMessageType>;
 
-  handleClientEvent(event: string, params: any, session_id: any) {
-    this.events.emit(event, params, session_id);
-    this.events.emit("all-cdp-message", event, params, session_id);
+  handleClientEvent(event: string, params: any, target: any) {
+    this.events.emit(event, params, target);
+    this.events.emit("all-cdp-message", event, params, target);
   }
 
-  handleSessionList(sessionList: any) {
-    this.events.emit("SessionList", sessionList);
+  // Obsoleted legacy protocol: public method and event names.
+  handleSessionList(targetList: any) {
+    this.events.emit("SessionList", targetList);
   }
 
   on(event: string, callback: EventHandler) {

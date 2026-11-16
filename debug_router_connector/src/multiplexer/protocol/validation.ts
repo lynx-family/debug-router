@@ -462,6 +462,7 @@ function isRequireMessage(value: unknown): boolean {
     isString(data.type) &&
     isRecord(payload) &&
     isNumber(payload.client_id) &&
+    // Obsoleted legacy protocol: Target ID.
     isNumber(payload.session_id) &&
     hasOwn(payload, "message") &&
     isNumber(data.sender)

@@ -20,20 +20,20 @@ class Processor {
  public:
   explicit Processor(std::unique_ptr<MessageHandler> message_handler);
   void Process(const std::string &message);
-  std::string WrapCustomizedMessage(const std::string &type, int session_id,
+  std::string WrapCustomizedMessage(const std::string &type, int target_id,
                                     const std::string &message, int mark,
                                     bool isObject = false);
-  void FlushSessionList();
+  void FlushTargetList();
   void SetIsReconnect(bool is_reconnect);
 
  private:
   void registerDevice();
   void joinRoom();
   void reportError(const std::string &error);
-  void sessionList();
+  void targetList();
   void changeRoomServer(const std::string &url, const std::string &room);
   void openCard(const std::string &url);
-  void processMessage(const std::string &type, int session_id,
+  void processMessage(const std::string &type, int target_id,
                       const std::string &message);
   void HandleAppAction(
       const std::shared_ptr<protocol::RemoteDebugProtocolBodyData4Custom>

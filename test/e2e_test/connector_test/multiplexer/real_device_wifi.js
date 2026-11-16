@@ -34,7 +34,7 @@ const cases = [
   ["roundtrip", "Driver to real Android WiFi roundtrip", runRoundTripCase],
   [
     "cdp-roundtrip",
-    "Driver to real Android WiFi session CDP roundtrip",
+    "Driver to real Android WiFi target CDP roundtrip",
     runCdpRoundTripCase,
   ],
   [
@@ -254,7 +254,7 @@ async function runCdpRoundTripCase(args, serial) {
         return payload?.id === requestId;
       },
       args.timeout,
-      "real Android WiFi session CDP response"
+      "real Android WiFi target CDP response"
     );
 
     state.driver.socket.send(

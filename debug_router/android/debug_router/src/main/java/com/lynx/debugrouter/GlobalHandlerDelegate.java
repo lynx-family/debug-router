@@ -16,9 +16,9 @@ public class GlobalHandlerDelegate implements DebugRouterGlobalHandler {
 
   @Override
   @CalledByNative
-  public void onMessage(String type, int sessionId, String message) {
+  public void onMessage(String type, int targetId, String message) {
     if (handler != null) {
-      handler.onMessage(type, sessionId, message);
+      handler.onMessage(type, targetId, message);
     }
   }
 

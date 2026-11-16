@@ -28,18 +28,18 @@ typedef enum : NSUInteger {
 
 typedef enum : NSUInteger { APP_STATE_UNINIT, FOREGROUND, BACKGROUND } AppState;
 
-class NativeSlotDeleagate : public debugrouter::core::NativeSlot {
+class NativeTargetDelegate : public debugrouter::core::NativeTarget {
  public:
-  NativeSlotDeleagate(DebugRouterSlot *slot, const std::string &type, const std::string &url)
-      : debugrouter::core::NativeSlot(type, url), slot_ios_(slot) {}
+  NativeTargetDelegate(DebugRouterSlot *target, const std::string &type, const std::string &url)
+      : debugrouter::core::NativeTarget(type, url), target_ios_(target) {}
   virtual void OnMessage(const std::string &message, const std::string &type) override {
     NSString *messageNSStr = [NSString stringWithUTF8String:message.c_str()];
     NSString *typeNSStr = [NSString stringWithUTF8String:type.c_str()];
-    [slot_ios_ onMessage:messageNSStr WithType:typeNSStr];
+    [target_ios_ onMessage:messageNSStr WithType:typeNSStr];
   }
 
  private:
-  DebugRouterSlot *slot_ios_;
+  DebugRouterSlot *target_ios_;
 };
 
 class DebugRouterReportiOS : public debugrouter::report::DebugRouterNativeReport {
@@ -122,21 +122,21 @@ class GlobalHandlerDelegate : public debugrouter::core::DebugRouterGlobalHandler
   id<DebugRouterGlobalHandler> handler_;
 };
 
-class SessionHandlerDelegate : public debugrouter::core::DebugRouterSessionHandler {
+class TargetHandlerDelegate : public debugrouter::core::DebugRouterTargetHandler {
  public:
-  SessionHandlerDelegate(id<DebugRouterSessionHandler> handler) : handler_(handler) {}
+  TargetHandlerDelegate(id<DebugRouterSessionHandler> handler) : handler_(handler) {}
 
   virtual void OnMessage(const std::string &message, const std::string &type,
-                         int32_t session_id) override {
+                         int32_t target_id) override {
     [handler_ onMessage:[NSString stringWithUTF8String:message.c_str()]
                withType:[NSString stringWithUTF8String:type.c_str()]
-          withSessionId:session_id];
+          withSessionId:target_id];
   }
-  virtual void OnSessionCreate(int32_t session_id, const std::string &url) override {
-    [handler_ onSessionCreate:session_id withUrl:[NSString stringWithUTF8String:url.c_str()]];
+  virtual void OnTargetCreate(int32_t target_id, const std::string &url) override {
+    [handler_ onSessionCreate:target_id withUrl:[NSString stringWithUTF8String:url.c_str()]];
   }
-  virtual void OnSessionDestroy(int32_t session_id) override {
-    [handler_ onSessionDestroy:session_id];
+  virtual void OnTargetDestroy(int32_t target_id) override {
+    [handler_ onSessionDestroy:target_id];
   }
 
  private:
@@ -201,7 +201,7 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   AppState appState_;
   NSMapTable *viewMap_;
   NSMutableDictionary *global_handler_map;
-  NSMutableDictionary *session_handler_map;
+  NSMutableDictionary *target_handler_map;
 }
 
 + (DebugRouter *)instance {
@@ -243,7 +243,7 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
     debugrouter::core::DebugRouterCore::GetInstance().SetAppInfo("debugRouterId",
                                                                  [id_string UTF8String]);
     global_handler_map = [[NSMutableDictionary alloc] init];
-    session_handler_map = [[NSMutableDictionary alloc] init];
+    target_handler_map = [[NSMutableDictionary alloc] init];
 
     [DebugRouterUtil dispatchMainAsyncSafe:^() {
       self->recordAppIdleTimerDisabledStatus = [UIApplication sharedApplication].idleTimerDisabled;
@@ -301,18 +301,18 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   debugrouter::core::DebugRouterCore::GetInstance().Send([message UTF8String]);
 }
 
-- (void)sendData:(NSString *)data WithType:(NSString *)type ForSession:(int)session {
-  [self sendData:data WithType:type ForSession:session WithMark:-1 isObject:NO];
+- (void)sendData:(NSString *)data WithType:(NSString *)type ForSession:(int)target_id {
+  [self sendData:data WithType:type ForSession:target_id WithMark:-1 isObject:NO];
 }
 
 - (void)sendData:(NSString *)data
         WithType:(NSString *)type
-      ForSession:(int)session
+      ForSession:(int)target_id
         WithMark:(int)mark {
-  [self sendData:data WithType:type ForSession:session WithMark:mark isObject:NO];
+  [self sendData:data WithType:type ForSession:target_id WithMark:mark isObject:NO];
 }
 
-- (void)sendObject:(NSDictionary *)data WithType:(NSString *)type ForSession:(int)session {
+- (void)sendObject:(NSDictionary *)data WithType:(NSString *)type ForSession:(int)target_id {
   NSError *error;
   NSData *jsonData = [NSJSONSerialization dataWithJSONObject:data
                                                      options:NSJSONWritingPrettyPrinted
@@ -320,13 +320,13 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   NSString *jsonString;
   if (jsonData) {
     jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-    [self sendData:jsonString WithType:type ForSession:session WithMark:-1 isObject:YES];
+    [self sendData:jsonString WithType:type ForSession:target_id WithMark:-1 isObject:YES];
   }
 }
 
 - (void)sendObject:(NSDictionary *)data
           WithType:(NSString *)type
-        ForSession:(int)session
+        ForSession:(int)target_id
           WithMark:(int)mark {
   NSError *error;
   NSData *jsonData = [NSJSONSerialization dataWithJSONObject:data
@@ -335,13 +335,13 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   NSString *jsonString;
   if (jsonData) {
     jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-    [self sendData:jsonString WithType:type ForSession:session WithMark:mark isObject:YES];
+    [self sendData:jsonString WithType:type ForSession:target_id WithMark:mark isObject:YES];
   }
 }
 
 - (void)sendData:(NSString *)data
         WithType:(NSString *)type
-      ForSession:(int)session
+      ForSession:(int)target_id
         WithMark:(int)mark
         isObject:(BOOL)isObject {
   if (data == nil || type == nil || ![data isKindOfClass:[NSString class]] ||
@@ -355,7 +355,7 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
     LLogError(@"invaild data or type");
     return;
   }
-  debugrouter::core::DebugRouterCore::GetInstance().SendData(dataUtf8, typeUtf8, session, mark,
+  debugrouter::core::DebugRouterCore::GetInstance().SendData(dataUtf8, typeUtf8, target_id, mark,
                                                              isObject);
 }
 
@@ -372,7 +372,7 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   debugrouter::core::DebugRouterCore::GetInstance().SendAsync(messageUtf8);
 }
 
-- (void)sendDataAsync:(NSString *)data WithType:(NSString *)type ForSession:(int)session {
+- (void)sendDataAsync:(NSString *)data WithType:(NSString *)type ForSession:(int)target_id {
   if (data == nil || type == nil || ![data isKindOfClass:[NSString class]] ||
       ![type isKindOfClass:[NSString class]]) {
     LLogError(@"nil data or type or not NSString");
@@ -384,13 +384,13 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
     LLogError(@"invaild data or type");
     return;
   }
-  debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(dataUtf8, typeUtf8, session, -1,
+  debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(dataUtf8, typeUtf8, target_id, -1,
                                                                   false);
 }
 
 - (void)sendDataAsync:(NSString *)data
              WithType:(NSString *)type
-           ForSession:(int)session
+           ForSession:(int)target_id
              WithMark:(int)mark {
   if (data == nil || type == nil || ![data isKindOfClass:[NSString class]] ||
       ![type isKindOfClass:[NSString class]]) {
@@ -403,11 +403,11 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
     LLogError(@"invaild data or type");
     return;
   }
-  debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(dataUtf8, typeUtf8, session, mark,
-                                                                  false);
+  debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(dataUtf8, typeUtf8, target_id,
+                                                                  mark, false);
 }
 
-- (void)sendObjectAsync:(NSDictionary *)data WithType:(NSString *)type ForSession:(int)session {
+- (void)sendObjectAsync:(NSDictionary *)data WithType:(NSString *)type ForSession:(int)target_id {
   if (type == nil) {
     return;
   }
@@ -419,13 +419,13 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   if (jsonData) {
     jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
     debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(
-        [jsonString UTF8String], [type UTF8String], session, -1, true);
+        [jsonString UTF8String], [type UTF8String], target_id, -1, true);
   }
 }
 
 - (void)sendObjectAsync:(NSDictionary *)data
                WithType:(NSString *)type
-             ForSession:(int)session
+             ForSession:(int)target_id
                WithMark:(int)mark {
   if (type == nil) {
     return;
@@ -438,28 +438,28 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   if (jsonData) {
     jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
     debugrouter::core::DebugRouterCore::GetInstance().SendDataAsync(
-        [jsonString UTF8String], [type UTF8String], session, mark, true);
+        [jsonString UTF8String], [type UTF8String], target_id, mark, true);
   }
 }
 
-- (int)plug:(DebugRouterSlot *)slot {
-  LLogInfo(@"plug %@", [slot getTemplateUrl]);
+- (int)plug:(DebugRouterSlot *)target {
+  LLogInfo(@"plug %@", [target getTemplateUrl]);
 
-  int32_t sessionId =
-      debugrouter::core::DebugRouterCore::GetInstance().Plug(std::make_shared<NativeSlotDeleagate>(
-          slot, [[slot type] UTF8String], [[slot getTemplateUrl] UTF8String]));
-  UIView *view = [slot getTemplateView];
+  int32_t targetId =
+      debugrouter::core::DebugRouterCore::GetInstance().Plug(std::make_shared<NativeTargetDelegate>(
+          target, [[target type] UTF8String], [[target getTemplateUrl] UTF8String]));
+  UIView *view = [target getTemplateView];
   if (view != nil) {
     @synchronized(viewMap_) {
-      [viewMap_ setObject:@(sessionId) forKey:(id)view];
+      [viewMap_ setObject:@(targetId) forKey:(id)view];
     }
   }
-  return sessionId;
+  return targetId;
 }
 
-- (void)pull:(int)sessionId {
-  LLogInfo(@"pull session %d", sessionId);
-  debugrouter::core::DebugRouterCore::GetInstance().Pull(sessionId);
+- (void)pull:(int)targetId {
+  LLogInfo(@"pull target %d", targetId);
+  debugrouter::core::DebugRouterCore::GetInstance().Pull(targetId);
 }
 
 - (void)initReportService {
@@ -516,11 +516,11 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
   if (handler == nil) {
     return;
   }
-  SessionHandlerDelegate *handlerDelegate = new SessionHandlerDelegate(handler);
+  TargetHandlerDelegate *handlerDelegate = new TargetHandlerDelegate(handler);
   int handlerId =
-      debugrouter::core::DebugRouterCore::GetInstance().AddSessionHandler(handlerDelegate);
+      debugrouter::core::DebugRouterCore::GetInstance().AddTargetHandler(handlerDelegate);
   NSNumber *key = [NSNumber numberWithUnsignedInteger:(NSUInteger)handler];
-  [session_handler_map setObject:@(handlerId) forKey:key];
+  [target_handler_map setObject:@(handlerId) forKey:key];
 }
 
 - (BOOL)removeSessionHandler:(id<DebugRouterSessionHandler>)handler {
@@ -528,11 +528,11 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
     return false;
   }
   NSNumber *key = [NSNumber numberWithUnsignedInteger:(NSUInteger)handler];
-  NSNumber *removedHandlerId = [session_handler_map objectForKey:key];
+  NSNumber *removedHandlerId = [target_handler_map objectForKey:key];
   if (removedHandlerId) {
-    [session_handler_map removeObjectForKey:key];
+    [target_handler_map removeObjectForKey:key];
     int removedId = [removedHandlerId intValue];
-    return debugrouter::core::DebugRouterCore::GetInstance().RemoveSessionHandler(removedId);
+    return debugrouter::core::DebugRouterCore::GetInstance().RemoveTargetHandler(removedId);
   }
   return false;
 }
@@ -615,22 +615,22 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 
 - (int)getSessionIdByView:(nonnull UIView *)view {
   @synchronized(viewMap_) {
-    NSNumber *session_number = [viewMap_ objectForKey:(id)view];
-    return session_number ? [session_number intValue] : 0;
+    NSNumber *target_number = [viewMap_ objectForKey:(id)view];
+    return target_number ? [target_number intValue] : 0;
   }
 }
 
-- (void)setSessionId:(int)sessionId ofView:(UIView *)view {
+- (void)setSessionId:(int)targetId ofView:(UIView *)view {
   @synchronized(viewMap_) {
-    [viewMap_ setObject:@(sessionId) forKey:(id)view];
+    [viewMap_ setObject:@(targetId) forKey:(id)view];
   }
 }
 
-- (UIView *)getViewBySessionId:(int)sessionId {
+- (UIView *)getViewBySessionId:(int)targetId {
   @synchronized(viewMap_) {
     for (UIView *view in viewMap_) {
-      NSNumber *viewSessionId = [viewMap_ objectForKey:view];
-      if ([viewSessionId integerValue] == sessionId) {
+      NSNumber *viewTargetId = [viewMap_ objectForKey:view];
+      if ([viewTargetId integerValue] == targetId) {
         return view;
       }
     }
@@ -645,11 +645,11 @@ class MessageHandlerDelegate : public debugrouter::core::DebugRouterMessageHandl
 }
 
 - (void)enableAllSessions {
-  debugrouter::core::DebugRouterCore::GetInstance().EnableAllSessions();
+  debugrouter::core::DebugRouterCore::GetInstance().EnableAllTargets();
 }
 
-- (void)enableSingleSession:(int)sessionId {
-  debugrouter::core::DebugRouterCore::GetInstance().EnableSingleSession(sessionId);
+- (void)enableSingleSession:(int)targetId {
+  debugrouter::core::DebugRouterCore::GetInstance().EnableSingleTarget(targetId);
 }
 
 - (void)enableDebugChannel {

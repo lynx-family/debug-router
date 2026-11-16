@@ -2,18 +2,18 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
-#ifndef DEBUGROUTER_NATIVE_CORE_NATIVE_SLOT_H_
-#define DEBUGROUTER_NATIVE_CORE_NATIVE_SLOT_H_
+#ifndef DEBUGROUTER_NATIVE_CORE_NATIVE_TARGET_H_
+#define DEBUGROUTER_NATIVE_CORE_NATIVE_TARGET_H_
 
 #include <string>
 
 namespace debugrouter {
 namespace core {
 
-class NativeSlot {
+class NativeTarget {
  public:
-  NativeSlot(const std::string &type, const std::string &url);
-  virtual ~NativeSlot() = default;
+  NativeTarget(const std::string &type, const std::string &url);
+  virtual ~NativeTarget() = default;
   std::string GetUrl();
   std::string GetType();
   virtual void OnMessage(const std::string &message,
@@ -27,4 +27,4 @@ class NativeSlot {
 }  // namespace core
 }  // namespace debugrouter
 
-#endif  // DEBUGROUTER_NATIVE_CORE_NATIVE_SLOT_H_
+#endif  // DEBUGROUTER_NATIVE_CORE_NATIVE_TARGET_H_

@@ -10,5 +10,5 @@ import androidx.annotation.Keep;
 public interface DebugRouterGlobalHandler {
   @Deprecated void openCard(String url);
 
-  void onMessage(String type, int sessionId, String message);
+  void onMessage(String type, int targetId, String message);
 }

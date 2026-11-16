@@ -56,7 +56,7 @@ export class UsbClient extends Client {
   sendCustomizedMessage(
     method: string,
     params: Object = "",
-    sessionId: number = -1,
+    targetId: number = -1,
     type: string = "CDP",
   ): Promise<string> {
     // This functionality has moved to the corresponding multiplexer mirror.

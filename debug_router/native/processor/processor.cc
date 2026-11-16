@@ -54,8 +54,8 @@ void Processor::process(const Json::Value &root) {
     LOGI("joinRoom");
     joinRoom();
   } else if (body->IsProtocolBody4RoomJoined()) {
-    LOGI("get sessionList");
-    sessionList();
+    LOGI("get targetList");
+    targetList();
   } else if (body->IsProtocolBody4ChangeRoomServer()) {
     LOGI("changeRoomServer");
     auto server_data = body->AsChangeRoomServer();
@@ -65,7 +65,7 @@ void Processor::process(const Json::Value &root) {
     if (custom->Is4CDP()) {
       auto cdp = custom->AsCDP();
       if (cdp->client_id_ == client_id_) {
-        processMessage("CDP", cdp->session_id_, cdp->message_);
+        processMessage("CDP", cdp->target_id_, cdp->message_);
       }
     } else if (custom->Is4D2RStopAtEntry()) {
       if (custom->client_id_ == client_id_) {
@@ -82,9 +82,9 @@ void Processor::process(const Json::Value &root) {
     } else if (custom->Is4OpenCard()) {
       LOGI("openCard");
       openCard(custom->AsOpenCardData()->url);
-    } else if (custom->Is4ListSession()) {
-      LOGI("FlushSessionList");
-      FlushSessionList();
+    } else if (custom->Is4ListTargets()) {
+      LOGI("FlushTargetList");
+      FlushTargetList();
     } else if (custom->Is4MessageHandler()) {
       LOGI("HandleAppAction");
       HandleAppAction(custom);
@@ -92,7 +92,7 @@ void Processor::process(const Json::Value &root) {
       LOGI("extension");
       auto ext = custom->AsExtension();
       if (ext->client_id_ == client_id_) {
-        processMessage(custom->type_, ext->session_id_, ext->message_);
+        processMessage(custom->type_, ext->target_id_, ext->message_);
       }
     }
   }
@@ -108,7 +108,7 @@ std::string Processor::wrapStopAtEntryMessage(
 }
 
 std::string Processor::WrapCustomizedMessage(const std::string &type,
-                                             int session_id,
+                                             int target_id,
                                              const std::string &message,
                                              int mark, bool isObject) {
   // handle legacy message type
@@ -121,7 +121,7 @@ std::string Processor::WrapCustomizedMessage(const std::string &type,
   std::shared_ptr<protocol::CustomData4CDP> cdp_data =
       std::make_shared<protocol::CustomData4CDP>();
   cdp_data->client_id_ = client_id_;
-  cdp_data->session_id_ = session_id;
+  cdp_data->target_id_ = target_id;
   cdp_data->message_ = message;
   cdp_data->is_object_ = isObject;
   std::shared_ptr<protocol::RemoteDebugProtocolBody> custom =
@@ -130,7 +130,7 @@ std::string Processor::WrapCustomizedMessage(const std::string &type,
   return protocol::RemoteDebugProtocol::Stringify(custom, mark);
 }
 
-void Processor::FlushSessionList() { sessionList(); }
+void Processor::FlushTargetList() { targetList(); }
 
 void Processor::SetIsReconnect(bool is_reconnect) {
   is_reconnect_ = is_reconnect;
@@ -163,20 +163,20 @@ void Processor::reportError(const std::string &error) {
   }
 }
 
-void Processor::sessionList() {
+void Processor::targetList() {
   if (message_handler_) {
-    std::unique_ptr<protocol::CustomData4SessionList> session_list =
-        std::make_unique<protocol::CustomData4SessionList>();
+    std::unique_ptr<protocol::CustomData4TargetList> target_list =
+        std::make_unique<protocol::CustomData4TargetList>();
     Json::Reader reader;
     Json::Value info;
-    for (const auto &pair : message_handler_->GetSessionList()) {
-      std::shared_ptr<protocol::SessionInfo> session_info =
-          std::make_shared<protocol::SessionInfo>();
-      session_info->session_id_ = pair.first;
+    for (const auto &pair : message_handler_->GetTargetList()) {
+      std::shared_ptr<protocol::TargetInfo> target_info =
+          std::make_shared<protocol::TargetInfo>();
+      target_info->target_id_ = pair.first;
 
       std::string url;
       if (reader.parse(pair.second, info)) {
-        session_info->type_ = info["type"].asString();
+        target_info->type_ = info["type"].asString();
         url = info["url"].asString();
       } else {
         url = pair.second;
@@ -184,13 +184,13 @@ void Processor::sessionList() {
       if (url.compare(protocol::kInvalidTempalteUrl) == 0) {
         continue;
       }
-      session_info->url_ = url;
-      session_list->list_.push_back(session_info);
+      target_info->url_ = url;
+      target_list->list_.push_back(target_info);
     }
     std::shared_ptr<protocol::RemoteDebugProtocolBody> body =
         protocol::RemoteDebugProtocol::CreateProtocolBody4Custom(
-            protocol::kRemoteDebugProtocolBodyData4Custom4SessionList,
-            client_id_, std::move(session_list));
+            protocol::kRemoteDebugProtocolBodyData4Custom4TargetList,
+            client_id_, std::move(target_list));
     message_handler_->SendMessage(
         protocol::RemoteDebugProtocol::Stringify(body));
   }
@@ -251,10 +251,10 @@ void Processor::HandleAppAction(
       protocol::RemoteDebugProtocol::Stringify(body_result));
 }
 
-void Processor::processMessage(const std::string &type, int session_id,
+void Processor::processMessage(const std::string &type, int target_id,
                                const std::string &message) {
   if (message_handler_) {
-    message_handler_->OnMessage(type, session_id, message);
+    message_handler_->OnMessage(type, target_id, message);
   }
 }
 

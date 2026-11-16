@@ -138,12 +138,12 @@ def generate_harness_source() -> str:
 
         struct RegisterState {{
           bool debug_router_android = true;
-          bool native_slot = true;
+          bool native_target = true;
           bool debug_router_listener = true;
           bool debug_router_report = true;
           bool message_handler = true;
           bool debug_router_global_handler = true;
-          bool debug_router_session_handler = true;
+          bool debug_router_target_handler = true;
           bool message_assembler = true;
           bool logging_delegate = true;
           int register_calls = 0;
@@ -200,9 +200,9 @@ def generate_harness_source() -> str:
           }}
         }};
 
-        struct NativeSlotAndroid {{
+        struct NativeTargetAndroid {{
           static bool RegisterJNIUtils(JNIEnv* env) {{
-            return test_support::TrackRegister(env, test_support::g_register_state.native_slot);
+            return test_support::TrackRegister(env, test_support::g_register_state.native_target);
           }}
         }};
 
@@ -230,9 +230,9 @@ def generate_harness_source() -> str:
           }}
         }};
 
-        struct DebugRouterSessionHandlerAndroid {{
+        struct DebugRouterTargetHandlerAndroid {{
           static bool RegisterJNIUtils(JNIEnv* env) {{
-            return test_support::TrackRegister(env, test_support::g_register_state.debug_router_session_handler);
+            return test_support::TrackRegister(env, test_support::g_register_state.debug_router_target_handler);
           }}
         }};
 
