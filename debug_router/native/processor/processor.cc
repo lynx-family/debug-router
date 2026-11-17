@@ -48,7 +48,7 @@ void Processor::process(const Json::Value &root) {
     client_id_ = init_data->client_id_;
     if (client_id_ > 0) {
       LOGI("registerDevice");
-      registerDevice();
+      registerDevice(init_data->negotiated_version_);
     }
   } else if (body->IsProtocolBody4Registered()) {
     LOGI("joinRoom");
@@ -136,11 +136,13 @@ void Processor::SetIsReconnect(bool is_reconnect) {
   is_reconnect_ = is_reconnect;
 }
 
-void Processor::registerDevice() {
+void Processor::registerDevice(
+    const std::optional<protocol::ProtocolVersion> &negotiated_version) {
   if (message_handler_) {
     std::shared_ptr<protocol::RemoteDebugProtocolBody> body =
         protocol::RemoteDebugProtocol::CreateProtocolBody4Register(
-            client_id_, message_handler_->GetClientInfo(), is_reconnect_);
+            client_id_, message_handler_->GetClientInfo(), is_reconnect_,
+            negotiated_version);
     message_handler_->SendMessage(
         protocol::RemoteDebugProtocol::Stringify(body));
   }
