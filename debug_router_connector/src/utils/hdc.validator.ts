@@ -1,4 +1,6 @@
 import { join } from "path";
+import { promises as fs } from "fs";
+import { tmpdir } from "os";
 import Hdc from "./hdc/hdc";
 
 import child_process, { ExecException } from "child_process";
@@ -38,9 +40,17 @@ export async function getHdcInstance(hdcOption: any) {
 }
 
 async function exeCmd(cmd: string) {
+  // Keep relative files written by HDC (including during shutdown) out of the
+  // caller's workspace. Preserve its environment: TMPDIR also locates HDC locks.
+  const cwd = join(
+    tmpdir(),
+    `debug-router-connector-hdc-${process.getuid?.() ?? "default"}`,
+  );
+  await fs.mkdir(cwd, { recursive: true });
   return new Promise<string>((resolve, reject) => {
     child_process.exec(
       cmd,
+      { cwd },
       (error: ExecException | null, stdout: string, stderr: string) => {
         if (error == null) {
           resolve(stdout);
