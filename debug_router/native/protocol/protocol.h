@@ -5,9 +5,12 @@
 #ifndef DEBUGROUTER_NATIVE_PROTOCOL_PROTOCOL_H_
 #define DEBUGROUTER_NATIVE_PROTOCOL_PROTOCOL_H_
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "debug_router/native/log/logging.h"
 #include "debug_router/native/protocol/md5.h"
@@ -15,6 +18,8 @@
 
 namespace debugrouter {
 namespace protocol {
+
+using ProtocolVersion = std::pair<uint32_t, uint32_t>;  // <major, minor>
 
 extern const char *kRemoteDebugServerEvent4Unknow;
 extern const char *kRemoteDebugServerEvent4Init;
@@ -77,6 +82,7 @@ struct Stringifiable {
 
 struct RemoteDebugProtocolBodyData4Init : public Stringifiable {
   RemoteDebugPrococolClientId client_id_;
+  std::optional<ProtocolVersion> negotiated_version_;
 
   ~RemoteDebugProtocolBodyData4Init() override = default;
 
@@ -110,6 +116,7 @@ struct RemoteDebugProtocolBodyData4Register : public Stringifiable {
   RemoteDebugPrococolClientId client_id_;
   std::unordered_map<std::string, std::string> client_info_;
   bool is_reconnect_;
+  std::optional<ProtocolVersion> negotiated_version_;
 
   ~RemoteDebugProtocolBodyData4Register() override = default;
 
@@ -123,6 +130,11 @@ struct RemoteDebugProtocolBodyData4Register : public Stringifiable {
       info[item.first] = item.second;
     }
     v[kKeyInfo] = info;
+    if (negotiated_version_) {
+      const auto &[major, minor] = *negotiated_version_;
+      v["sdk_version"] = "debug-router-sdk_" + std::to_string(major) + "_" +
+                         std::to_string(minor);
+    }
     data = v;
   };
 };
@@ -511,12 +523,13 @@ std::string Stringify(const std::shared_ptr<RemoteDebugProtocolBody> body,
                       int mark);
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Register(
     RemoteDebugPrococolClientId client_id,
-    std::unordered_map<std::string, std::string> client_info,
-    bool is_reconnect);
+    std::unordered_map<std::string, std::string> client_info, bool is_reconnect,
+    const std::optional<ProtocolVersion> &negotiated_version = std::nullopt);
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4JoinRoom(
     RemoteDebugProtocolRoomId room_id);
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Init(
-    RemoteDebugPrococolClientId client_id);
+    RemoteDebugPrococolClientId client_id,
+    const std::optional<std::string> &connector_version);
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4RoomJoined(
     const char *room_id, RemoteDebugPrococolClientId client_id);
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Registerd();

@@ -27,7 +27,8 @@ class Processor {
   void SetIsReconnect(bool is_reconnect);
 
  private:
-  void registerDevice();
+  void registerDevice(
+      const std::optional<protocol::ProtocolVersion> &negotiated_version);
   void joinRoom();
   void reportError(const std::string &error);
   void targetList();

@@ -4,10 +4,61 @@
 
 #include "debug_router/native/protocol/protocol.h"
 
+#include <algorithm>
+#include <sstream>
+
 #include "debug_router/native/log/logging.h"
 
 namespace debugrouter {
 namespace protocol {
+
+namespace {
+
+constexpr uint32_t kProtocolMajorVersion = 1;
+constexpr uint32_t kProtocolMinorVersion = 0;
+
+int ParseVersionNumber(const std::string &text) {
+  int value = -1;
+  std::istringstream input(text);
+  return (input >> value) ? value : -1;
+}
+
+bool ParseProtocolVersion(const std::string &text, ProtocolVersion &version) {
+  const size_t first_spliter = text.find('_');
+  const size_t second_spliter = first_spliter == std::string::npos
+                                    ? std::string::npos
+                                    : text.find('_', first_spliter + 1);
+  if (second_spliter == std::string::npos ||
+      text.find('_', second_spliter + 1) != std::string::npos) {
+    return false;
+  }
+
+  const std::string major =
+      text.substr(first_spliter + 1, second_spliter - first_spliter - 1);
+  const std::string minor = text.substr(second_spliter + 1);
+  const int parsed_major = ParseVersionNumber(major);
+  const int parsed_minor = ParseVersionNumber(minor);
+  if (parsed_major < 0 || parsed_minor < 0) {
+    return false;
+  }
+  version = {static_cast<uint32_t>(parsed_major),
+             static_cast<uint32_t>(parsed_minor)};
+  return true;
+}
+
+bool NegotiateProtocolVersion(const std::string &peer,
+                              ProtocolVersion &version) {
+  ProtocolVersion parsed_peer;
+  if (!ParseProtocolVersion(peer, parsed_peer)) {
+    return false;
+  }
+  auto current_version =
+      std::make_pair(kProtocolMajorVersion, kProtocolMinorVersion);
+  version = std::min(parsed_peer, current_version);
+  return true;
+}
+
+}  // namespace
 
 const char *kRemoteDebugServerEvent4Unknow = "unknown";
 const char *kRemoteDebugServerEvent4Init = "Initialize";
@@ -140,10 +191,19 @@ RemoteDebugProtocolBody::AsCustom() {
 namespace RemoteDebugProtocol {
 
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Init(
-    const RemoteDebugPrococolClientId client_id) {
+    const RemoteDebugPrococolClientId client_id,
+    const std::optional<std::string> &connector_version) {
   std::shared_ptr<RemoteDebugProtocolBodyData4Init> init_data =
       std::make_shared<RemoteDebugProtocolBodyData4Init>();
   init_data->client_id_ = client_id;
+  if (connector_version) {
+    ProtocolVersion negotiated;
+    if (!NegotiateProtocolVersion(*connector_version, negotiated)) {
+      LOGW("Protocol negotiation failed: invalid connector_version");
+      return nullptr;
+    }
+    init_data->negotiated_version_ = negotiated;
+  }
   std::shared_ptr<RemoteDebugProtocolBody> init_body =
       std::make_shared<RemoteDebugProtocolBody>(kRemoteDebugServerEvent4Init,
                                                 init_data);
@@ -152,13 +212,14 @@ std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Init(
 
 std::shared_ptr<RemoteDebugProtocolBody> CreateProtocolBody4Register(
     RemoteDebugPrococolClientId client_id,
-    std::unordered_map<std::string, std::string> client_info,
-    bool is_reconnect) {
+    std::unordered_map<std::string, std::string> client_info, bool is_reconnect,
+    const std::optional<ProtocolVersion> &negotiated_version) {
   std::shared_ptr<RemoteDebugProtocolBodyData4Register> register_data =
       std::make_shared<RemoteDebugProtocolBodyData4Register>();
   register_data->client_id_ = client_id;
   register_data->client_info_ = client_info;
   register_data->is_reconnect_ = is_reconnect;
+  register_data->negotiated_version_ = negotiated_version;
   std::shared_ptr<RemoteDebugProtocolBody> register_body =
       std::make_shared<RemoteDebugProtocolBody>(
           kRemoteDebugServerEvent4Register, register_data);
@@ -311,7 +372,13 @@ std::shared_ptr<RemoteDebugProtocolBody> Parse(const Json::Value &value) {
       const Json::Value &data = value[kKeyData];
       if (data.isInt()) {
         int client_id = data.asInt();
-        return CreateProtocolBody4Init(client_id);
+        std::optional<std::string> connector_version;
+        if (value.isMember("connector_version")) {
+          const Json::Value &version_value = value["connector_version"];
+          connector_version =
+              version_value.isString() ? version_value.asString() : "";
+        }
+        return CreateProtocolBody4Init(client_id, connector_version);
       }
     }
     if (eventStr.compare(kRemoteDebugServerEvent4Registered) == 0) {
