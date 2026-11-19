@@ -191,7 +191,7 @@ Current public facade behavior:
 - `connectUsbClients()` asks the daemon to start the runtime client watcher for a device, then upserts returned snapshots into local `MultiplexerUsbClient` objects.
 - `getDevices()`, `getDeviceUsbClients()`, and `getAllUsbClients()` read from the local mirrors and wait for local events when necessary.
 - `startWSServer()` asks the daemon to start the WebSocket server and mirrors returned `WebSocketServerInfo` into compatibility fields: `wssPort`, `wssHost`, `roomId`, and `wss.wssPath`.
-- After a facade calls `startWSServer()`, it becomes a WebSocket-state requester. Host immediately sends it a targeted current snapshot, then targets later WebSocket lifecycle snapshots to the requester set. Physical lifecycle snapshots are broadcast to every control and may also contain WebSocket fields, but facades that did not request the WebSocket service ignore those fields and do not expose WebSocket messages or lifecycle events.
+- When a facade calls `startWSServer()`, Host adds the connected caller to the requester set before resolving the address or starting the listener. It sends the current snapshot once both are ready. Host targets WebSocket lifecycle snapshots to the requester set. Physical lifecycle snapshots are broadcast to every control and may also contain WebSocket fields, but facades that did not request the WebSocket service ignore those fields and do not expose WebSocket messages or lifecycle events.
 - `getAllWebsocketAppClients()` and `getAllAppClients()` continue to expose WiFi runtimes through `MultiplexerWebSocketClient` proxies. Proxy send and close operations become daemon RPCs.
 - `sendMessageToWeb()` and `sendMessageToApp()` keep the original public call shape, but both forward through the daemon's unified `sendMessageWithoutReply` RPC.
 - `disableAllClients()` and `addDeviceManager()` no longer operate on physical objects in the Multiplexer-only facade; they only log warnings.
@@ -547,14 +547,14 @@ Local mirror synchronization rules:
 `startWSServer` RPC runs inside the daemon:
 
 1. Start from the legacy default port `19783` and use `detect-port` to avoid conflicts. The public `websocketOption.port` field is retained but ignored, matching the legacy Connector behavior.
-2. Use `websocketOption.host` as the advertised IPv4 address or hostname when supplied. For callers without an override, use `InternalIpDetector.detectInternalIPv4()` to select the OS-routed IPv4 with an interface fallback.
+2. Use `websocketOption.host` as the advertised IPv4 address or hostname when supplied. Callers without an override share an in-flight `InternalIpDetector.detectInternalIPv4()` lookup, which selects the OS-routed IPv4 address with an interface fallback. If the lookup fails, Host returns the last successfully detected IPv4 address or propagates the error if no lookup has succeeded. The next automatic request probes the current network again. The shared listener keeps its port and room.
 3. Create `WebSocketController` and listen on `/mdevices/page/android`. Each caller receives its own advertised host with the shared listener's port and room.
 
 The Connector facade forwards each enabled `startWSServer()` call to Host. Its existing desired-start state allows snapshots arriving before the RPC response to be exposed locally; startup idempotency and requester tracking belong to Host. Failed startup RPCs clear local WebSocket client mirrors and schedule recovery.
 
 The facade sends the optional `websocketHost` field at registration and repeats it on reconnect. Host associates it with the control connection and uses it when handling the empty `startWSServer` request. Older v2 daemons ignore this registration field and perform their normal address detection. The facade uses the configured host with the returned port and room.
 
-Concurrent requesters share one `webSocketServerStarting` Promise. Host marks the server started and stores `WebSocketServerInfo` only after that Promise succeeds. If startup fails, it removes the current requester, clears and closes the partially created controller, and clears the in-flight Promise so a later request can retry; fields that were never committed as started do not need duplicate reset assignments.
+Concurrent requesters share one `webSocketServerStarting` Promise. A connected requester can receive WebSocket messages while its call is pending. Host sends its current snapshot on success and removes the caller's subscription if it cannot resolve an address or start the listener. If listener startup fails, Host closes the partially created controller and clears the in-flight Promise so a later request can retry.
 
 After startup, the shared WebSocket server remains running even when every control that requested it disconnects. Requester removal stops requester-targeted WebSocket snapshots and prevents that facade from exposing shared WebSocket state or messages; the server is closed together with the daemon during idle shutdown, explicit shutdown, or replacement.
 
