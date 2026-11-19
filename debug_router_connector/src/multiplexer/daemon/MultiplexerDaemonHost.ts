@@ -167,8 +167,8 @@ export class MultiplexerDaemonHost {
   private controlServer: MultiplexerControlServer | null = null;
   private webSocketController: WebSocketController | null = null;
   private webSocketServerInfo: WebSocketServerInfo | undefined;
-  private webSocketStartupHost?: string;
-  private automaticWebSocketAddress?: Promise<string>;
+  private automaticWebSocketAddress?: string;
+  private webSocketAddressDetection?: Promise<string>;
   // Watcher state is keyed by device serial; concurrent starts share one Promise per device.
   private readonly clientWatcherStartedDeviceIds = new Set<string>();
   private readonly clientWatcherStartingByDeviceId = new Map<
@@ -340,6 +340,8 @@ export class MultiplexerDaemonHost {
       stopErrors.push(error);
     }
 
+    // A request waiting for an address can still start the listener during shutdown.
+    await this.webSocketAddressDetection?.catch(() => undefined);
     if (this.webSocketServerStarting) {
       await this.webSocketServerStarting.catch(() => {
         // The startWSServer caller observes the startup error; stop reports cleanup errors.
@@ -1094,14 +1096,12 @@ export class MultiplexerDaemonHost {
           .then((info) => {
             this.webSocketServerStarted = true;
             this.webSocketServerInfo = info;
-            this.webSocketStartupHost = host;
             this.connectionTraceRecorder?.recordWebsocketServerStarted(info);
             return info;
           })
           .catch(async (error) => {
             const webSocketController = this.webSocketController;
             this.webSocketController = null;
-            this.automaticWebSocketAddress = undefined;
             try {
               await webSocketController?.close();
             } catch (closeError) {
@@ -1129,15 +1129,12 @@ export class MultiplexerDaemonHost {
         };
       }
       // All callers share the listener. Advertise the address each caller requested.
-      const result =
-        host === this.webSocketStartupHost
-          ? info
-          : {
-              ...info,
-              host: `${host ?? (await this.getAutomaticWebSocketAddress())}:${
-                info.port
-              }`,
-            };
+      const result = {
+        ...info,
+        host: `${host ?? (await this.getAutomaticWebSocketAddress())}:${
+          info.port
+        }`,
+      };
       this.sendSnapshot([controlId]);
       return result;
     } catch (error) {
@@ -1147,13 +1144,21 @@ export class MultiplexerDaemonHost {
   }
 
   private getAutomaticWebSocketAddress(): Promise<string> {
-    this.automaticWebSocketAddress ??= InternalIpDetector.detectInternalIPv4()
-      .then(({ selected }) => selected.address)
+    this.webSocketAddressDetection ??= InternalIpDetector.detectInternalIPv4()
+      .then(({ selected }) => {
+        this.automaticWebSocketAddress = selected.address;
+        return selected.address;
+      })
       .catch((error) => {
-        this.automaticWebSocketAddress = undefined;
+        if (this.automaticWebSocketAddress) {
+          return this.automaticWebSocketAddress;
+        }
         throw error;
+      })
+      .finally(() => {
+        this.webSocketAddressDetection = undefined;
       });
-    return this.automaticWebSocketAddress;
+    return this.webSocketAddressDetection;
   }
 
   private async startWebSocketServerInternal(

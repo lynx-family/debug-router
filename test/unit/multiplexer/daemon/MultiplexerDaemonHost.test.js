@@ -3072,7 +3072,8 @@ describe("MultiplexerDaemonHost", function () {
   });
 
   for (const firstHost of [undefined, "192.168.1.23"]) {
-    it(`keeps per-caller WebSocket addresses when the first host is ${firstHost ?? "automatic"}`, async function () {
+    it(`refreshes the automatic WebSocket address after a network change when the first host is ${firstHost ?? "automatic"}`, async function () {
+      let address;
       let detectionCalls = 0;
       const instances = [];
       class FakeWebSocketController {
@@ -3092,7 +3093,10 @@ describe("MultiplexerDaemonHost", function () {
         detectPortImpl: async () => 19001,
         detectIPv4Impl: async () => {
           detectionCalls++;
-          return { selected: { address: "10.0.0.5" } };
+          if (!address) {
+            throw new Error("no IPv4 address available");
+          }
+          return { selected: { address } };
         },
         WebSocketControllerCtor: FakeWebSocketController,
       });
@@ -3109,18 +3113,51 @@ describe("MultiplexerDaemonHost", function () {
           2, false, { manualConnect: true }, "dev-machine.local"
         );
         host.handleControlConnected(3, false, { manualConnect: true });
-        const [first, second] = await Promise.all([start(1), start(2)]);
+        await assert.rejects(start(3), /no IPv4 address available/);
+        assert.strictEqual(host.webSocketRequesterControlIds.has(3), false);
+        const beforeStart = detectionCalls;
+        address = "10.0.0.5";
+        const first = await start(1);
+        const second = await start(2);
         assert.strictEqual(first.host, `${firstHost ?? "10.0.0.5"}:19001`);
         assert.strictEqual(second.host, "dev-machine.local:19001");
-        assert.strictEqual(detectionCalls, firstHost === undefined ? 1 : 0);
+        assert.strictEqual(
+          detectionCalls - beforeStart,
+          firstHost === undefined ? 2 : 0
+        );
         assert.deepStrictEqual(await start(3), {
           host: "10.0.0.5:19001",
           port: 19001,
           roomId: "shared-room",
         });
-        assert.deepStrictEqual(await start(1), first);
+        address = "192.168.2.10";
+        const refreshed = {
+          host: "192.168.2.10:19001",
+          port: first.port,
+          roomId: first.roomId,
+        };
+        host.handleControlConnected(4, false, { manualConnect: true });
+        const beforeRefresh = detectionCalls;
+        const concurrentRefresh = Promise.all([start(3), start(4), start(2)]);
+        assert(host.webSocketRequesterControlIds.has(4));
+        assert.deepStrictEqual(await concurrentRefresh, [refreshed, refreshed, second]);
+        assert.strictEqual(detectionCalls, beforeRefresh + 1);
+        assert(host.webSocketRequesterControlIds.has(4));
+        assert.deepStrictEqual(await start(1), firstHost ? first : refreshed);
+        address = undefined;
+        const beforeFailure = detectionCalls;
+        assert.deepStrictEqual(await Promise.all([start(3), start(4)]), [
+          refreshed,
+          refreshed,
+        ]);
+        assert.strictEqual(detectionCalls, beforeFailure + 1);
+        assert(host.webSocketRequesterControlIds.has(3));
         assert.deepStrictEqual(await start(2), second);
-        assert.strictEqual(detectionCalls, 1);
+        address = "10.0.0.8";
+        assert.deepStrictEqual(await start(3), {
+          ...refreshed,
+          host: "10.0.0.8:19001",
+        });
         assert.strictEqual(instances.length, 1);
       } finally {
         await host.stop();
@@ -3129,10 +3166,51 @@ describe("MultiplexerDaemonHost", function () {
     });
   }
 
+  it("drains an in-flight address lookup and closes its listener before shutdown completes", async function () {
+    const detection = createDeferred();
+    let closeCalls = 0;
+    const reset = replaceWebSocketStartDependencies({
+      detectIPv4Impl: () => detection.promise,
+      WebSocketControllerCtor: class {
+        constructor(_host, option) {
+          option.callback();
+        }
+        getAllWebsocketAppClients() {
+          return new Map();
+        }
+        getAllWebsocketWebClients() {
+          return new Map();
+        }
+        close() {
+          closeCalls++;
+        }
+      },
+    });
+    const { host } = createHost({ enableWebSocket: true });
+    host.handleControlConnected(1, false, { manualConnect: true });
+    try {
+      const start = host.handleControlRpc(1, createRpcRequest("startWSServer", {}));
+      let stopped = false;
+      const stopping = host.stop().then(() => { stopped = true; });
+      await nextTick();
+      assert.strictEqual(stopped, false);
+      detection.resolve({ selected: { address: "10.0.0.5" } });
+      await start;
+      await stopping;
+      assert.strictEqual(closeCalls, 1);
+      assert.strictEqual(host.webSocketController, null);
+      assert.strictEqual(host.webSocketRequesterControlIds.size, 0);
+    } finally {
+      reset();
+    }
+  });
+
   it("startWSServer shares in-flight starts and is idempotent after success", async function () {
     const { host } = createHost({
       enableWebSocket: true,
     });
+    const controlServer = attachControlServer(host);
+    host.handleControlConnected(1, false, { manualConnect: true }, "127.0.0.1");
     const deferred = createDeferred();
     let calls = 0;
     host.startWebSocketServerInternal = () => {
@@ -3150,6 +3228,7 @@ describe("MultiplexerDaemonHost", function () {
     );
     await nextTick();
     assert.strictEqual(calls, 1);
+    host.emit("ws-web-message", { id: 17, message: "before-ready" });
 
     const serverInfo = {
       port: 19783,
@@ -3161,6 +3240,14 @@ describe("MultiplexerDaemonHost", function () {
       serverInfo,
       serverInfo,
     ]);
+    host.emit("ws-web-message", { id: 17, message: "after-ready" });
+    const delivered = controlServer.targeted.filter(
+      ({ event }) => event.event === "client-message"
+    );
+    assert.deepStrictEqual(
+      delivered.map(({ controlId, event }) => [controlId, event.data.message]),
+      [[1, "before-ready"], [1, "after-ready"]]
+    );
     assert.deepStrictEqual(
       await host.handleControlRpc(1, createRpcRequest("startWSServer", {})),
       serverInfo
@@ -3390,6 +3477,7 @@ describe("MultiplexerDaemonHost", function () {
     const { host } = createHost({
       enableWebSocket: true,
     });
+    host.handleControlConnected(1, false, { manualConnect: true }, "127.0.0.1");
     let calls = 0;
     const controllers = [];
     host.startWebSocketServerInternal = async () => {
@@ -3427,6 +3515,7 @@ describe("MultiplexerDaemonHost", function () {
     const { host } = createHost({
       enableWebSocket: true,
     });
+    host.handleControlConnected(1, false, { manualConnect: true }, "127.0.0.1");
     const closeGate = createDeferred();
     let closeFinished = false;
     host.startWebSocketServerInternal = async () => {
