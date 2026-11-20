@@ -90,11 +90,35 @@ describe("InternalIpDetector", function () {
     assert.strictEqual(result.selected.source, "interface-fallback");
   });
 
-  it("rejects fallback when only loopback, link-local and IPv6 addresses exist", async function () {
+  it("uses loopback when no routable IPv4 address is available", async function () {
     restores.push(
       detectorModule.__set__("os_1", {
         networkInterfaces: () => ({
           lo0: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
+          en0: [
+            { family: "IPv4", address: "169.254.1.2", internal: false },
+            { family: "IPv6", address: "::1", internal: true },
+          ],
+        }),
+      })
+    );
+    socket.address = () => ({ address: "0.0.0.0" });
+
+    const result = await InternalIpDetector.detectInternalIPv4();
+
+    assert.deepStrictEqual(result.selected, {
+      address: "127.0.0.1",
+      interface: "lo0",
+      source: "loopback-fallback",
+      probeError: "The operating system did not select a local IPv4 address",
+    });
+    assert.strictEqual(socket.closeCalls, 1);
+  });
+
+  it("rejects fallback when no IPv4 address, including loopback, exists", async function () {
+    restores.push(
+      detectorModule.__set__("os_1", {
+        networkInterfaces: () => ({
           en0: [
             { family: "IPv4", address: "169.254.1.2", internal: false },
             { family: "IPv6", address: "::1", internal: true },
