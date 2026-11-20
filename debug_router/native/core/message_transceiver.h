@@ -26,8 +26,6 @@ class MessageTransceiverDelegate {
   virtual void OnMessage(
       const std::string &message,
       const std::shared_ptr<MessageTransceiver> &transceiver) = 0;
-  virtual void OnInit(const std::shared_ptr<MessageTransceiver> &transceiver,
-                      int32_t code, const std::string &info) = 0;
 };
 
 class MessageTransceiver
@@ -43,9 +41,6 @@ class MessageTransceiver
   virtual void HandleReceivedMessage(const std::string &message);
   virtual void SetDelegate(MessageTransceiverDelegate *delegate);
   virtual MessageTransceiverDelegate *delegate();
-
-  virtual void StartServer() = 0;
-  virtual void StopServer() = 0;
 
  private:
   MessageTransceiverDelegate *delegate_ = nullptr;

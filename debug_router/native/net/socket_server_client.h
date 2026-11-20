@@ -21,9 +21,14 @@ class SocketServerClient : public core::MessageTransceiver {
   core::ConnectionType GetType() override;
   void HandleReceivedMessage(const std::string &message) override;
 
-  void StartServer() override;
-  void StopServer() override;
+  // intermediate state, need to be deleted after connection is refactored
+  void StartServer();
+  // intermediate state, need to be deleted after connection is refactored
+  void StopServer(bool invalidate_listening_port = false);
+  // intermediate state, need to be deleted after connection is refactored
+  int32_t GetListeningPort() const;
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+  // intermediate state, need to be deleted after connection is refactored
   bool SetStartPort(int32_t start_port);
 #endif
 

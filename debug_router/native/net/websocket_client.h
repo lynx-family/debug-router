@@ -44,9 +44,6 @@ class WebSocketClient : public core::MessageTransceiver {
   virtual void Send(const std::string &data) override;
   core::ConnectionType GetType() override;
 
-  void StartServer() override;
-  void StopServer() override;
-
  private:
   void DisconnectInternal();
   void ConnectInternal(const std::string &url);

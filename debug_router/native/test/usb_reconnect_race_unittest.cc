@@ -135,7 +135,8 @@ class TestSocketServer final : public SocketServer {
       const std::shared_ptr<SocketServerConnectionListener>& listener)
       : SocketServer(listener) {}
 
-  void Start() override {}
+  int32_t InitSocket() override { return kInvalidPort; }
+  void Start(SocketType socket_fd) override {}
   int GetErrorMessage() override { return 0; }
   void CloseSocket(int socket_fd) override {}
 

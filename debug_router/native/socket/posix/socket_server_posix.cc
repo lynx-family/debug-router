@@ -96,20 +96,11 @@ int32_t SocketServerPosix::InitSocket() {
     NotifyInit(GetErrorMessage(), "listen error");
     return kInvalidPort;
   }
+  SetListeningPort(port);
   return port;
 }
 
-void SocketServerPosix::Start() {
-  SocketType socket_fd = socket_fd_.load(std::memory_order_acquire);
-  if (socket_fd == kInvalidSocket) {
-    int32_t port = kInvalidPort;
-    port = InitSocket();
-    if (port == kInvalidPort) {
-      return;
-    }
-    NotifyInit(0, "port:" + std::to_string(port));
-    socket_fd = socket_fd_.load(std::memory_order_acquire);
-  }
+void SocketServerPosix::Start(SocketType socket_fd) {
   LOGI("server socket:" << socket_fd);
   struct sockaddr_in addr;
   socklen_t addrLen = sizeof(addr);

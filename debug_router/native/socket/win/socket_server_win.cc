@@ -74,22 +74,11 @@ int32_t SocketServerWin::InitSocket() {
     NotifyInit(GetErrorMessage(), "listen error");
     return kInvalidPort;
   }
+  SetListeningPort(port);
   return port;
 }
 
-void SocketServerWin::Start() {
-  SocketType socket_fd = socket_fd_.load(std::memory_order_acquire);
-  int32_t port = kInvalidPort;
-  if (socket_fd == kInvalidSocket) {
-    port = InitSocket();
-    if (port == kInvalidPort) {
-      return;
-    }
-    socket_fd = socket_fd_.load(std::memory_order_acquire);
-  }
-  if (port != kInvalidPort) {
-    NotifyInit(0, "port:" + std::to_string(port));
-  }
+void SocketServerWin::Start(SocketType socket_fd) {
   LOGI("server socket:" << socket_fd);
   SocketType accept_socket_fd = accept(socket_fd, NULL, NULL);
   if (accept_socket_fd == kInvalidSocket) {
@@ -115,7 +104,7 @@ void SocketServerWin::Start() {
   new_client->StartUp(listener);
 }
 
-void SocketServerWin::CloseSocket(int socket_fd) {
+void SocketServerWin::CloseSocket(SocketType socket_fd) {
   LOGI("CloseSocket" << socket_fd);
   if (socket_fd == kInvalidSocket) {
     return;

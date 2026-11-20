@@ -24,8 +24,6 @@ class FakeMessageTransceiver final : public core::MessageTransceiver {
   core::ConnectionType GetType() override {
     return core::ConnectionType::kWebSocket;
   }
-  void StartServer() override {}
-  void StopServer() override {}
 };
 
 class CountingDelegate final : public core::MessageTransceiverDelegate {
@@ -46,9 +44,6 @@ class CountingDelegate final : public core::MessageTransceiverDelegate {
   void OnMessage(
       const std::string& message,
       const std::shared_ptr<core::MessageTransceiver>& transceiver) override {}
-
-  void OnInit(const std::shared_ptr<core::MessageTransceiver>& transceiver,
-              int32_t code, const std::string& info) override {}
 
   std::atomic<int> closed_count{0};
   std::atomic<int> failure_count{0};

@@ -18,14 +18,6 @@ class ConnectionListener
   // LOGI error_code here.
   void OnInit(int32_t code, const std::string &info) {
     LOGI("OnInit: code :" << code << ", info:" << info);
-    if (auto client = client_.lock()) {
-      core::MessageTransceiverDelegate *delegate = client->delegate();
-      if (delegate == nullptr) {
-        LOGE("OnInit: delegate == nullptr");
-        return;
-      }
-      delegate->OnInit(client, code, info);
-    }
   }
 
   void OnStatusChanged(debugrouter::socket_server::ConnectionStatus status,
@@ -95,10 +87,15 @@ void SocketServerClient::StartServer() {
   }
 }
 
-void SocketServerClient::StopServer() {
+void SocketServerClient::StopServer(bool invalidate_listening_port) {
   if (socket_server_) {
-    socket_server_->StopServer();
+    socket_server_->StopServer(invalidate_listening_port);
   }
+}
+
+int32_t SocketServerClient::GetListeningPort() const {
+  return socket_server_ ? socket_server_->GetListeningPort()
+                        : socket_server::kInvalidPort;
 }
 
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
