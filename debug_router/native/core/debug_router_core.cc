@@ -14,7 +14,6 @@
 #include "debug_router/native/core/native_target.h"
 #include "debug_router/native/core/util.h"
 #include "debug_router/native/log/logging.h"
-#include "debug_router/native/net/socket_server_client.h"
 #include "debug_router/native/net/websocket_client.h"
 #include "debug_router/native/processor/message_handler.h"
 #include "debug_router/native/processor/processor.h"
@@ -189,16 +188,13 @@ DebugRouterCore::DebugRouterCore()
       is_first_connect_(UNINIT) {
 #if ENABLE_MESSAGE_IMPL
   size_t transceiver_count = 0;
-  message_transceivers_[transceiver_count++] =
-      std::make_shared<net::WebSocketClient>();
-  // intermediate state, need to be deleted after connection is refactored
-  socket_server_client_ = std::make_shared<net::SocketServerClient>();
-  message_transceivers_[transceiver_count++] = socket_server_client_;
+  auto websocket_client = std::make_shared<net::WebSocketClient>();
+  message_transceivers_[transceiver_count++] = websocket_client;
+
+  websocket_client->Init();
+  websocket_client->SetDelegate(this);
+  transport_manager_.Init(this);
 #endif
-  for (size_t i = 0; i < kTransceiverCount; ++i) {
-    message_transceivers_[i]->Init();
-    message_transceivers_[i]->SetDelegate(this);
-  }
   std::unique_ptr<processor::MessageHandler> handler =
       std::make_unique<MessageHandlerCore>();
   processor_ = std::make_unique<processor::Processor>(std::move(handler));
@@ -362,12 +358,7 @@ int32_t DebugRouterCore::Plug(
 }
 
 int32_t DebugRouterCore::GetUSBPort() {
-#if ENABLE_MESSAGE_IMPL
-  // intermediate state, need to be deleted after connection is refactored
-  return socket_server_client_->GetListeningPort();
-#else
-  return socket_server::kInvalidPort;
-#endif
+  return transport_manager_.GetListeningPort();
 }
 
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
@@ -386,14 +377,10 @@ bool DebugRouterCore::SetUSBStartPort(int32_t start_port) {
           current_transceiver_->GetType() == ConnectionType::kUsb) {
         current_transceiver_->Disconnect();
       }
-      socket_server_client_->StopServer(/*invalidate_listening_port=*/true);
-      socket_server_client_->SetStartPort(start_port);
-      if (should_run) {
-        socket_server_client_->StartServer();
-      }
+      transport_manager_.RestartServerWithStartPort(start_port, should_run);
     });
   } else {
-    socket_server_client_->SetStartPort(start_port);
+    transport_manager_.SetStartPort(start_port);
   }
   return true;
 #else
@@ -925,13 +912,11 @@ void DebugRouterCore::UpdateServerState() {
               OnClosed(current_transceiver);
               current_transceiver->Disconnect();
             }
-#if ENABLE_MESSAGE_IMPL
             if (should_run) {
-              socket_server_client_->StartServer();
+              transport_manager_.StartServer();
             } else {
-              socket_server_client_->StopServer();
+              transport_manager_.StopServer();
             }
-#endif
           }
 
           if (!server_state_update_dirty_.load(std::memory_order_relaxed)) {

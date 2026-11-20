@@ -33,6 +33,8 @@ unittest_set("example_testset") {
     "../log/logging.h",
     "../net/socket_server_client.cc",
     "../net/socket_server_client.h",
+    "../net/transport_manager.cc",
+    "../net/transport_manager.h",
     "../net/websocket_client.cc",
     "../net/websocket_client.h",
     "../net/websocket_task.cc",

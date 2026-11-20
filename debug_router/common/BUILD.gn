@@ -63,6 +63,8 @@ source_set("debug_router_source") {
     "../native/log/logging.h",
     "../native/net/socket_server_client.cc",
     "../native/net/socket_server_client.h",
+    "../native/net/transport_manager.cc",
+    "../native/net/transport_manager.h",
     "../native/net/websocket_client.cc",
     "../native/net/websocket_client.h",
     "../native/net/websocket_task.cc",

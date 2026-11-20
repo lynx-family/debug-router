@@ -4,105 +4,39 @@
 
 #include "debug_router/native/net/socket_server_client.h"
 
-#include "debug_router/native/log/logging.h"
-
 namespace debugrouter {
 namespace net {
 
-class ConnectionListener
-    : public debugrouter::socket_server::SocketServerConnectionListener {
- public:
-  ConnectionListener(std::shared_ptr<core::MessageTransceiver> client)
-      : client_(client) {}
-  virtual ~ConnectionListener() = default;
-  // LOGI error_code here.
-  void OnInit(int32_t code, const std::string &info) {
-    LOGI("OnInit: code :" << code << ", info:" << info);
-  }
-
-  void OnStatusChanged(debugrouter::socket_server::ConnectionStatus status,
-                       int32_t code, const std::string &info) {
-    if (auto client = client_.lock()) {
-      core::MessageTransceiverDelegate *delegate = client->delegate();
-      if (delegate == nullptr) {
-        LOGE(
-            "OnStatusChanged: delegate == nullptr, client is already offline.");
-        return;
-      }
-      if (status == debugrouter::socket_server::kConnected) {
-        LOGI("OnOpen: code :" << code << ", info:" << info);
-        delegate->OnOpen(client);
-      } else if (status == debugrouter::socket_server::kDisconnected) {
-        LOGI("OnClose: code :" << code << ", info:" << info);
-        delegate->OnClosed(client);
-      } else if (status == debugrouter::socket_server::kError) {
-        LOGI("OnError: code :" << code << ", info:" << info);
-        delegate->OnFailure(client, info, code);
-      }
-    }
-  }
-
-  void OnMessage(const std::string &message) {
-    if (auto client = client_.lock()) {
-      core::MessageTransceiverDelegate *delegate = client->delegate();
-      if (delegate == nullptr) {
-        LOGE("OnMessage: delegate == nullptr, client is already offline.");
-        return;
-      }
-      delegate->OnMessage(message, client);
-    }
-  }
-
- private:
-  std::weak_ptr<core::MessageTransceiver> client_;
-};
-
-SocketServerClient::SocketServerClient() {}
-
-void SocketServerClient::Init() {
-  listener_ = std::make_shared<ConnectionListener>(shared_from_this());
-  socket_server_ = socket_server::SocketServer::CreateSocketServer(listener_);
-  socket_server_->Init();
-}
+SocketServerClient::SocketServerClient(
+    const std::shared_ptr<socket_server::SocketServer> &server,
+    const std::shared_ptr<socket_server::UsbClient> &client)
+    : socket_server_(server), usb_client_(client) {}
 
 bool SocketServerClient::Connect(const std::string &url) { return false; }
 
-void SocketServerClient::Disconnect() { socket_server_->Disconnect(); }
+void SocketServerClient::Disconnect() {
+  auto server = socket_server_.lock();
+  auto client = usb_client_.lock();
+  if (server && client) {
+    server->Disconnect(client);
+  }
+}
 
 core::ConnectionType SocketServerClient::GetType() {
   return core::ConnectionType::kUsb;
 }
 
 void SocketServerClient::Send(const std::string &data) {
-  socket_server_->Send(data);
+  auto server = socket_server_.lock();
+  auto client = usb_client_.lock();
+  if (server && client) {
+    server->Send(client, data);
+  }
 }
 
 void SocketServerClient::HandleReceivedMessage(const std::string &message) {
   // empty
 }
-
-void SocketServerClient::StartServer() {
-  if (socket_server_) {
-    socket_server_->StartServer();
-  }
-}
-
-void SocketServerClient::StopServer(bool invalidate_listening_port) {
-  if (socket_server_) {
-    socket_server_->StopServer(invalidate_listening_port);
-  }
-}
-
-int32_t SocketServerClient::GetListeningPort() const {
-  return socket_server_ ? socket_server_->GetListeningPort()
-                        : socket_server::kInvalidPort;
-}
-
-#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
-bool SocketServerClient::SetStartPort(int32_t start_port) {
-  return socket_server_ && socket_server_->SetStartPort(start_port);
-}
-#endif
 
 }  // namespace net
 }  // namespace debugrouter

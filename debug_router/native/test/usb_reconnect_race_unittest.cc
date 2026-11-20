@@ -100,7 +100,8 @@ class RecordingSocketServerListener final
  public:
   void OnInit(int32_t code, const std::string& info) override {}
 
-  void OnStatusChanged(ConnectionStatus status, int32_t code,
+  void OnStatusChanged(const std::shared_ptr<UsbClient>&,
+                       ConnectionStatus status, int32_t code,
                        const std::string& info) override {
     if (status == kConnected) {
       connected_count.fetch_add(1, std::memory_order_relaxed);
@@ -112,7 +113,8 @@ class RecordingSocketServerListener final
     cv.notify_all();
   }
 
-  void OnMessage(const std::string& message) override {}
+  void OnMessage(const std::shared_ptr<UsbClient>&,
+                 const std::string& message) override {}
 
   bool WaitForCount(const std::atomic<int>& counter, int expected_count,
                     int timeout_ms) {
@@ -182,14 +184,16 @@ class IntegrationConnectionListener final
     cv_.notify_all();
   }
 
-  void OnStatusChanged(ConnectionStatus status, int32_t code,
+  void OnStatusChanged(const std::shared_ptr<UsbClient>&,
+                       ConnectionStatus status, int32_t code,
                        const std::string& info) override {
     std::lock_guard<std::mutex> lock(mutex_);
     status_history_.push_back(status);
     cv_.notify_all();
   }
 
-  void OnMessage(const std::string& message) override {
+  void OnMessage(const std::shared_ptr<UsbClient>&,
+                 const std::string& message) override {
     std::lock_guard<std::mutex> lock(mutex_);
     messages_.push_back(message);
     cv_.notify_all();
