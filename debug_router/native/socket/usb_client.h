@@ -6,6 +6,7 @@
 #define DEBUGROUTER_NATIVE_SOCKET_USB_CLIENT_H_
 
 #include <atomic>
+#include <memory>
 
 #include "debug_router/native/base/socket_guard.h"
 #include "debug_router/native/socket/blocking_queue.h"
@@ -17,6 +18,9 @@
 namespace debugrouter {
 namespace base {
 class WorkThreadExecutor;
+}
+namespace core {
+class MessageTransceiver;
 }
 namespace socket_server {
 class UsbClientListener;
@@ -38,6 +42,15 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   ~UsbClient();
 
   void SetConnectStatus(USBConnectStatus status);
+
+  // Access the transceiver only on the DebugRouter executor.
+  void SetTransceiver(
+      const std::shared_ptr<core::MessageTransceiver> &transceiver) {
+    transceiver_ = transceiver;
+  }
+  std::shared_ptr<core::MessageTransceiver> GetTransceiver() const {
+    return transceiver_;
+  }
 
 #ifdef TESTING
   void SetListenerForTest(const std::shared_ptr<UsbClientListener> &listener) {
@@ -122,6 +135,7 @@ class UsbClient : public std::enable_shared_from_this<UsbClient> {
   base::WorkThreadExecutor write_thread_;
   base::WorkThreadExecutor dispatch_thread_;
   std::shared_ptr<UsbClientListener> listener_;
+  std::shared_ptr<core::MessageTransceiver> transceiver_;
   std::atomic<USBConnectStatus> connect_status_{USBConnectStatus::DISCONNECTED};
   std::unique_ptr<CountDownLatch> latch_;
 

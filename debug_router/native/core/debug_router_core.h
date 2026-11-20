@@ -22,6 +22,7 @@
 #include "debug_router/native/core/debug_router_target_handler.h"
 #include "debug_router/native/core/message_transceiver.h"
 #include "debug_router/native/core/native_target.h"
+#include "debug_router/native/net/transport_manager.h"
 #include "debug_router/native/report/debug_router_native_report.h"
 
 namespace debugrouter {
@@ -30,9 +31,6 @@ class DebugRouterExecutor;
 }
 namespace processor {
 class Processor;
-}
-namespace net {
-class SocketServerClient;
 }
 
 namespace core {
@@ -50,7 +48,7 @@ typedef enum {
 } WebSocketConnectType;
 
 #if ENABLE_MESSAGE_IMPL
-static constexpr size_t kTransceiverCount = 2;
+static constexpr size_t kTransceiverCount = 1;
 #else
 static constexpr size_t kTransceiverCount = 0;
 #endif
@@ -203,10 +201,7 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   void Connect(const std::string &url, const std::string &room,
                bool is_reconnect);
   std::atomic<ConnectionState> connection_state_;
-#if ENABLE_MESSAGE_IMPL
-  // intermediate state, need to be deleted after connection is refactored
-  std::shared_ptr<net::SocketServerClient> socket_server_client_;
-#endif
+  net::TransportManager transport_manager_;
   std::shared_ptr<MessageTransceiver> current_transceiver_;
   std::array<std::shared_ptr<MessageTransceiver>, kTransceiverCount>
       message_transceivers_;

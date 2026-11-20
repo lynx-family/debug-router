@@ -12,30 +12,18 @@ namespace debugrouter {
 namespace net {
 class SocketServerClient : public core::MessageTransceiver {
  public:
-  SocketServerClient();
+  SocketServerClient(const std::shared_ptr<socket_server::SocketServer> &server,
+                     const std::shared_ptr<socket_server::UsbClient> &client);
   virtual ~SocketServerClient() = default;
-  void Init() override;
   bool Connect(const std::string &url) override;
   void Disconnect() override;
   void Send(const std::string &data) override;
   core::ConnectionType GetType() override;
   void HandleReceivedMessage(const std::string &message) override;
 
-  // intermediate state, need to be deleted after connection is refactored
-  void StartServer();
-  // intermediate state, need to be deleted after connection is refactored
-  void StopServer(bool invalidate_listening_port = false);
-  // intermediate state, need to be deleted after connection is refactored
-  int32_t GetListeningPort() const;
-#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
-  // intermediate state, need to be deleted after connection is refactored
-  bool SetStartPort(int32_t start_port);
-#endif
-
  private:
-  std::shared_ptr<debugrouter::socket_server::SocketServer> socket_server_;
-  std::shared_ptr<debugrouter::socket_server::SocketServerConnectionListener>
-      listener_;
+  std::weak_ptr<socket_server::SocketServer> socket_server_;
+  std::weak_ptr<socket_server::UsbClient> usb_client_;
 };
 
 }  // namespace net

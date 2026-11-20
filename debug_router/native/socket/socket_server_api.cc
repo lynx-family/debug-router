@@ -39,15 +39,13 @@ void SocketServer::ScheduleClientStop(
   clean_executor_.submit([client]() { client->Stop(); });
 }
 
-bool SocketServer::Send(const std::string &message) {
-  std::shared_ptr<UsbClient> client;
+bool SocketServer::Send(const std::shared_ptr<UsbClient> &client,
+                        const std::string &message) {
   {
     std::lock_guard<std::mutex> lock(client_lock_);
-    client = usb_client_;
-  }
-  if (!client) {
-    LOGI("SocketServerApi Send: client is null.");
-    return false;
+    if (!client || client != usb_client_) {
+      return false;
+    }
   }
   return client->Send(message);
 }
@@ -89,7 +87,7 @@ void SocketServer::HandleOnOpenStatus(std::shared_ptr<UsbClient> client,
     }
     if (should_notify) {
       if (auto listener = listener_.lock()) {
-        listener->OnStatusChanged(kConnected, code, reason);
+        listener->OnStatusChanged(client, kConnected, code, reason);
       }
     }
   });
@@ -108,7 +106,7 @@ void SocketServer::HandleOnMessageStatus(std::shared_ptr<UsbClient> client,
       return;
     }
     if (auto listener = listener_.lock()) {
-      listener->OnMessage(message);
+      listener->OnMessage(client, message);
     }
   });
 }
@@ -161,7 +159,7 @@ void SocketServer::HandleOnCloseStatus(std::shared_ptr<UsbClient> client,
       ScheduleClientStop(client_to_stop);
     }
     if (auto listener = listener_.lock()) {
-      listener->OnStatusChanged(status, code, reason);
+      listener->OnStatusChanged(client, status, code, reason);
     }
   });
 }
@@ -214,7 +212,7 @@ void SocketServer::HandleOnErrorStatus(std::shared_ptr<UsbClient> client,
       ScheduleClientStop(client_to_stop);
     }
     if (auto listener = listener_.lock()) {
-      listener->OnStatusChanged(status, code, reason);
+      listener->OnStatusChanged(client, status, code, reason);
     }
   });
 }
@@ -348,21 +346,20 @@ void SocketServer::Close() {
   CloseSocket(socket_fd);
 }
 
-void SocketServer::Disconnect() {
+void SocketServer::Disconnect(const std::shared_ptr<UsbClient> &client) {
   thread::DebugRouterExecutor::GetInstance().Post([=]() {
-    std::shared_ptr<UsbClient> client_to_stop;
     {
       std::lock_guard<std::mutex> lock(client_lock_);
-      client_to_stop = usb_client_;
+      if (!client || client != usb_client_) {
+        return;
+      }
       usb_client_ = nullptr;
-      if (temp_usb_client_ == client_to_stop) {
+      if (temp_usb_client_ == client) {
         temp_usb_client_ = nullptr;
       }
     }
-    if (client_to_stop) {
-      LOGI("SocketServerApi Disconnect: stop curr client.");
-      ScheduleClientStop(client_to_stop);
-    }
+    LOGI("SocketServerApi Disconnect: stop curr client.");
+    ScheduleClientStop(client);
   });
 }
 

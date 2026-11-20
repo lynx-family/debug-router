@@ -23,9 +23,11 @@ namespace socket_server {
 class SocketServerConnectionListener {
  public:
   virtual void OnInit(int32_t code, const std::string &info) = 0;
-  virtual void OnStatusChanged(ConnectionStatus status, int32_t code,
+  virtual void OnStatusChanged(const std::shared_ptr<UsbClient> &client,
+                               ConnectionStatus status, int32_t code,
                                const std::string &info) = 0;
-  virtual void OnMessage(const std::string &message) = 0;
+  virtual void OnMessage(const std::shared_ptr<UsbClient> &client,
+                         const std::string &message) = 0;
 };
 
 class SocketServer : public std::enable_shared_from_this<SocketServer> {
@@ -35,8 +37,10 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
   virtual ~SocketServer();
 
   void Init();
-  bool Send(const std::string &message);
-  void Disconnect();
+  bool Send(const std::shared_ptr<UsbClient> &client,
+            const std::string &message);
+  void Disconnect(const std::shared_ptr<UsbClient> &client);
+
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
   bool SetStartPort(int32_t start_port);
 #endif
