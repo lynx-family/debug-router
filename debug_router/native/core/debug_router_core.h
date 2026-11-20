@@ -31,11 +31,9 @@ class DebugRouterExecutor;
 namespace processor {
 class Processor;
 }
-#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
 namespace net {
 class SocketServerClient;
 }
-#endif
 
 namespace core {
 
@@ -77,9 +75,6 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   virtual void OnMessage(
       const std::string &message,
       const std::shared_ptr<MessageTransceiver> &transceiver) override;
-
-  virtual void OnInit(const std::shared_ptr<MessageTransceiver> &transceiver,
-                      int32_t code, const std::string &info) override;
 
 #ifdef TESTING
   void ProcessMessageForTest(const std::string &message);
@@ -208,12 +203,13 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   void Connect(const std::string &url, const std::string &room,
                bool is_reconnect);
   std::atomic<ConnectionState> connection_state_;
+#if ENABLE_MESSAGE_IMPL
+  // intermediate state, need to be deleted after connection is refactored
+  std::shared_ptr<net::SocketServerClient> socket_server_client_;
+#endif
   std::shared_ptr<MessageTransceiver> current_transceiver_;
   std::array<std::shared_ptr<MessageTransceiver>, kTransceiverCount>
       message_transceivers_;
-#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
-  std::shared_ptr<net::SocketServerClient> socket_server_client_;
-#endif
   int32_t max_target_id_;
   std::unique_ptr<report::DebugRouterNativeReport> report_;
   std::unique_ptr<debugrouter::processor::Processor> processor_;
@@ -223,7 +219,6 @@ class DebugRouterCore : public MessageTransceiverDelegate {
   void TryToReconnect();
   void NotifyConnectStateByMessage(ConnectionState state);
   std::string GetConnectionStateMsg(ConnectionState state);
-  std::atomic<int32_t> usb_port_;
   std::atomic<int> handler_count_;
   std::atomic<WebSocketConnectType> is_first_connect_;
   // Caches the last server state requested by UpdateServerState().

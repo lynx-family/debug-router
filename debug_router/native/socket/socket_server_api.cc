@@ -2,6 +2,8 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <chrono>
+
 #include "debug_router/native/socket/socket_server_type.h"
 #ifdef _WIN32
 #include "debug_router/native/socket/win/socket_server_win.h"
@@ -225,39 +227,53 @@ void SocketServer::NotifyInit(int32_t code, const std::string &info) {
   });
 }
 
-void SocketServer::setEnableServer(bool enable) {
-  LOGI("SocketServer::setEnableServer:" << enable);
+int32_t SocketServer::GetListeningPort() const {
+  return listening_port_.load(std::memory_order_relaxed);
+}
+
+void SocketServer::SetListeningPort(int32_t port) {
+  listening_port_.store(port, std::memory_order_relaxed);
+}
+
+void SocketServer::StartServer() {
+  LOGI("SocketServer::StartServer");
   // notify only when transition from false to true
   bool should_notify = false;
   {
-    std::lock_guard<std::mutex> lock(running_mutex_);
-    should_notify =
-        !is_running_.exchange(enable, std::memory_order_relaxed) && enable;
+    std::lock_guard<std::mutex> lock(server_state_mutex_);
+    should_notify = !is_running_;
+    is_running_ = true;
   }
   if (should_notify) {
     running_condition_.notify_one();
   }
 }
 
-void SocketServer::StartServer() { setEnableServer(true); }
-
-void SocketServer::StopServer() {
+void SocketServer::StopServer(bool invalidate_listening_port) {
+  LOGI("SocketServer::StopServer");
   std::shared_ptr<UsbClient> current_client;
   std::shared_ptr<UsbClient> pending_client;
-  setEnableServer(false);
+  SocketType socket_fd;
+  {
+    std::lock_guard<std::mutex> lock(server_state_mutex_);
+    is_running_ = false;
+    if (invalidate_listening_port) {
+      listening_port_.store(kInvalidPort, std::memory_order_relaxed);
+    }
+    socket_fd = socket_fd_.exchange(kInvalidSocket, std::memory_order_acq_rel);
+  }
   // Close socket if it's valid
-  SocketType socket_fd = socket_fd_.load(std::memory_order_acquire);
   if (socket_fd != kInvalidSocket) {
 #ifdef _WIN32
     shutdown(socket_fd, SD_BOTH);
 #else
     shutdown(socket_fd, SHUT_RDWR);
 #endif
+    CloseSocket(socket_fd);
   }
 
-  Close();
   {
-    std::unique_lock<std::mutex> lock(serving_mutex_);
+    std::unique_lock<std::mutex> lock(server_state_mutex_);
     serving_condition_.wait(lock, [this]() { return !is_serving_; });
   }
   {
@@ -275,22 +291,40 @@ void SocketServer::StopServer() {
   }
 }
 
+SocketType SocketServer::GetValidSocket() {
+  SocketType socket_fd = socket_fd_.load(std::memory_order_acquire);
+  if (socket_fd == kInvalidSocket) {
+    const int32_t port = InitSocket();
+    if (port == kInvalidPort) {
+      return kInvalidSocket;
+    }
+    NotifyInit(0, "port:" + std::to_string(port));
+    socket_fd = socket_fd_.load(std::memory_order_acquire);
+  }
+  return socket_fd;
+}
+
 void SocketServer::ThreadFunc(std::shared_ptr<SocketServer> socket_server) {
   int count = 0;
   while (true) {
+    SocketType socket_fd;
     {
-      std::unique_lock running_lock(socket_server->running_mutex_);
-      socket_server->running_condition_.wait(running_lock, [=]() {
-        return socket_server->is_running_.load(std::memory_order_relaxed) ==
-               true;
-      });
-      std::lock_guard<std::mutex> serving_lock(socket_server->serving_mutex_);
+      std::unique_lock state_lock(socket_server->server_state_mutex_);
+      socket_server->running_condition_.wait(
+          state_lock, [=]() { return socket_server->is_running_; });
+      socket_fd = socket_server->GetValidSocket();
+      if (socket_fd == kInvalidSocket) {
+        // wait for 1 second before retrying
+        socket_server->running_condition_.wait_for(
+            state_lock, std::chrono::milliseconds(1000));
+        continue;
+      }
       socket_server->is_serving_ = true;
     }
     LOGI("Init start:" << count);
-    socket_server->Start();
+    socket_server->Start(socket_fd);
     {
-      std::lock_guard<std::mutex> lock(socket_server->serving_mutex_);
+      std::lock_guard<std::mutex> lock(socket_server->server_state_mutex_);
       socket_server->is_serving_ = false;
     }
     socket_server->serving_condition_.notify_all();

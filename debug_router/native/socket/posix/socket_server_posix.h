@@ -22,8 +22,8 @@ class SocketServerPosix : public SocketServer {
 #endif
 
   inline int GetErrorMessage() override { return errno; }
-  int32_t InitSocket();
-  void Start() override;
+  int32_t InitSocket() override;
+  void Start(SocketType socket_fd) override;
   void CloseSocket(int socket_fd) override;
 };
 

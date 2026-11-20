@@ -18,9 +18,7 @@
 #include "debug_router/native/net/websocket_client.h"
 #include "debug_router/native/processor/message_handler.h"
 #include "debug_router/native/processor/processor.h"
-#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
 #include "debug_router/native/socket/socket_server_type.h"
-#endif
 #include "debug_router/native/thread/debug_router_executor.h"
 #include "json/value.h"
 
@@ -193,13 +191,9 @@ DebugRouterCore::DebugRouterCore()
   size_t transceiver_count = 0;
   message_transceivers_[transceiver_count++] =
       std::make_shared<net::WebSocketClient>();
-#if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
+  // intermediate state, need to be deleted after connection is refactored
   socket_server_client_ = std::make_shared<net::SocketServerClient>();
   message_transceivers_[transceiver_count++] = socket_server_client_;
-#else
-  message_transceivers_[transceiver_count++] =
-      std::make_shared<net::SocketServerClient>();
-#endif
 #endif
   for (size_t i = 0; i < kTransceiverCount; ++i) {
     message_transceivers_[i]->Init();
@@ -368,7 +362,12 @@ int32_t DebugRouterCore::Plug(
 }
 
 int32_t DebugRouterCore::GetUSBPort() {
-  return usb_port_.load(std::memory_order_relaxed);
+#if ENABLE_MESSAGE_IMPL
+  // intermediate state, need to be deleted after connection is refactored
+  return socket_server_client_->GetListeningPort();
+#else
+  return socket_server::kInvalidPort;
+#endif
 }
 
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
@@ -379,10 +378,7 @@ bool DebugRouterCore::SetUSBStartPort(int32_t start_port) {
     return false;
   }
   LOGI("SetUSBStartPort: " << start_port);
-  if (!socket_server_client_) {
-    LOGW("SetUSBStartPort ignored because usb server is unavailable.");
-    return false;
-  }
+#if ENABLE_MESSAGE_IMPL
   if (server_running_.load(std::memory_order_relaxed)) {
     thread::DebugRouterExecutor::GetInstance().Post([this, start_port]() {
       const bool should_run = ShouldServerRun();
@@ -390,8 +386,7 @@ bool DebugRouterCore::SetUSBStartPort(int32_t start_port) {
           current_transceiver_->GetType() == ConnectionType::kUsb) {
         current_transceiver_->Disconnect();
       }
-      usb_port_.store(socket_server::kInvalidPort, std::memory_order_relaxed);
-      socket_server_client_->StopServer();
+      socket_server_client_->StopServer(/*invalidate_listening_port=*/true);
       socket_server_client_->SetStartPort(start_port);
       if (should_run) {
         socket_server_client_->StartServer();
@@ -401,6 +396,10 @@ bool DebugRouterCore::SetUSBStartPort(int32_t start_port) {
     socket_server_client_->SetStartPort(start_port);
   }
   return true;
+#else
+  LOGW("SetUSBStartPort ignored because usb server is unavailable.");
+  return false;
+#endif
 }
 #endif
 
@@ -432,21 +431,6 @@ void DebugRouterCore::Pull(int32_t target_id_) {
       handler->OnTargetDestroy(target_id_);
     }
   }
-}
-
-void DebugRouterCore::OnInit(
-    const std::shared_ptr<MessageTransceiver>& transceiver, int32_t code,
-    const std::string& info) {
-  if (code != 0) {
-    return;
-  }
-  std::string::size_type index = info.find("port:");
-  if (index == std::string::npos) {
-    return;
-  }
-  std::string port = info.substr(index + 5);
-  LOGI("OnInit usb port: " << port);
-  usb_port_.store(std::stoi(port), std::memory_order_relaxed);
 }
 
 void DebugRouterCore::Report(const std::string& eventName,
@@ -915,6 +899,7 @@ bool DebugRouterCore::ShouldServerRun() {
          debug_channel_enabled_.load(std::memory_order_relaxed);
 }
 
+// intermediate state, need to be deleted after connection is refactored
 void DebugRouterCore::UpdateServerState() {
   server_state_update_dirty_.store(true, std::memory_order_relaxed);
   if (server_state_update_scheduled_.exchange(true,
@@ -940,13 +925,13 @@ void DebugRouterCore::UpdateServerState() {
               OnClosed(current_transceiver);
               current_transceiver->Disconnect();
             }
-            for (size_t i = 0; i < kTransceiverCount; ++i) {
-              if (should_run) {
-                message_transceivers_[i]->StartServer();
-              } else {
-                message_transceivers_[i]->StopServer();
-              }
+#if ENABLE_MESSAGE_IMPL
+            if (should_run) {
+              socket_server_client_->StartServer();
+            } else {
+              socket_server_client_->StopServer();
             }
+#endif
           }
 
           if (!server_state_update_dirty_.load(std::memory_order_relaxed)) {

@@ -44,7 +44,9 @@ class SocketServerPosixTestPeer {
     server.socket_fd_.store(socket_fd, std::memory_order_release);
   }
 
-  static void AcceptOnce(SocketServerPosix &server) { server.Start(); }
+  static void AcceptOnce(SocketServerPosix &server) {
+    server.Start(SocketFd(server));
+  }
 
   static void SetTemporaryClient(SocketServerPosix &server,
                                  std::shared_ptr<UsbClient> client) {

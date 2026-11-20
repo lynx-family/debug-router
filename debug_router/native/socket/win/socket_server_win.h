@@ -19,9 +19,9 @@ class SocketServerWin : public SocketServer {
  private:
   inline int GetErrorMessage() override { return WSAGetLastError(); }
 
-  int32_t InitSocket();
-  void Start() override;
-  void CloseSocket(int socket_fd) override;
+  int32_t InitSocket() override;
+  void Start(SocketType socket_fd) override;
+  void CloseSocket(SocketType socket_fd) override;
 };
 
 }  // namespace socket_server

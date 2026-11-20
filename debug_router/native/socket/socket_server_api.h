@@ -57,21 +57,26 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
       const std::shared_ptr<SocketServerConnectionListener> &listener);
 
   void StartServer();
-  void StopServer();
+  void StopServer(
+      // intermediate state, need to be deleted after connection is refactored
+      bool invalidate_listening_port = false);
+  int32_t GetListeningPort() const;
 
  protected:
   static void ThreadFunc(std::shared_ptr<SocketServer> socket_server);
 
-  virtual void Start() = 0;
+  virtual int32_t InitSocket() = 0;
+  virtual void Start(SocketType socket_fd) = 0;
   virtual int GetErrorMessage() = 0;
-  virtual void CloseSocket(int socket_fd) = 0;
+  virtual void CloseSocket(SocketType socket_fd) = 0;
   void Close();
   void NotifyInit(int32_t code, const std::string &info);
+  SocketType GetValidSocket();
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
   PORT_TYPE GetStartPort();
 #endif
 
-  void setEnableServer(bool enable);
+  void SetListeningPort(int32_t port);
 
   std::weak_ptr<SocketServerConnectionListener> listener_;
   std::queue<std::string> writer_message_queue_;
@@ -89,12 +94,12 @@ class SocketServer : public std::enable_shared_from_this<SocketServer> {
 #if defined(DEBUGROUTER_ENABLE_IOS_USB_START_PORT)
   std::atomic<PORT_TYPE> start_port_{kStartPort};
 #endif
-  std::atomic<bool> is_running_{false};
-  std::condition_variable running_condition_;
-  std::mutex running_mutex_;
+  std::atomic<int32_t> listening_port_{kInvalidPort};
+  bool is_running_{false};
   bool is_serving_{false};
+  std::mutex server_state_mutex_;  // Protects is_running_ and is_serving_
+  std::condition_variable running_condition_;
   std::condition_variable serving_condition_;
-  std::mutex serving_mutex_;
 };
 
 // ClientListener
