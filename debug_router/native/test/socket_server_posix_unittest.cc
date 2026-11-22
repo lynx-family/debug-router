@@ -12,16 +12,20 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "debug_router/native/base/socket_guard.h"
 #include "debug_router/native/core/debug_router_core.h"
+#include "debug_router/native/core/util.h"
 #include "debug_router/native/socket/count_down_latch.h"
 #include "debug_router/native/socket/usb_client.h"
 #include "debug_router/native/thread/debug_router_executor.h"
@@ -52,6 +56,16 @@ class SocketServerPosixTestPeer {
     server.temp_usb_client_ = std::move(client);
   }
 
+  static std::shared_ptr<UsbClient> CurrentClient(SocketServerPosix &server) {
+    std::lock_guard<std::mutex> lock(server.client_lock_);
+    return server.usb_client_;
+  }
+
+  static std::shared_ptr<UsbClient> TemporaryClient(SocketServerPosix &server) {
+    std::lock_guard<std::mutex> lock(server.client_lock_);
+    return server.temp_usb_client_;
+  }
+
   static void SubmitClientWork(const std::shared_ptr<UsbClient> &client,
                                std::function<void()> task) {
     client->SubmitWorkForTest(std::move(task));
@@ -73,6 +87,52 @@ class NoopListener final : public SocketServerConnectionListener {
   void OnStatusChanged(ConnectionStatus, int32_t,
                        const std::string &) override {}
   void OnMessage(const std::string &) override {}
+};
+
+class RecordingListener final : public SocketServerConnectionListener {
+ public:
+  void OnInit(int32_t, const std::string &) override {}
+
+  void OnStatusChanged(ConnectionStatus status, int32_t,
+                       const std::string &) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    statuses_.push_back(status);
+    condition_.notify_all();
+  }
+
+  void OnMessage(const std::string &message) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    messages_.push_back(message);
+    condition_.notify_all();
+  }
+
+  bool WaitForStatusCount(ConnectionStatus status, size_t count) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return condition_.wait_for(lock, 2s, [&]() {
+      size_t matches = 0;
+      for (ConnectionStatus current : statuses_) {
+        matches += current == status;
+      }
+      return matches >= count;
+    });
+  }
+
+  bool WaitForMessageCount(size_t count) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return condition_.wait_for(lock, 2s,
+                               [&]() { return messages_.size() >= count; });
+  }
+
+  std::vector<std::string> Messages() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return messages_;
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  std::vector<ConnectionStatus> statuses_;
+  std::vector<std::string> messages_;
 };
 
 class StopServerOnExit {
@@ -138,6 +198,37 @@ int ConnectToPort(uint16_t port) {
     return -1;
   }
   return socket_fd;
+}
+
+std::string PackFrame(const std::string &payload) {
+  const uint32_t payload_size = static_cast<uint32_t>(payload.size());
+  std::string frame(kFrameHeaderLen + kPayloadSizeLen + payload_size, '\0');
+  char encoded[4];
+  util::IntToCharArray(kFrameProtocolVersion, encoded);
+  std::memcpy(frame.data(), encoded, sizeof(encoded));
+  util::IntToCharArray(kPTFrameTypeTextMessage, encoded);
+  std::memcpy(frame.data() + 4, encoded, sizeof(encoded));
+  util::IntToCharArray(kFrameDefaultTag, encoded);
+  std::memcpy(frame.data() + 8, encoded, sizeof(encoded));
+  util::IntToCharArray(payload_size + kPayloadSizeLen, encoded);
+  std::memcpy(frame.data() + 12, encoded, sizeof(encoded));
+  util::IntToCharArray(payload_size, encoded);
+  std::memcpy(frame.data() + 16, encoded, sizeof(encoded));
+  std::memcpy(frame.data() + 20, payload.data(), payload.size());
+  return frame;
+}
+
+bool SendAll(int socket_fd, const std::string &data) {
+  size_t sent = 0;
+  while (sent < data.size()) {
+    const ssize_t count =
+        send(socket_fd, data.data() + sent, data.size() - sent, 0);
+    if (count <= 0) {
+      return false;
+    }
+    sent += static_cast<size_t>(count);
+  }
+  return true;
 }
 
 class ScopedSocketEnvironment {
@@ -266,6 +357,74 @@ TEST(SocketServerPosixTestSuite,
 
   EXPECT_TRUE(accepted_before_cleanup);
   EXPECT_TRUE(old_client_weak.expired());
+}
+
+TEST(SocketServerPosixTestSuite,
+     BareConnectionKeepsActiveClientUntilValidFramePromotes) {
+  auto listener = std::make_shared<RecordingListener>();
+  auto server = std::make_shared<SocketServerPosix>(listener);
+  StopServerOnExit stop_server(server);
+
+  uint16_t port = 0;
+  const int listener_socket = CreateLoopbackListener(port);
+  ASSERT_GE(listener_socket, 0);
+  SocketServerPosixTestPeer::AdoptListeningSocket(*server, listener_socket);
+
+  const auto accept_once = [&]() {
+    auto accept_future = std::async(std::launch::async, [server]() {
+      SocketServerPosixTestPeer::AcceptOnce(*server);
+    });
+    if (accept_future.wait_for(2s) != std::future_status::ready) {
+      return false;
+    }
+    accept_future.get();
+    return true;
+  };
+  const auto wait_for_cleanup = [&]() {
+    auto cleanup_done = std::make_shared<std::promise<void>>();
+    auto cleanup_future = cleanup_done->get_future();
+    SocketServerPosixTestPeer::SubmitCleanupWork(
+        *server, [cleanup_done]() { cleanup_done->set_value(); });
+    return cleanup_future.wait_for(2s) == std::future_status::ready;
+  };
+
+  base::SocketGuard active_peer(ConnectToPort(port));
+  ASSERT_GE(active_peer.Get(), 0);
+  ASSERT_TRUE(accept_once());
+  const std::string active_message = R"({"event":"Initialize"})";
+  ASSERT_TRUE(SendAll(active_peer.Get(), PackFrame(active_message)));
+  ASSERT_TRUE(listener->WaitForStatusCount(kConnected, 1));
+  ASSERT_TRUE(listener->WaitForMessageCount(1));
+  const auto active_client = SocketServerPosixTestPeer::CurrentClient(*server);
+  ASSERT_NE(active_client, nullptr);
+  EXPECT_EQ(SocketServerPosixTestPeer::TemporaryClient(*server), nullptr);
+
+  base::SocketGuard bare_peer(ConnectToPort(port));
+  ASSERT_GE(bare_peer.Get(), 0);
+  ASSERT_TRUE(accept_once());
+  ASSERT_TRUE(wait_for_cleanup());
+  EXPECT_EQ(SocketServerPosixTestPeer::CurrentClient(*server), active_client);
+  const auto bare_client = SocketServerPosixTestPeer::TemporaryClient(*server);
+  ASSERT_NE(bare_client, nullptr);
+  EXPECT_NE(bare_client, active_client);
+
+  const std::string active_after_bare =
+      R"({"event":"Customized","data":{"type":"ListSession"}})";
+  ASSERT_TRUE(SendAll(active_peer.Get(), PackFrame(active_after_bare)));
+  ASSERT_TRUE(listener->WaitForMessageCount(2));
+  EXPECT_EQ(listener->Messages()[1], active_after_bare);
+
+  base::SocketGuard promoted_peer(ConnectToPort(port));
+  ASSERT_GE(promoted_peer.Get(), 0);
+  ASSERT_TRUE(accept_once());
+  ASSERT_TRUE(wait_for_cleanup());
+  const std::string promoted_message = R"({"event":"Initialize"})";
+  ASSERT_TRUE(SendAll(promoted_peer.Get(), PackFrame(promoted_message)));
+  ASSERT_TRUE(listener->WaitForStatusCount(kConnected, 2));
+  ASSERT_TRUE(listener->WaitForMessageCount(3));
+  EXPECT_NE(SocketServerPosixTestPeer::CurrentClient(*server), active_client);
+  EXPECT_EQ(SocketServerPosixTestPeer::TemporaryClient(*server), nullptr);
+  EXPECT_EQ(listener->Messages()[2], promoted_message);
 }
 
 }  // namespace
