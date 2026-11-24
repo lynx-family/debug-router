@@ -30,7 +30,7 @@ static NSInteger DefaultObserverId = -1;
 static NSInteger CurrentId = 0;
 static NSMutableDictionary *ObserverDic = [[NSMutableDictionary alloc] init];
 static BOOL hasSetDelegate = NO;
-static const char *DebugRouterLogLevelName(DebugRouterLogLevel level) {
+[[maybe_unused]] static const char *DebugRouterLogLevelName(DebugRouterLogLevel level) {
   switch (level) {
     case DebugRouterLogLevelVerbose:
       return "V";
